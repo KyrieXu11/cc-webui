@@ -62,7 +62,8 @@ export async function* streamChat(
       }
       if (!data) continue;
       try {
-        yield JSON.parse(data);
+        const parsed = JSON.parse(data);
+        yield parsed;
       } catch {
         /* skip malformed */
       }

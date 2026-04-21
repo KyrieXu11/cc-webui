@@ -3,6 +3,8 @@ import { streamSSE } from "hono/streaming";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { awaitPermission } from "./permission.ts";
 
 const chat = new Hono();
 
@@ -56,8 +58,10 @@ chat.post("/chat", async (c) => {
 
   return streamSSE(c, async (stream) => {
     let aborted = false;
+    const ac = new AbortController();
     stream.onAbort(() => {
       aborted = true;
+      ac.abort();
     });
 
     try {
@@ -70,6 +74,20 @@ chat.post("/chat", async (c) => {
           permissionMode,
           effort,
           includePartialMessages: true,
+          canUseTool: async (toolName, input, opts) => {
+            const id = randomUUID();
+            await stream.writeSSE({
+              event: "permission_request",
+              data: JSON.stringify({
+                type: "permission_request",
+                id,
+                tool: toolName,
+                input,
+              }),
+            });
+            const decision = await awaitPermission(id, opts.signal);
+            return decision;
+          },
         },
       });
 

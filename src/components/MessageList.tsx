@@ -4,6 +4,7 @@ import AssistantText from "./AssistantText";
 import StepTimeline from "./StepTimeline";
 import PermissionCard from "./PermissionCard";
 import SummaryCard from "./SummaryCard";
+import ThinkingBlock from "./ThinkingBlock";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
 
@@ -19,12 +20,18 @@ interface Props {
   events: ChatEvent[];
   expandedSteps: Set<string>;
   onToggleStep: (id: string) => void;
+  onAnswerPermission: (
+    permissionId: string,
+    decision: "allow" | "deny",
+    message?: string
+  ) => void;
 }
 
 export default function MessageList({
   events,
   expandedSteps,
   onToggleStep,
+  onAnswerPermission,
 }: Props) {
   const blocks: Block[] = [];
   for (const ev of events) {
@@ -57,13 +64,26 @@ export default function MessageList({
             return <UserBubble key={ev.id} text={ev.text} delay={0} />;
           case "assistant":
             return <AssistantText key={ev.id} text={ev.text} delay={0} />;
+          case "thinking":
+            return (
+              <ThinkingBlock
+                key={ev.id}
+                text={ev.text}
+                expanded={expandedSteps.has(ev.id)}
+                onToggle={() => onToggleStep(ev.id)}
+              />
+            );
           case "permission":
             return (
               <PermissionCard
                 key={ev.id}
-                question={ev.question}
-                options={ev.options}
+                tool={ev.tool}
+                input={ev.input}
+                resolved={ev.resolved}
                 delay={0}
+                onAnswer={(decision, message) =>
+                  onAnswerPermission(ev.permissionId, decision, message)
+                }
               />
             );
           case "summary":

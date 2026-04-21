@@ -5,6 +5,7 @@ import { chat } from "./chat.ts";
 import { fsRoute } from "./fs.ts";
 import { sessionsRoute } from "./sessions.ts";
 import { uploadRoute } from "./upload.ts";
+import { permissionRoute } from "./permission.ts";
 
 const app = new Hono();
 
@@ -12,6 +13,7 @@ app.route("/api", chat);
 app.route("/api/fs", fsRoute);
 app.route("/api/sessions", sessionsRoute);
 app.route("/api/upload", uploadRoute);
+app.route("/api/permission", permissionRoute);
 
 const isProd = process.env.NODE_ENV === "production";
 if (isProd) {

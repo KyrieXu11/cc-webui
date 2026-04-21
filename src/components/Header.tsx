@@ -1,5 +1,6 @@
 import { tildify } from "../lib/fs";
 import HeaderSearch from "./HeaderSearch";
+import type { SessionSummary } from "../lib/sessions";
 
 interface Props {
   sessionId?: string | null;
@@ -10,6 +11,7 @@ interface Props {
   onToggleFiles?: () => void;
   filesOpen?: boolean;
   onPickProject?: (cwd: string) => void;
+  onPickSession?: (s: SessionSummary) => void;
 }
 
 export default function Header({
@@ -21,6 +23,7 @@ export default function Header({
   onToggleFiles,
   filesOpen,
   onPickProject,
+  onPickSession,
 }: Props) {
   return (
     <header className="flex items-center gap-4 h-14 px-5 border-b border-line shrink-0">
@@ -49,8 +52,12 @@ export default function Header({
         )}
       </div>
       <div className="flex-1 flex justify-center min-w-0">
-        {onPickProject && (
-          <HeaderSearch home={home} onSelect={onPickProject} />
+        {onPickProject && onPickSession && (
+          <HeaderSearch
+            home={home}
+            onPickProject={onPickProject}
+            onPickSession={onPickSession}
+          />
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">

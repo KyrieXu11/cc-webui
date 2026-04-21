@@ -3,6 +3,7 @@ export type StepStatus = "ok" | "pending" | "error";
 export type ChatEvent =
   | { id: string; type: "user"; text: string }
   | { id: string; type: "assistant"; text: string }
+  | { id: string; type: "thinking"; text: string }
   | {
       id: string;
       type: "step";
@@ -15,8 +16,10 @@ export type ChatEvent =
   | {
       id: string;
       type: "permission";
-      question: string;
-      options: string[];
+      permissionId: string;
+      tool: string;
+      input: Record<string, any>;
+      resolved?: "allow" | "deny";
     }
   | {
       id: string;

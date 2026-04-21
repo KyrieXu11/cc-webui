@@ -1,6 +1,6 @@
 import Popover from "./Popover";
 import {
-  EFFORT_OPTIONS,
+  availableEffortOptions,
   effortLabel,
   type EffortLevel,
 } from "../lib/settings";
@@ -8,9 +8,11 @@ import {
 interface Props {
   value: EffortLevel;
   onChange: (v: EffortLevel) => void;
+  model: string;
 }
 
-export default function EffortSelector({ value, onChange }: Props) {
+export default function EffortSelector({ value, onChange, model }: Props) {
+  const options = availableEffortOptions(model);
   return (
     <Popover
       align="left"
@@ -26,7 +28,7 @@ export default function EffortSelector({ value, onChange }: Props) {
     >
       {({ close }) => (
         <div className="p-1">
-          {EFFORT_OPTIONS.map((m) => (
+          {options.map((m) => (
             <button
               key={m.id}
               onClick={() => {

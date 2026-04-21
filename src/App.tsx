@@ -19,6 +19,7 @@ import {
 } from "./lib/settings";
 import { addRecent, getHome } from "./lib/fs";
 import { getSessionMessages, type SessionSummary } from "./lib/sessions";
+import { sendPermission } from "./lib/permission";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -61,6 +62,25 @@ export default function App() {
       else next.add(id);
       return next;
     });
+  };
+
+  const answerPermission = async (
+    permissionId: string,
+    decision: "allow" | "deny",
+    message?: string
+  ) => {
+    setAllEvents((prev) =>
+      prev.map((e) =>
+        e.type === "permission" && e.permissionId === permissionId
+          ? { ...e, resolved: decision }
+          : e
+      )
+    );
+    try {
+      await sendPermission(permissionId, decision, message);
+    } catch (err) {
+      console.error("permission resolve failed:", err);
+    }
   };
 
   useEffect(() => {
@@ -173,7 +193,13 @@ export default function App() {
   };
 
   const updateModel = (model: string) =>
-    setSettings((s) => ({ ...s, model }));
+    setSettings((s) => {
+      const next = { ...s, model };
+      if (model !== "opus" && s.effort === "xhigh") {
+        next.effort = "high";
+      }
+      return next;
+    });
 
   const updateMode = (permissionMode: PermissionMode) =>
     setSettings((s) => ({ ...s, permissionMode }));
@@ -277,6 +303,7 @@ export default function App() {
               onToggleFiles={() => setFilesOpen((o) => !o)}
               filesOpen={filesOpen}
               onPickProject={openProject}
+              onPickSession={openSession}
             />
             <main className="flex-1 relative overflow-hidden">
               <div ref={scrollRef} className="h-full overflow-y-auto">
@@ -301,6 +328,7 @@ export default function App() {
                         events={events}
                         expandedSteps={expandedSteps}
                         onToggleStep={toggleStep}
+                        onAnswerPermission={answerPermission}
                       />
                     </>
                   )}

@@ -15,6 +15,19 @@ export function applySDKMessage(
     return events;
   }
 
+  if (msg.type === "permission_request" && msg.id) {
+    return [
+      ...events,
+      {
+        id: `p-${msg.id}`,
+        type: "permission",
+        permissionId: msg.id,
+        tool: msg.tool ?? "unknown",
+        input: msg.input ?? {},
+      },
+    ];
+  }
+
   if (msg.type === "stream_event" && msg.event) {
     const ev = msg.event;
 
@@ -43,15 +56,36 @@ export function applySDKMessage(
           },
         ];
       }
+      if (block?.type === "thinking") {
+        return [
+          ...events,
+          {
+            id: `t-${msg.uuid}-${ev.index}`,
+            type: "thinking",
+            text: block.thinking ?? "",
+          },
+        ];
+      }
     }
 
-    if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
-      const last = events[events.length - 1];
-      if (last?.type === "assistant") {
-        return [
-          ...events.slice(0, -1),
-          { ...last, text: last.text + ev.delta.text },
-        ];
+    if (ev.type === "content_block_delta") {
+      if (ev.delta?.type === "text_delta") {
+        const last = events[events.length - 1];
+        if (last?.type === "assistant") {
+          return [
+            ...events.slice(0, -1),
+            { ...last, text: last.text + ev.delta.text },
+          ];
+        }
+      }
+      if (ev.delta?.type === "thinking_delta") {
+        const last = events[events.length - 1];
+        if (last?.type === "thinking") {
+          return [
+            ...events.slice(0, -1),
+            { ...last, text: last.text + (ev.delta.thinking ?? "") },
+          ];
+        }
       }
     }
     return events;
@@ -152,6 +186,12 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
               id: `a-${m.uuid}-${i}`,
               type: "assistant",
               text: b.text,
+            });
+          } else if (b?.type === "thinking" && b.thinking) {
+            events.push({
+              id: `t-${m.uuid}-${i}`,
+              type: "thinking",
+              text: b.thinking,
             });
           } else if (b?.type === "tool_use") {
             events.push({

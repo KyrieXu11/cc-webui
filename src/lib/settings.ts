@@ -95,13 +95,19 @@ export const EFFORT_OPTIONS: Array<{
   id: EffortLevel;
   label: string;
   hint: string;
+  opusOnly?: boolean;
 }> = [
   { id: "low", label: "Low", hint: "几乎不思考 · 最快" },
   { id: "medium", label: "Medium", hint: "均衡（默认）" },
   { id: "high", label: "High", hint: "更深入的推理" },
-  { id: "xhigh", label: "xHigh", hint: "长时间思考" },
+  { id: "xhigh", label: "xHigh", hint: "长时间思考 · 仅 Opus", opusOnly: true },
   { id: "max", label: "Max", hint: "最大限度 · 最慢" },
 ];
+
+export function availableEffortOptions(model: string) {
+  if (model === "opus") return EFFORT_OPTIONS;
+  return EFFORT_OPTIONS.filter((o) => !o.opusOnly);
+}
 
 export function effortLabel(id: EffortLevel): string {
   return EFFORT_OPTIONS.find((m) => m.id === id)?.label ?? id;

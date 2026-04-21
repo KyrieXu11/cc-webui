@@ -147,6 +147,36 @@ export default function Composer({
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
               submit();
+              return;
+            }
+            if (
+              e.key === "Backspace" &&
+              !e.metaKey &&
+              !e.altKey &&
+              !e.shiftKey
+            ) {
+              const el = e.currentTarget;
+              const start = el.selectionStart ?? 0;
+              const end = el.selectionEnd ?? 0;
+              if (start !== end || start === 0) return;
+              const before = value.slice(0, start);
+              const m = before.match(/@[^\s]+(\s?)$/);
+              if (!m) return;
+              const tokenStart = before.length - m[0].length;
+              let deleteFrom = tokenStart;
+              if (
+                !m[1] &&
+                tokenStart > 0 &&
+                value[tokenStart - 1] === " "
+              ) {
+                deleteFrom = tokenStart - 1;
+              }
+              e.preventDefault();
+              const next = value.slice(0, deleteFrom) + value.slice(start);
+              onChange(next);
+              requestAnimationFrame(() =>
+                el.setSelectionRange(deleteFrom, deleteFrom)
+              );
             }
           }}
           onPaste={(e) => {
@@ -214,7 +244,11 @@ export default function Composer({
           <span className="text-subtle/50 text-[11px]">·</span>
           <ModeSelector value={mode} onChange={onModeChange} />
           <span className="text-subtle/50 text-[11px]">·</span>
-          <EffortSelector value={effort} onChange={onEffortChange} />
+          <EffortSelector
+            value={effort}
+            onChange={onEffortChange}
+            model={model}
+          />
         </div>
         <span className="text-[11px] text-subtle font-mono px-1">
           {disabled ? "thinking…" : uploading ? "uploading…" : "idle"}

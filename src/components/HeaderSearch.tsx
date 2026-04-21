@@ -1,21 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getRecents, tildify, type RecentProject } from "../lib/fs";
+import { getRecents, tildify, timeAgo, type RecentProject } from "../lib/fs";
+import { listSessions, type SessionSummary } from "../lib/sessions";
 
 interface Props {
   home: string;
-  onSelect: (cwd: string) => void;
+  onPickProject: (cwd: string) => void;
+  onPickSession: (s: SessionSummary) => void;
 }
 
-export default function HeaderSearch({ home, onSelect }: Props) {
+type ProjectHit = { kind: "project"; path: string; lastUsed: number };
+type SessionHit = {
+  kind: "session";
+  session: SessionSummary;
+  title: string;
+};
+type Hit = ProjectHit | SessionHit;
+
+export default function HeaderSearch({
+  home,
+  onPickProject,
+  onPickSession,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<RecentProject[]>([]);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [idx, setIdx] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     getRecents().then(setRecents).catch(() => {});
+    listSessions(100).then(setSessions).catch(() => {});
   }, [open]);
 
   useEffect(() => {
@@ -27,19 +43,54 @@ export default function HeaderSearch({ home, onSelect }: Props) {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const filtered = useMemo(() => {
+  const { projectHits, sessionHits } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return recents;
-    return recents.filter((r) => {
-      const display = tildify(r.path, home).toLowerCase();
-      return display.includes(q) || r.path.toLowerCase().includes(q);
-    });
-  }, [recents, query, home]);
+
+    const pHits: ProjectHit[] = recents
+      .filter((r) => {
+        if (!q) return true;
+        const disp = tildify(r.path, home).toLowerCase();
+        return disp.includes(q) || r.path.toLowerCase().includes(q);
+      })
+      .slice(0, q ? 10 : 5)
+      .map((r) => ({
+        kind: "project",
+        path: r.path,
+        lastUsed: r.lastUsed,
+      }));
+
+    const sHits: SessionHit[] = sessions
+      .filter((s) => {
+        if (!s.cwd) return false;
+        if (!q) return true;
+        const title = (
+          s.customTitle ||
+          s.summary ||
+          s.firstPrompt ||
+          ""
+        ).toLowerCase();
+        return title.includes(q) || s.cwd.toLowerCase().includes(q);
+      })
+      .slice(0, q ? 20 : 6)
+      .map((s) => ({
+        kind: "session",
+        session: s,
+        title: s.customTitle || s.summary || s.firstPrompt || "（无摘要）",
+      }));
+
+    return { projectHits: pHits, sessionHits: sHits };
+  }, [recents, sessions, query, home]);
+
+  const flat: Hit[] = useMemo(
+    () => [...projectHits, ...sessionHits],
+    [projectHits, sessionHits]
+  );
 
   useEffect(() => setIdx(0), [query, open]);
 
-  const pick = (cwd: string) => {
-    onSelect(cwd);
+  const pick = (hit: Hit) => {
+    if (hit.kind === "project") onPickProject(hit.path);
+    else onPickSession(hit.session);
     setOpen(false);
     setQuery("");
   };
@@ -47,13 +98,13 @@ export default function HeaderSearch({ home, onSelect }: Props) {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setIdx((i) => Math.min(i + 1, filtered.length - 1));
+      setIdx((i) => Math.min(i + 1, flat.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" && filtered[idx]) {
+    } else if (e.key === "Enter" && flat[idx]) {
       e.preventDefault();
-      pick(filtered[idx].path);
+      pick(flat[idx]);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
@@ -83,40 +134,109 @@ export default function HeaderSearch({ home, onSelect }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder="搜索打开过的项目"
+          placeholder="搜索项目或对话"
           className="w-full h-8 pl-8 pr-3 rounded-md bg-surface border border-line text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
         />
       </div>
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1.5 bg-surface border border-line-strong rounded-lg shadow-[0_16px_48px_-12px_rgba(0,0,0,0.5)] overflow-hidden z-50">
-          <div className="px-3 py-1.5 text-[10.5px] font-mono text-subtle uppercase tracking-[0.08em] border-b border-line">
-            最近打开 · {filtered.length} 项
-          </div>
-          <div className="max-h-[320px] overflow-y-auto py-1">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-3 text-[12.5px] text-subtle">
-                {recents.length === 0 ? "还没有打开过项目" : "无匹配"}
+          <div className="max-h-[420px] overflow-y-auto py-1">
+            {projectHits.length > 0 && (
+              <div>
+                <SectionHeader label="项目" count={projectHits.length} />
+                {projectHits.map((h, i) => {
+                  const absoluteIdx = i;
+                  return (
+                    <button
+                      key={h.path}
+                      onClick={() => pick(h)}
+                      onMouseEnter={() => setIdx(absoluteIdx)}
+                      className={`w-full text-left px-3 py-1.5 flex items-center justify-between gap-3 transition-colors ${
+                        absoluteIdx === idx
+                          ? "bg-blue/[0.15]"
+                          : "hover:bg-fg/5"
+                      }`}
+                      title={h.path}
+                    >
+                      <span
+                        className={`font-mono text-[12.5px] truncate ${
+                          absoluteIdx === idx ? "text-fg" : "text-muted"
+                        }`}
+                      >
+                        <Highlighted
+                          text={tildify(h.path, home)}
+                          query={query}
+                        />
+                      </span>
+                      <span className="text-[11px] text-subtle shrink-0">
+                        {timeAgo(h.lastUsed)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            ) : (
-              filtered.map((r, i) => (
-                <button
-                  key={r.path}
-                  onClick={() => pick(r.path)}
-                  onMouseEnter={() => setIdx(i)}
-                  className={`w-full text-left px-3 py-1.5 font-mono text-[12.5px] truncate transition-colors ${
-                    i === idx
-                      ? "bg-blue/[0.15] text-fg"
-                      : "text-muted hover:text-fg"
-                  }`}
-                  title={r.path}
-                >
-                  <Highlighted text={tildify(r.path, home)} query={query} />
-                </button>
-              ))
+            )}
+            {sessionHits.length > 0 && (
+              <div>
+                <SectionHeader label="对话" count={sessionHits.length} />
+                {sessionHits.map((h, i) => {
+                  const absoluteIdx = projectHits.length + i;
+                  return (
+                    <button
+                      key={h.session.sessionId}
+                      onClick={() => pick(h)}
+                      onMouseEnter={() => setIdx(absoluteIdx)}
+                      className={`w-full text-left px-3 py-1.5 flex items-start gap-3 transition-colors ${
+                        absoluteIdx === idx
+                          ? "bg-blue/[0.15]"
+                          : "hover:bg-fg/5"
+                      }`}
+                      title={h.title}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className={`text-[12.5px] truncate ${
+                            absoluteIdx === idx ? "text-fg" : "text-muted"
+                          }`}
+                        >
+                          <Highlighted text={h.title} query={query} />
+                        </div>
+                        {h.session.cwd && (
+                          <div className="text-[10.5px] text-subtle font-mono truncate mt-0.5">
+                            <Highlighted
+                              text={tildify(h.session.cwd, home)}
+                              query={query}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-subtle shrink-0 pt-0.5">
+                        {timeAgo(h.session.lastModified)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {flat.length === 0 && (
+              <div className="px-3 py-5 text-[12.5px] text-subtle text-center">
+                {recents.length === 0 && sessions.length === 0
+                  ? "还没有项目或对话"
+                  : "无匹配"}
+              </div>
             )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SectionHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="px-3 py-1 text-[10px] font-mono text-subtle uppercase tracking-[0.08em] flex items-center gap-2">
+      <span>{label}</span>
+      <span className="text-subtle/60">· {count}</span>
     </div>
   );
 }
