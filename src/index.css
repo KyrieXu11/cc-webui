@@ -1,0 +1,137 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Press+Start+2P&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #0a0d14;
+  --color-surface: #121620;
+  --color-raised: #191e2a;
+
+  --color-fg: #e8eaed;
+  --color-muted: #a0a4ad;
+  --color-subtle: #6b7079;
+
+  --color-line: rgba(255, 255, 255, 0.06);
+  --color-line-strong: rgba(255, 255, 255, 0.12);
+
+  --color-blue: #5b6bff;
+  --color-blue-hover: #6e7cff;
+  --color-green: #3ecf8e;
+  --color-amber: #e0a030;
+
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+:root[data-theme="light"] {
+  --color-canvas: #fafafa;
+  --color-surface: #ffffff;
+  --color-raised: #f3f4f6;
+  --color-fg: #111827;
+  --color-muted: #4b5563;
+  --color-subtle: #9ca3af;
+  --color-line: rgba(0, 0, 0, 0.08);
+  --color-line-strong: rgba(0, 0, 0, 0.14);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" on, "ss02" on;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 10px;
+  border: 2px solid var(--color-canvas);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-subtle);
+}
+
+::selection {
+  background: rgba(91, 107, 255, 0.3);
+}
+
+textarea {
+  font-family: inherit;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-enter {
+  animation: fadeUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.amber-card {
+  background: rgba(224, 160, 48, 0.025);
+  border: 1px solid rgba(224, 160, 48, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(224, 160, 48, 0.04),
+    0 24px 60px -24px rgba(224, 160, 48, 0.18);
+}
+
+.pulse-dot {
+  box-shadow: 0 0 14px rgba(91, 107, 255, 0.5);
+}
+
+/* Pixel-arcade wordmark: double-layer stack (shadow + gradient fill). */
+.pixel-fill,
+.pixel-shadow {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  display: inline-block;
+}
+
+.pixel-fill {
+  background: linear-gradient(
+    180deg,
+    #b6c1ff 0%,
+    #7d8bff 35%,
+    #5b6bff 68%,
+    #2c3bcf 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.pixel-shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: #151a54;
+  transform: translate(0.11em, 0.13em);
+  pointer-events: none;
+  user-select: none;
+}
