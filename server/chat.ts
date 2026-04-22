@@ -5,6 +5,16 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "./permission.ts";
+import { createBashMcpServer, relabelTasksSessionId } from "./bash-mcp.ts";
+
+const MCP_BASH_RUN = "mcp__bash__run";
+const MCP_BASH_OUTPUT = "mcp__bash__output";
+const MCP_BASH_KILL = "mcp__bash__kill";
+const SYSTEM_PROMPT_BASH_APPEND =
+  "SHELL TOOLS: The built-in Bash/BashOutput/KillBash tools are DISABLED. " +
+  `Use ${MCP_BASH_RUN} (same schema: command, timeout, description, plus run_in_background). ` +
+  `For background tasks, poll with ${MCP_BASH_OUTPUT} (bash_id) and terminate with ${MCP_BASH_KILL} (bash_id). ` +
+  "Do not try to invoke the built-in Bash — it will be rejected.";
 
 const chat = new Hono();
 
@@ -36,6 +46,23 @@ const ALLOWED_EFFORTS: EffortLevel[] = [
   "xhigh",
   "max",
 ];
+
+// Session-scoped tool allowances: when the user picks "allow_session" on a
+// permission prompt, the tool name is remembered here and future calls for the
+// same sessionId auto-approve without re-prompting. Keyed by the SDK session_id,
+// which can be emitted mid-stream on the very first turn; we migrate the set to
+// the real id when that happens.
+const sessionAllowances = new Map<string, Set<string>>();
+
+function getOrCreateAllowance(id: string | undefined): Set<string> {
+  if (!id) return new Set<string>();
+  let set = sessionAllowances.get(id);
+  if (!set) {
+    set = new Set<string>();
+    sessionAllowances.set(id, set);
+  }
+  return set;
+}
 
 chat.post("/chat", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -86,6 +113,9 @@ chat.post("/chat", async (c) => {
       console.log(`[chat ${reqId}] SSE aborted at ${elapsed()}`);
     });
 
+    let currentSessionId = sessionId;
+    const allowance = getOrCreateAllowance(currentSessionId);
+
     try {
       const queryPrompt =
         images.length > 0
@@ -110,6 +140,11 @@ chat.post("/chat", async (c) => {
             })()
           : prompt;
 
+      const bashMcp = createBashMcpServer({
+        cwd,
+        getSessionId: () => currentSessionId,
+      });
+
       const response = query({
         prompt: queryPrompt as any,
         options: {
@@ -119,18 +154,43 @@ chat.post("/chat", async (c) => {
           permissionMode,
           effort,
           includePartialMessages: true,
+          mcpServers: { bash: bashMcp },
+          disallowedTools: ["Bash", "BashOutput", "KillBash"],
+          systemPrompt: {
+            type: "preset",
+            preset: "claude_code",
+            append: SYSTEM_PROMPT_BASH_APPEND,
+          },
           canUseTool: async (toolName, input, opts) => {
+            if (
+              toolName === MCP_BASH_OUTPUT ||
+              toolName === MCP_BASH_KILL
+            ) {
+              return { behavior: "allow", updatedInput: input };
+            }
+            if (allowance.has(toolName)) {
+              return { behavior: "allow", updatedInput: input };
+            }
             const id = randomUUID();
+            const displayTool =
+              toolName === MCP_BASH_RUN ? "Bash" : toolName;
             await stream.writeSSE({
               event: "permission_request",
               data: JSON.stringify({
                 type: "permission_request",
                 id,
-                tool: toolName,
+                tool: displayTool,
                 input,
               }),
             });
             const decision = await awaitPermission(id, opts.signal);
+            if (decision.behavior === "allow") {
+              return { behavior: "allow", updatedInput: input };
+            }
+            if (decision.behavior === "allow_session") {
+              allowance.add(toolName);
+              return { behavior: "allow", updatedInput: input };
+            }
             return decision;
           },
         },
@@ -145,6 +205,18 @@ chat.post("/chat", async (c) => {
           ((msg as any).subtype ? `:${(msg as any).subtype}` : "");
         if (msgCount <= 20 || msgCount % 50 === 0) {
           console.log(`[chat ${reqId}] msg #${msgCount} ${tag} @${elapsed()}`);
+        }
+        const emittedId = (msg as any).session_id as string | undefined;
+        if (emittedId && emittedId !== currentSessionId) {
+          const previousId = currentSessionId;
+          if (!previousId) {
+            sessionAllowances.set(emittedId, allowance);
+          } else if (sessionAllowances.get(previousId) === allowance) {
+            sessionAllowances.delete(previousId);
+            sessionAllowances.set(emittedId, allowance);
+          }
+          relabelTasksSessionId(previousId, emittedId);
+          currentSessionId = emittedId;
         }
         await stream.writeSSE({
           event: msg.type,

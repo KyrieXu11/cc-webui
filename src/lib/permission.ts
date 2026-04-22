@@ -1,6 +1,8 @@
+import type { PermissionDecision } from "./types";
+
 export async function sendPermission(
   id: string,
-  behavior: "allow" | "deny",
+  behavior: PermissionDecision,
   message?: string
 ): Promise<void> {
   const res = await fetch(`/api/permission/${id}`, {

@@ -7,6 +7,7 @@ import { sessionsRoute } from "./sessions.ts";
 import { uploadRoute } from "./upload.ts";
 import { metaRoute } from "./meta.ts";
 import { permissionRoute } from "./permission.ts";
+import { bashTasksRoute } from "./bash-tasks.ts";
 
 const app = new Hono();
 
@@ -16,6 +17,7 @@ app.route("/api/sessions", sessionsRoute);
 app.route("/api/upload", uploadRoute);
 app.route("/api/permission", permissionRoute);
 app.route("/api/meta", metaRoute);
+app.route("/api/bash/tasks", bashTasksRoute);
 
 const isProd = process.env.NODE_ENV === "production";
 if (isProd) {

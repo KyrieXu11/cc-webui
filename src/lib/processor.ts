@@ -1,6 +1,16 @@
 import type { ChatEvent, ImageAttachment } from "./types";
 import type { SessionMessage } from "./sessions";
 
+const TOOL_ALIAS: Record<string, string> = {
+  "mcp__bash__run": "Bash",
+  "mcp__bash__output": "BashOutput",
+  "mcp__bash__kill": "KillBash",
+};
+
+function normalizeToolName(name: string): string {
+  return TOOL_ALIAS[name] ?? name;
+}
+
 type OnSession = (id: string) => void;
 
 export function applySDKMessage(
@@ -44,13 +54,14 @@ export function applySDKMessage(
         ];
       }
       if (block?.type === "tool_use") {
+        const toolName = normalizeToolName(block.name);
         return [
           ...events,
           {
             id: `s-${block.id}`,
             type: "step",
-            tool: block.name,
-            arg: summarize(block.name, block.input),
+            tool: toolName,
+            arg: summarize(toolName, block.input),
             status: "pending",
             input: block.input,
           },
@@ -99,9 +110,10 @@ export function applySDKMessage(
         if (idx >= 0) {
           const existing = result[idx];
           if (existing.type === "step") {
+            const toolName = normalizeToolName(block.name);
             const updated: ChatEvent = {
               ...existing,
-              arg: summarize(block.name, block.input) ?? existing.arg,
+              arg: summarize(toolName, block.input) ?? existing.arg,
               input: block.input ?? existing.input,
             };
             result = [...result.slice(0, idx), updated, ...result.slice(idx + 1)];
@@ -218,11 +230,12 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
               text: b.thinking,
             });
           } else if (b?.type === "tool_use") {
+            const toolName = normalizeToolName(b.name);
             events.push({
               id: `s-${b.id}`,
               type: "step",
-              tool: b.name,
-              arg: summarize(b.name, b.input),
+              tool: toolName,
+              arg: summarize(toolName, b.input),
               status: "ok",
               input: b.input,
             });
@@ -243,7 +256,12 @@ export function summarize(tool: string, input: any): string | undefined {
     case "NotebookEdit":
       return shortPath(input.file_path);
     case "Bash":
-      return truncate(input.command, 96);
+      return input.run_in_background
+        ? `[bg] ${truncate(input.command, 88) ?? ""}`
+        : truncate(input.command, 96);
+    case "BashOutput":
+    case "KillBash":
+      return input.bash_id;
     case "Grep":
       return input.pattern ? `/${input.pattern}/` : undefined;
     case "Glob":

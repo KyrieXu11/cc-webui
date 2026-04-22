@@ -7,6 +7,7 @@ type PendingEntry = {
 
 export type PermissionDecision =
   | { behavior: "allow" }
+  | { behavior: "allow_session" }
   | { behavior: "deny"; message: string };
 
 const pending = new Map<string, PendingEntry>();
@@ -73,13 +74,22 @@ permissionRoute.post("/:id", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => ({}));
   const behavior = body.behavior;
-  if (behavior !== "allow" && behavior !== "deny") {
-    return c.json({ error: "behavior must be allow or deny" }, 400);
+  if (
+    behavior !== "allow" &&
+    behavior !== "allow_session" &&
+    behavior !== "deny"
+  ) {
+    return c.json(
+      { error: "behavior must be allow, allow_session, or deny" },
+      400
+    );
   }
   const decision: PermissionDecision =
     behavior === "allow"
       ? { behavior: "allow" }
-      : { behavior: "deny", message: body.message || "user denied" };
+      : behavior === "allow_session"
+        ? { behavior: "allow_session" }
+        : { behavior: "deny", message: body.message || "user denied" };
   const ok = resolvePermission(id, decision);
   return c.json({ ok });
 });

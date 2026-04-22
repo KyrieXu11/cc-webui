@@ -1,5 +1,7 @@
 export type StepStatus = "ok" | "pending" | "error";
 
+export type PermissionDecision = "allow" | "allow_session" | "deny";
+
 export type ImageAttachment = {
   name?: string;
   mediaType: string;
@@ -30,7 +32,7 @@ export type ChatEvent =
       permissionId: string;
       tool: string;
       input: Record<string, any>;
-      resolved?: "allow" | "deny";
+      resolved?: PermissionDecision;
     }
   | {
       id: string;

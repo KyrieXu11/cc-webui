@@ -21,6 +21,7 @@ interface Props {
   onChange: (v: string) => void;
   slashCommands?: string[];
   onPickSlash?: (cmd: string) => void;
+  rightSlot?: React.ReactNode;
 }
 
 export default function Composer({
@@ -36,6 +37,7 @@ export default function Composer({
   onChange,
   slashCommands = [],
   onPickSlash,
+  rightSlot,
 }: Props) {
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -352,9 +354,12 @@ export default function Composer({
             model={model}
           />
         </div>
-        <span className="text-[11px] text-subtle font-mono px-1">
-          {disabled ? "thinking…" : uploading ? "uploading…" : "idle"}
-        </span>
+        <div className="flex items-center gap-2">
+          {rightSlot}
+          <span className="text-[11px] text-subtle font-mono px-1">
+            {disabled ? "thinking…" : uploading ? "uploading…" : "idle"}
+          </span>
+        </div>
       </div>
     </div>
   );

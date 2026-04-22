@@ -1,4 +1,4 @@
-import type { ChatEvent } from "../lib/types";
+import type { ChatEvent, ImageAttachment, PermissionDecision } from "../lib/types";
 import UserBubble from "./UserBubble";
 import AssistantText from "./AssistantText";
 import StepTimeline from "./StepTimeline";
@@ -31,11 +31,12 @@ interface Props {
   onToggleStep: (id: string) => void;
   onAnswerPermission: (
     permissionId: string,
-    decision: "allow" | "deny",
+    decision: PermissionDecision,
     message?: string
   ) => void;
   isPending?: boolean;
   retryInfo?: RetryInfo | null;
+  onPreviewImage?: (img: ImageAttachment, label: string) => void;
 }
 
 export default function MessageList({
@@ -45,6 +46,7 @@ export default function MessageList({
   onAnswerPermission,
   isPending,
   retryInfo,
+  onPreviewImage,
 }: Props) {
   const blocks: Block[] = [];
   for (const ev of events) {
@@ -80,6 +82,7 @@ export default function MessageList({
                 text={ev.text}
                 images={ev.images}
                 delay={0}
+                onPreviewImage={onPreviewImage}
               />
             );
           case "assistant":

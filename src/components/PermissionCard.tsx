@@ -1,11 +1,12 @@
 import { useState } from "react";
+import type { PermissionDecision } from "../lib/types";
 
 interface Props {
   tool: string;
   input: Record<string, any>;
-  resolved?: "allow" | "deny";
+  resolved?: PermissionDecision;
   delay?: number;
-  onAnswer: (decision: "allow" | "deny", message?: string) => void;
+  onAnswer: (decision: PermissionDecision, message?: string) => void;
 }
 
 function summarizeInput(tool: string, input: Record<string, any>): string {
@@ -32,6 +33,12 @@ function summarizeInput(tool: string, input: Record<string, any>): string {
   }
 }
 
+const RESOLVED_LABEL: Record<PermissionDecision, string> = {
+  allow: "已允许本次",
+  allow_session: "本次会话都允许",
+  deny: "已拒绝",
+};
+
 export default function PermissionCard({
   tool,
   input,
@@ -40,8 +47,15 @@ export default function PermissionCard({
   onAnswer,
 }: Props) {
   const [reason, setReason] = useState("");
+  const [showReason, setShowReason] = useState(false);
   const locked = resolved !== undefined;
   const summary = summarizeInput(tool, input);
+
+  const btnBase =
+    "px-3 h-8 rounded-md text-[12.5px] border transition-all duration-150 whitespace-nowrap";
+  const btnIdle =
+    "bg-canvas/50 border-fg/10 text-muted hover:text-fg hover:border-fg/25 hover:bg-raised";
+  const btnLocked = "bg-transparent border-fg/5 text-subtle cursor-default";
 
   return (
     <div
@@ -54,50 +68,79 @@ export default function PermissionCard({
         </div>
         <span className="text-subtle">·</span>
         <span className="font-mono text-[12.5px] text-fg">{tool}</span>
+        {locked && (
+          <span className="ml-auto font-mono text-[10.5px] text-subtle">
+            {RESOLVED_LABEL[resolved!]}
+          </span>
+        )}
       </div>
+
       {summary && (
-        <pre className="bg-canvas/50 border border-fg/10 rounded-md p-2.5 mb-4 overflow-x-auto font-mono text-[12px] leading-[1.55] text-muted whitespace-pre-wrap break-all">
+        <pre className="bg-canvas/50 border border-fg/10 rounded-md p-2.5 mb-4 max-h-[9em] overflow-y-auto font-mono text-[12px] leading-[1.55] text-muted whitespace-pre-wrap break-all">
           {summary}
         </pre>
       )}
-      <div className="text-[13px] text-muted leading-[1.7] mb-3">
-        是否允许执行以上 <span className="font-mono text-fg">{tool}</span>？
-      </div>
-      <div className="flex flex-wrap gap-2 mb-3">
+
+      <div className="flex flex-wrap items-center gap-2">
         <button
           disabled={locked}
           onClick={() => onAnswer("allow")}
-          className={`px-3.5 h-8 rounded-md text-[13px] border transition-all duration-150 ${
+          className={`${btnBase} ${
             resolved === "allow"
               ? "bg-blue border-blue text-white"
               : locked
-                ? "bg-transparent border-fg/5 text-subtle"
-                : "bg-canvas/50 border-fg/10 text-muted hover:text-fg hover:border-fg/25 hover:bg-raised"
+                ? btnLocked
+                : btnIdle
           }`}
         >
           允许本次
         </button>
         <button
           disabled={locked}
+          onClick={() => onAnswer("allow_session")}
+          className={`${btnBase} ${
+            resolved === "allow_session"
+              ? "bg-blue border-blue text-white"
+              : locked
+                ? btnLocked
+                : btnIdle
+          }`}
+          title={`本次对话内所有 ${tool} 调用都自动放行`}
+        >
+          本次会话都允许
+        </button>
+        <button
+          disabled={locked}
           onClick={() => onAnswer("deny", reason.trim() || undefined)}
-          className={`px-3.5 h-8 rounded-md text-[13px] border transition-all duration-150 ${
+          className={`${btnBase} ${
             resolved === "deny"
               ? "bg-surface border-fg/40 text-fg"
               : locked
-                ? "bg-transparent border-fg/5 text-subtle"
-                : "bg-canvas/50 border-fg/10 text-muted hover:text-fg hover:border-fg/25 hover:bg-raised"
+                ? btnLocked
+                : btnIdle
           }`}
         >
           拒绝
         </button>
+        {!locked && !showReason && (
+          <button
+            onClick={() => setShowReason(true)}
+            className="ml-auto text-[11.5px] text-subtle hover:text-fg transition-colors"
+          >
+            + 添加拒绝说明
+          </button>
+        )}
       </div>
-      <input
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        disabled={locked}
-        placeholder="拒绝理由（可选，会回传给 Claude）…"
-        className="w-full h-9 px-3 rounded-md bg-canvas/50 border border-fg/10 text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 disabled:opacity-50 transition-colors"
-      />
+
+      {showReason && !locked && (
+        <input
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="拒绝理由（会回传给 Claude）…"
+          className="mt-3 w-full h-9 px-3 rounded-md bg-canvas/50 border border-fg/10 text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
+        />
+      )}
     </div>
   );
 }

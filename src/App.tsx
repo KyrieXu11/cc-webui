@@ -11,7 +11,9 @@ import HomeView from "./components/HomeView";
 import OpenProjectDialog from "./components/OpenProjectDialog";
 import SkillsPicker from "./components/SkillsPicker";
 import HelpModal from "./components/HelpModal";
-import type { ChatEvent } from "./lib/types";
+import TasksButton from "./components/TasksButton";
+import TasksModal from "./components/TasksModal";
+import type { ChatEvent, PermissionDecision } from "./lib/types";
 import { streamChat, type ImageAttachment } from "./lib/api";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
@@ -52,6 +54,8 @@ export default function App() {
   const [skills, setSkills] = useState<string[]>([]);
   const [skillsPickerOpen, setSkillsPickerOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
 
   const LOCAL_COMMANDS = ["skills", "help", "clear", "exit"];
   const mergedSlashCommands = [
@@ -156,7 +160,7 @@ export default function App() {
 
   const answerPermission = async (
     permissionId: string,
-    decision: "allow" | "deny",
+    decision: PermissionDecision,
     message?: string
   ) => {
     setAllEvents((prev) =>
@@ -410,6 +414,19 @@ export default function App() {
     error: string | null;
   } | null>(null);
 
+  const previewAttachedImage = (img: ImageAttachment, label: string) => {
+    setPreview({
+      absPath: "",
+      relPath: label,
+      kind: "image",
+      content: "",
+      imageUrl: `data:${img.mediaType};base64,${img.data}`,
+      truncated: false,
+      loading: false,
+      error: null,
+    });
+  };
+
   const previewFile = async (abs: string, rel: string) => {
     const name = abs.slice(abs.lastIndexOf("/") + 1);
 
@@ -555,6 +572,7 @@ export default function App() {
                           allEvents[allEvents.length - 1]?.type === "user"
                         }
                         retryInfo={retryInfo}
+                        onPreviewImage={previewAttachedImage}
                       />
                     </>
                   )}
@@ -580,6 +598,13 @@ export default function App() {
                   onChange={setComposerValue}
                   slashCommands={mergedSlashCommands}
                   onPickSlash={handlePickSlash}
+                  rightSlot={
+                    <TasksButton
+                      sessionId={sessionId}
+                      onOpen={() => setTasksOpen(true)}
+                      refreshKey={tasksRefreshKey}
+                    />
+                  }
                 />
               </div>
             </div>
@@ -610,9 +635,11 @@ export default function App() {
           loading={preview.loading}
           error={preview.error}
           onClose={() => setPreview(null)}
-          onInsert={() => {
-            insertFile(preview.absPath, preview.relPath);
-          }}
+          onInsert={
+            preview.absPath
+              ? () => insertFile(preview.absPath, preview.relPath)
+              : undefined
+          }
         />
       )}
       {dialogOpen && (
@@ -632,6 +659,15 @@ export default function App() {
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {tasksOpen && (
+        <TasksModal
+          sessionId={sessionId}
+          onClose={() => {
+            setTasksOpen(false);
+            setTasksRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

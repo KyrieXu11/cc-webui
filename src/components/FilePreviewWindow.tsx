@@ -20,7 +20,7 @@ interface Props {
   loading: boolean;
   error: string | null;
   onClose: () => void;
-  onInsert: () => void;
+  onInsert?: () => void;
 }
 
 const MIN_WIDTH = 420;
@@ -165,14 +165,16 @@ export default function FilePreviewWindow({
               ? `${lineCount}行 · 截断`
               : `${lineCount}行`}
         </span>
-        <button
-          data-no-drag
-          onClick={onInsert}
-          className="shrink-0 font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
-          title="插入到对话"
-        >
-          @ 插入
-        </button>
+        {onInsert && (
+          <button
+            data-no-drag
+            onClick={onInsert}
+            className="shrink-0 font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
+            title="插入到对话"
+          >
+            @ 插入
+          </button>
+        )}
         <button
           data-no-drag
           onClick={onClose}
