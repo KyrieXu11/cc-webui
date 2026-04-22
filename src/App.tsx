@@ -334,6 +334,10 @@ export default function App() {
                         expandedSteps={expandedSteps}
                         onToggleStep={toggleStep}
                         onAnswerPermission={answerPermission}
+                        isPending={
+                          isStreaming &&
+                          allEvents[allEvents.length - 1]?.type === "user"
+                        }
                       />
                     </>
                   )}

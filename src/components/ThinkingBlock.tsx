@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { pickThinkingWord } from "../lib/thinking-words";
 
 interface Props {
   text: string;
@@ -7,46 +8,13 @@ interface Props {
   delay?: number;
 }
 
-const WORDS = [
-  "Thinking",
-  "Pondering",
-  "Musing",
-  "Considering",
-  "Deliberating",
-  "Ruminating",
-  "Contemplating",
-  "Reflecting",
-  "Cogitating",
-  "Reasoning",
-  "Analyzing",
-  "Brewing",
-  "Churning",
-  "Thundering",
-  "Simmering",
-  "Crunching",
-  "Scheming",
-  "Weaving",
-  "Stirring",
-  "Unraveling",
-  "Decoding",
-  "Plotting",
-];
-
-function pickWord(prev?: string): string {
-  if (WORDS.length < 2) return WORDS[0];
-  while (true) {
-    const w = WORDS[Math.floor(Math.random() * WORDS.length)];
-    if (w !== prev) return w;
-  }
-}
-
 export default function ThinkingBlock({
   text,
   expanded,
   onToggle,
   delay = 0,
 }: Props) {
-  const [label, setLabel] = useState(() => pickWord());
+  const [label, setLabel] = useState(() => pickThinkingWord());
   const [active, setActive] = useState(true);
   const prevTextRef = useRef(text);
 
@@ -62,7 +30,7 @@ export default function ThinkingBlock({
   useEffect(() => {
     if (!active) return;
     const t = setInterval(() => {
-      setLabel((cur) => pickWord(cur));
+      setLabel((cur) => pickThinkingWord(cur));
     }, 1600);
     return () => clearInterval(t);
   }, [active]);

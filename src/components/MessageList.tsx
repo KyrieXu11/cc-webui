@@ -5,6 +5,7 @@ import StepTimeline from "./StepTimeline";
 import PermissionCard from "./PermissionCard";
 import SummaryCard from "./SummaryCard";
 import ThinkingBlock from "./ThinkingBlock";
+import PendingHint from "./PendingHint";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
 
@@ -25,6 +26,7 @@ interface Props {
     decision: "allow" | "deny",
     message?: string
   ) => void;
+  isPending?: boolean;
 }
 
 export default function MessageList({
@@ -32,6 +34,7 @@ export default function MessageList({
   expandedSteps,
   onToggleStep,
   onAnswerPermission,
+  isPending,
 }: Props) {
   const blocks: Block[] = [];
   for (const ev of events) {
@@ -97,6 +100,7 @@ export default function MessageList({
             );
         }
       })}
+      {isPending && blocks.length > 0 && <PendingHint />}
     </div>
   );
 }
