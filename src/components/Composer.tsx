@@ -5,8 +5,10 @@ import EffortSelector from "./EffortSelector";
 import type { EffortLevel, PermissionMode } from "../lib/settings";
 import { uploadFiles, formatSize, type UploadedFile } from "../lib/upload";
 
+type ImagePart = { name?: string; mediaType: string; data: string };
+
 interface Props {
-  onSend?: (text: string) => void;
+  onSend?: (text: string, images?: ImagePart[]) => void;
   disabled?: boolean;
   model: string;
   onModelChange: (v: string) => void;
@@ -62,14 +64,29 @@ export default function Composer({
     const v = value.trim();
     if (disabled || uploading) return;
     if (!v && attachments.length === 0) return;
+
+    const imageParts: ImagePart[] = [];
+    const fileParts: typeof attachments = [];
+    for (const a of attachments) {
+      if (a.imageData && a.mime?.startsWith("image/")) {
+        imageParts.push({
+          name: a.name,
+          mediaType: a.mime,
+          data: a.imageData,
+        });
+      } else {
+        fileParts.push(a);
+      }
+    }
+
     let payload = v;
-    if (attachments.length > 0) {
-      const lines = attachments
+    if (fileParts.length > 0) {
+      const lines = fileParts
         .map((a) => `- ${a.path}  (${a.name})`)
         .join("\n");
       payload = `附件：\n${lines}${v ? `\n\n${v}` : ""}`;
     }
-    onSend?.(payload);
+    onSend?.(payload, imageParts.length > 0 ? imageParts : undefined);
     onChange("");
     setAttachments([]);
   };

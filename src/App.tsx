@@ -9,7 +9,7 @@ import MessageList from "./components/MessageList";
 import HomeView from "./components/HomeView";
 import OpenProjectDialog from "./components/OpenProjectDialog";
 import type { ChatEvent } from "./lib/types";
-import { streamChat } from "./lib/api";
+import { streamChat, type ImageAttachment } from "./lib/api";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
   loadSettings,
@@ -207,11 +207,15 @@ export default function App() {
   const updateEffort = (effort: Settings["effort"]) =>
     setSettings((s) => ({ ...s, effort }));
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, images?: ImageAttachment[]) => {
     const userEvt: ChatEvent = {
       id: `u-${Date.now()}`,
       type: "user",
-      text,
+      text:
+        text ||
+        (images && images.length > 0
+          ? `[${images.length} 张图片]`
+          : ""),
     };
     setAllEvents((prev) => [...prev, userEvt]);
     setVisibleCount((c) => Math.max(c, INITIAL_VISIBLE));
@@ -225,6 +229,7 @@ export default function App() {
         model: settings.model,
         permissionMode: settings.permissionMode,
         effort: settings.effort,
+        images,
       })) {
         setAllEvents((prev) =>
           applySDKMessage(prev, msg, (id) => setSessionId(id))

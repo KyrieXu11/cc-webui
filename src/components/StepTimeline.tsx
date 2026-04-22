@@ -1,4 +1,5 @@
 import type { ChatEvent } from "../lib/types";
+import EditDiff from "./EditDiff";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
 
@@ -62,7 +63,21 @@ const Chevron = ({ open }: { open: boolean }) => (
   </svg>
 );
 
-function StepDetails({ input, output }: { input?: any; output?: string }) {
+function StepDetails({
+  tool,
+  input,
+  output,
+}: {
+  tool: string;
+  input?: any;
+  output?: string;
+}) {
+  const isDiffTool =
+    tool === "Edit" || tool === "Write" || tool === "NotebookEdit";
+  if (isDiffTool && input) {
+    return <EditDiff tool={tool} input={input} />;
+  }
+
   const hasInput = input && Object.keys(input).length > 0;
   const hasOutput = output && output.length > 0;
   if (!hasInput && !hasOutput) {
@@ -143,7 +158,9 @@ export default function StepTimeline({
                   <Chevron open={open} />
                 </div>
               </button>
-              {open && <StepDetails input={s.input} output={s.output} />}
+              {open && (
+                <StepDetails tool={s.tool} input={s.input} output={s.output} />
+              )}
             </div>
           );
         })}

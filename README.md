@@ -29,12 +29,23 @@ npm run dev
 
 - **项目管理** — 扫描 `$HOME` 列出所有候选目录，可搜索打开；最近项目按会话归类展示
 - **会话恢复** — 直接打开 `~/.claude/projects/` 里已有的历史会话并继续聊
+- **搜索** — Header 中央搜索框同时匹配 **最近项目路径** 和 **会话标题**（`summary / firstPrompt / customTitle`），↑↓ 键盘导航
 - **流式渲染** — SDK 的 token 级 deltas、工具调用时间线、tool_result 结果
-- **Tool-call 展开** — 点每一步或按 **Ctrl+O** 全局展开/收起，查看完整 input / output
-- **权限确认** — `permissionMode: default` 时每次工具调用会弹琥珀色权限卡，Allow / Deny + 拒绝理由
-- **文件浏览器** — 右侧栏显示 cwd 文件树，点文件以 `@relpath` 插入到 composer
-- **文件上传** — composer 支持点击 / 拖拽 / 粘贴上传，落盘到 `/tmp/cc-webui-uploads/`，自动在 prompt 里带上路径
-- **模型 / 模式 / Effort 切换** — 底栏直接选 Opus / Sonnet / Haiku、Default / Accept Edits / Plan / Bypass、Low / Medium / High / xHigh / Max
+- **Extended thinking** — 模型的思考内容以折叠块形式穿插显示，橙色 sparkle 图标 + 动词轮播（`Pondering / Thundering / Brewing / …`），Ctrl+O 全局展开
+- **Tool-call 展开** — 点每一步查看完整 input / output
+  - **Edit / Write / NotebookEdit** 走专用 diff 视图：`Update /path (+24 -1)`，红底 `−` / 绿底 `+` 分行展示
+  - 其他工具 fallback 到通用 JSON / 文本视图
+- **权限确认** — `permissionMode: default` 时每次工具调用会弹琥珀色权限卡，Allow / Deny + 拒绝理由；10 分钟无响应自动视为 deny
+- **文件浏览器** — 右侧栏显示 cwd 文件树，懒加载子目录，点文件以 `@relpath` 插入到 composer
+- **文件上传** — composer 支持点击 / 拖拽 / 粘贴：
+  - **图片** → base64 直接作为 image content block 发给模型，1 个回合看见（等价于终端粘贴）
+  - **其他文件** → 落盘 `/tmp/cc-webui-uploads/`，路径以 `附件:` 形式带进 prompt，Claude 用 Read 访问
+- **`@path` 原子删除** — composer 里 Backspace 到 `@path` 末尾时整段一次性删掉，不用逐字符退
+- **模型 / 模式 / Effort** — 底栏直接选：
+  - 模型：Opus 4.7 / Sonnet 4.6 / Haiku 4.5
+  - 权限：Default / Accept Edits / Plan / Bypass
+  - Effort：Low / Medium / High / xHigh / Max（`xHigh` 只在 Opus 下显示；切换到其他模型会自动降到 High）
+- **Markdown 渲染** — `react-markdown + remark-gfm`，支持标题 / 列表 / 表格 / 代码块 / 链接；中英混排下中文标点紧邻 URL 时自动分隔，autolink 不再吞中文
 - **日夜主题** — 左侧栏底部太阳/月亮按钮切换，配置保存在 localStorage
 - **历史懒加载** — 首次打开一个会话只渲染最后 200 条消息，向上滚自动加更早
 
@@ -54,23 +65,35 @@ npm run dev
 cc-webui/
 ├── server/
 │   ├── index.ts        # Hono 入口 + 生产静态托管
-│   ├── chat.ts         # /api/chat SSE：包装 SDK query()，串 canUseTool
+│   ├── chat.ts         # /api/chat SSE：包装 SDK query()，串 canUseTool；图片走 async iterable 分支
 │   ├── fs.ts           # /api/fs/*：scan / tree / recents
 │   ├── sessions.ts     # /api/sessions/*：list / messages / delete
-│   ├── upload.ts       # /api/upload：multipart 落盘
-│   └── permission.ts   # /api/permission/:id：用 Map<id, Promise> 串权限回调
+│   ├── upload.ts       # /api/upload：multipart 落盘 + 回传 MIME
+│   └── permission.ts   # /api/permission/:id：用 Map<id, Promise> 串权限回调，带超时
 ├── src/
 │   ├── App.tsx
 │   ├── lib/
-│   │   ├── api.ts        # 浏览器侧 SSE 解析
-│   │   ├── processor.ts  # SDK 消息 → 前端 ChatEvent 状态机（流式 + 历史回放复用）
+│   │   ├── api.ts        # 浏览器侧 SSE 解析 + 图片附件打包
+│   │   ├── processor.ts  # SDK 消息 → 前端 ChatEvent 状态机（流式 + 历史回放复用，含 thinking / tool_use / permission_request）
 │   │   ├── sessions.ts
-│   │   ├── settings.ts   # localStorage 持久化
-│   │   ├── upload.ts
+│   │   ├── settings.ts   # localStorage 持久化，含主题、effort 与模型联动
+│   │   ├── upload.ts     # 客户端 FileReader 读 base64（仅图片）
 │   │   ├── permission.ts
 │   │   ├── fs.ts
 │   │   └── types.ts
-│   └── components/       # Header / Sidebar / Composer / MessageList / …
+│   └── components/
+│       ├── Header.tsx / HeaderSearch.tsx
+│       ├── Sidebar.tsx / ProjectSidebar.tsx / EmptyProjectSidebar.tsx
+│       ├── Composer.tsx
+│       ├── MessageList.tsx
+│       ├── UserBubble.tsx / AssistantText.tsx / SummaryCard.tsx
+│       ├── StepTimeline.tsx / EditDiff.tsx
+│       ├── ThinkingBlock.tsx
+│       ├── PermissionCard.tsx
+│       ├── FileExplorer.tsx
+│       ├── OpenProjectDialog.tsx
+│       ├── ModelSelector.tsx / ModeSelector.tsx / EffortSelector.tsx
+│       └── HomeView.tsx / Popover.tsx
 ├── public/favicon.png
 ├── index.html
 ├── vite.config.ts
@@ -79,14 +102,15 @@ cc-webui/
 
 ## 键盘快捷键
 
-- `Ctrl+O` — 全局展开 / 收起所有 tool_call 详情
+- `Ctrl+O` — 全局展开 / 收起所有 tool_call + thinking 详情
 - `⌘↵ / Ctrl↵` — 在 composer 里发送消息
+- `Backspace`（光标在 `@path` 末尾） — 整段删除该引用，附带一个相邻空格
 - `↑ ↓ ↵` — 在项目选择对话框 / header 搜索里导航
 - `Esc` — 关闭弹窗 / 搜索下拉
 
 ## 已知局限
 
 - **单用户 / 无鉴权** — API 全部公开，适合本地或用 Cloudflare Access 这类前置保护。裸暴露在公网会被利用上传 / 读写文件
-- **上传文件落在 `/tmp`** — 不在项目 cwd 里，Edit 修改不会进项目仓库。适合读、查、引用，不适合作为项目素材
-- **ProjectSidebar 的 `…` 菜单** — 占位按钮，目前点了没反应
-- **搜索只搜项目路径** — 还不能按会话标题 / 内容搜
+- **非图片上传文件落在 `/tmp`** — 不在项目 cwd 里，Edit 修改不会进项目仓库。适合读、查、引用，不适合作为项目素材（图片走 inline 直接给模型，不受此限制）
+- **Edit diff 不带真实行号 / 上下文** — 只显示 `old_string` → `new_string` 的纯变更行，没有读原文件去补上下文和真实行号
+- **没有语法高亮** — 代码块和 diff 都是纯等宽黑字，暂未引入 shiki 等高亮库（bundle 体积考虑）

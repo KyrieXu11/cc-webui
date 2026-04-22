@@ -30,7 +30,12 @@ uploadRoute.post("/", async (c) => {
   if (list.length === 0) return c.json({ error: "no files" }, 400);
 
   await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  const saved: Array<{ name: string; path: string; size: number }> = [];
+  const saved: Array<{
+    name: string;
+    path: string;
+    size: number;
+    mime: string;
+  }> = [];
   for (const f of list) {
     const stamp = Date.now().toString(36);
     const safe = sanitize(f.name);
@@ -38,7 +43,12 @@ uploadRoute.post("/", async (c) => {
     const dest = path.join(UPLOAD_DIR, filename);
     const buf = Buffer.from(await f.arrayBuffer());
     await fs.writeFile(dest, buf);
-    saved.push({ name: f.name, path: dest, size: buf.length });
+    saved.push({
+      name: f.name,
+      path: dest,
+      size: buf.length,
+      mime: f.type || "application/octet-stream",
+    });
   }
   return c.json({ files: saved });
 });

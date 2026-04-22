@@ -52,8 +52,20 @@ chat.post("/chat", async (c) => {
     ? body.effort
     : undefined;
 
-  if (!prompt.trim()) {
-    return c.json({ error: "prompt required" }, 400);
+  type IncomingImage = { name?: string; mediaType?: string; data?: string };
+  const rawImages: IncomingImage[] = Array.isArray(body.images)
+    ? body.images
+    : [];
+  const images = rawImages.filter(
+    (img): img is { name?: string; mediaType: string; data: string } =>
+      typeof img?.mediaType === "string" &&
+      img.mediaType.startsWith("image/") &&
+      typeof img.data === "string" &&
+      img.data.length > 0
+  );
+
+  if (!prompt.trim() && images.length === 0) {
+    return c.json({ error: "prompt or images required" }, 400);
   }
 
   return streamSSE(c, async (stream) => {
@@ -65,8 +77,31 @@ chat.post("/chat", async (c) => {
     });
 
     try {
+      const queryPrompt =
+        images.length > 0
+          ? (async function* () {
+              const content: any[] = [];
+              if (prompt.trim()) content.push({ type: "text", text: prompt });
+              for (const img of images) {
+                content.push({
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: img.mediaType,
+                    data: img.data,
+                  },
+                });
+              }
+              yield {
+                type: "user" as const,
+                message: { role: "user" as const, content },
+                parent_tool_use_id: null,
+              };
+            })()
+          : prompt;
+
       const response = query({
-        prompt,
+        prompt: queryPrompt as any,
         options: {
           resume: sessionId,
           cwd,

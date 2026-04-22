@@ -73,25 +73,13 @@ export default function ProjectSidebar({
   return (
     <aside className="w-[260px] shrink-0 border-r border-line flex flex-col bg-canvas">
       <div className="px-4 pt-4 pb-3 border-b border-line">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="min-w-0">
-            <div className="text-fg text-[14px] font-semibold truncate">
-              {basename(cwd)}
-            </div>
-            <div className="font-mono text-[11px] text-subtle truncate mt-0.5">
-              {tildify(cwd, home)}
-            </div>
+        <div className="min-w-0 mb-3">
+          <div className="text-fg text-[14px] font-semibold truncate">
+            {basename(cwd)}
           </div>
-          <button
-            aria-label="更多"
-            className="p-1 rounded text-subtle hover:text-fg hover:bg-fg/5 transition-colors shrink-0"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <circle cx="2.5" cy="7" r="1" fill="currentColor" />
-              <circle cx="7" cy="7" r="1" fill="currentColor" />
-              <circle cx="11.5" cy="7" r="1" fill="currentColor" />
-            </svg>
-          </button>
+          <div className="font-mono text-[11px] text-subtle truncate mt-0.5">
+            {tildify(cwd, home)}
+          </div>
         </div>
         <button
           onClick={onNewChat}

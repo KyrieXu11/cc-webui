@@ -1,8 +1,43 @@
+import { useEffect, useRef, useState } from "react";
+
 interface Props {
   text: string;
   expanded: boolean;
   onToggle: () => void;
   delay?: number;
+}
+
+const WORDS = [
+  "Thinking",
+  "Pondering",
+  "Musing",
+  "Considering",
+  "Deliberating",
+  "Ruminating",
+  "Contemplating",
+  "Reflecting",
+  "Cogitating",
+  "Reasoning",
+  "Analyzing",
+  "Brewing",
+  "Churning",
+  "Thundering",
+  "Simmering",
+  "Crunching",
+  "Scheming",
+  "Weaving",
+  "Stirring",
+  "Unraveling",
+  "Decoding",
+  "Plotting",
+];
+
+function pickWord(prev?: string): string {
+  if (WORDS.length < 2) return WORDS[0];
+  while (true) {
+    const w = WORDS[Math.floor(Math.random() * WORDS.length)];
+    if (w !== prev) return w;
+  }
 }
 
 export default function ThinkingBlock({
@@ -11,6 +46,27 @@ export default function ThinkingBlock({
   onToggle,
   delay = 0,
 }: Props) {
+  const [label, setLabel] = useState(() => pickWord());
+  const [active, setActive] = useState(true);
+  const prevTextRef = useRef(text);
+
+  // Mark active whenever the content changes; flip to inactive after a quiet gap.
+  useEffect(() => {
+    prevTextRef.current = text;
+    setActive(true);
+    const t = setTimeout(() => setActive(false), 2500);
+    return () => clearTimeout(t);
+  }, [text]);
+
+  // While thinking is active, rotate through verbs.
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => {
+      setLabel((cur) => pickWord(cur));
+    }, 1600);
+    return () => clearInterval(t);
+  }, [active]);
+
   const preview =
     text.length > 80 ? text.slice(0, 80).replace(/\s+/g, " ") + "…" : text;
 
@@ -21,9 +77,9 @@ export default function ThinkingBlock({
         className="group w-full flex items-center gap-2 text-left hover:bg-fg/[0.02] rounded-sm py-1 pr-2 transition-colors"
       >
         <Chevron open={expanded} />
-        <ThoughtIcon />
-        <span className="font-mono text-[10.5px] text-subtle uppercase tracking-[0.08em]">
-          思考
+        <Sparkle active={active} />
+        <span className="font-mono text-[11.5px] text-orange tracking-[0.02em]">
+          {active ? `${label}…` : "thought"}
         </span>
         <span className="text-subtle/70 text-[11px]">· {text.length} 字</span>
         {!expanded && preview && (
@@ -33,7 +89,7 @@ export default function ThinkingBlock({
         )}
       </button>
       {expanded && (
-        <div className="mt-1.5 mb-2 pl-3 ml-[11px] border-l-2 border-line-strong">
+        <div className="mt-1.5 mb-2 pl-3 ml-[11px] border-l-2 border-orange/40">
           <div className="text-[12.5px] leading-[1.75] text-muted italic whitespace-pre-wrap break-words">
             {text}
           </div>
@@ -61,21 +117,19 @@ const Chevron = ({ open }: { open: boolean }) => (
   </svg>
 );
 
-const ThoughtIcon = () => (
+const Sparkle = ({ active }: { active: boolean }) => (
   <svg
-    width="12"
-    height="12"
+    width="13"
+    height="13"
     viewBox="0 0 14 14"
     fill="none"
-    className="shrink-0 text-subtle"
+    className={`shrink-0 text-orange ${active ? "sparkle-spin" : ""}`}
   >
     <path
-      d="M4 4C4 2.9 4.9 2 6 2H9C10.1 2 11 2.9 11 4V6C11 7.1 10.1 8 9 8H6.5L4 10V8C4 7.45 3.55 7 3 7V4Z"
+      d="M7 1 L7 13 M1 7 L13 7 M2.5 2.5 L11.5 11.5 M2.5 11.5 L11.5 2.5"
       stroke="currentColor"
       strokeWidth="1.2"
-      strokeLinejoin="round"
+      strokeLinecap="round"
     />
-    <circle cx="5.5" cy="12" r="0.7" fill="currentColor" />
-    <circle cx="3" cy="13" r="0.5" fill="currentColor" />
   </svg>
 );

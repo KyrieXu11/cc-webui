@@ -1,5 +1,11 @@
 import type { EffortLevel, PermissionMode } from "./settings";
 
+export type ImageAttachment = {
+  name?: string;
+  mediaType: string;
+  data: string;
+};
+
 export interface StreamChatParams {
   prompt: string;
   sessionId: string | null;
@@ -7,6 +13,7 @@ export interface StreamChatParams {
   model?: string;
   permissionMode?: PermissionMode;
   effort?: EffortLevel;
+  images?: ImageAttachment[];
   signal?: AbortSignal;
 }
 
@@ -23,6 +30,8 @@ export async function* streamChat(
       model: params.model || undefined,
       permissionMode: params.permissionMode || undefined,
       effort: params.effort || undefined,
+      images:
+        params.images && params.images.length > 0 ? params.images : undefined,
     }),
     signal: params.signal,
   });
