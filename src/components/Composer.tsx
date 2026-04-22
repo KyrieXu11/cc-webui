@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ModelSelector from "./ModelSelector";
 import ModeSelector from "./ModeSelector";
 import EffortSelector from "./EffortSelector";
+import SlashCommandMenu from "./SlashCommandMenu";
 import type { EffortLevel, PermissionMode } from "../lib/settings";
 import { uploadFiles, formatSize, type UploadedFile } from "../lib/upload";
 
@@ -18,6 +19,8 @@ interface Props {
   onEffortChange: (v: EffortLevel) => void;
   value: string;
   onChange: (v: string) => void;
+  slashCommands?: string[];
+  onPickSlash?: (cmd: string) => void;
 }
 
 export default function Composer({
@@ -31,12 +34,53 @@ export default function Composer({
   onEffortChange,
   value,
   onChange,
+  slashCommands = [],
+  onPickSlash,
 }: Props) {
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [slashIdx, setSlashIdx] = useState(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Slash menu is active when the textarea starts with "/" and the first
+  // token (the command name) is still being typed (no space yet).
+  const slashInfo = useMemo(() => {
+    if (!value.startsWith("/")) return null;
+    const firstSpace = value.indexOf(" ");
+    if (firstSpace >= 0) return null;
+    const query = value.slice(1);
+    const lower = query.toLowerCase();
+    const matches = slashCommands
+      .filter((c) =>
+        lower === "" ? true : c.toLowerCase().includes(lower)
+      )
+      .sort((a, b) => {
+        const ai = a.toLowerCase().indexOf(lower);
+        const bi = b.toLowerCase().indexOf(lower);
+        if (ai !== bi) return ai - bi;
+        return a.localeCompare(b);
+      })
+      .slice(0, 40);
+    return { query, matches };
+  }, [value, slashCommands]);
+
+  const slashOpen = !!slashInfo && slashInfo.matches.length > 0;
+
+  useEffect(() => {
+    setSlashIdx(0);
+  }, [slashInfo?.query]);
+
+  const pickSlash = (cmd: string) => {
+    setSlashIdx(0);
+    if (onPickSlash) {
+      onPickSlash(cmd);
+    } else {
+      onChange(`/${cmd} `);
+    }
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
 
   useEffect(() => {
     const el = taRef.current;
@@ -119,6 +163,15 @@ export default function Composer({
             : "border-line-strong focus-within:border-fg/25"
         }`}
       >
+        {slashOpen && slashInfo && (
+          <SlashCommandMenu
+            commands={slashInfo.matches}
+            activeIdx={slashIdx}
+            onPick={pickSlash}
+            onHover={setSlashIdx}
+            query={slashInfo.query}
+          />
+        )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-4 pt-3">
             {attachments.map((a, i) => (
@@ -161,6 +214,38 @@ export default function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
+            if (slashOpen && slashInfo) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSlashIdx((i) =>
+                  Math.min(i + 1, slashInfo.matches.length - 1)
+                );
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSlashIdx((i) => Math.max(i - 1, 0));
+                return;
+              }
+              if (
+                (e.key === "Enter" || e.key === "Tab") &&
+                !e.metaKey &&
+                !e.ctrlKey &&
+                !e.shiftKey
+              ) {
+                const pick = slashInfo.matches[slashIdx];
+                if (pick) {
+                  e.preventDefault();
+                  pickSlash(pick);
+                  return;
+                }
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onChange("");
+                return;
+              }
+            }
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
               submit();

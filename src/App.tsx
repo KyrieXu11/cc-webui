@@ -8,6 +8,8 @@ import Composer from "./components/Composer";
 import MessageList from "./components/MessageList";
 import HomeView from "./components/HomeView";
 import OpenProjectDialog from "./components/OpenProjectDialog";
+import SkillsPicker from "./components/SkillsPicker";
+import HelpModal from "./components/HelpModal";
 import type { ChatEvent } from "./lib/types";
 import { streamChat, type ImageAttachment } from "./lib/api";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
@@ -44,10 +46,21 @@ export default function App() {
     retryDelayMs: number;
     errorStatus: number | null;
   } | null>(null);
+  const [slashCommands, setSlashCommands] = useState<string[]>([]);
+  const [skills, setSkills] = useState<string[]>([]);
+  const [skillsPickerOpen, setSkillsPickerOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  const LOCAL_COMMANDS = ["skills", "help", "clear", "exit"];
+  const mergedSlashCommands = [
+    ...LOCAL_COMMANDS,
+    ...slashCommands.filter((c) => !LOCAL_COMMANDS.includes(c)),
+  ];
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const prevScrollHeight = useRef<number | null>(null);
   const forceScrollBottom = useRef(false);
+  const didRestore = useRef(false);
 
   useEffect(() => {
     saveSettings(settings);
@@ -60,6 +73,75 @@ export default function App() {
   useEffect(() => {
     getHome().then(setHome).catch(() => {});
   }, []);
+
+  // Restore last-open project (+ session) on reload.
+  useEffect(() => {
+    if (didRestore.current) return;
+    didRestore.current = true;
+    try {
+      const raw = localStorage.getItem("cc-webui:lastProject");
+      if (!raw) return;
+      const saved = JSON.parse(raw) as {
+        cwd?: string;
+        sessionId?: string | null;
+      };
+      if (!saved?.cwd) return;
+      setProjectCwd(saved.cwd);
+      setSidebarOpen(true);
+      if (saved.sessionId) {
+        setSessionId(saved.sessionId);
+        setLoadingSession(true);
+        getSessionMessages(saved.sessionId, saved.cwd)
+          .then((msgs) => {
+            forceScrollBottom.current = true;
+            setAllEvents(sessionMessagesToEvents(msgs));
+          })
+          .catch(() => setAllEvents([]))
+          .finally(() => setLoadingSession(false));
+      }
+    } catch {
+      /* ignore corrupt saved state */
+    }
+  }, []);
+
+  // Persist current project + session so refresh lands back in place.
+  useEffect(() => {
+    if (!didRestore.current) return;
+    try {
+      if (!projectCwd) {
+        localStorage.removeItem("cc-webui:lastProject");
+      } else {
+        localStorage.setItem(
+          "cc-webui:lastProject",
+          JSON.stringify({ cwd: projectCwd, sessionId })
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [projectCwd, sessionId]);
+
+  useEffect(() => {
+    if (!projectCwd) return;
+    let cancelled = false;
+    const qs = new URLSearchParams();
+    qs.set("cwd", projectCwd);
+    fetch(`/api/meta?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data.slashCommands) && data.slashCommands.length > 0) {
+          setSlashCommands(data.slashCommands);
+        }
+        if (Array.isArray(data.skills) && data.skills.length > 0) {
+          setSkills(data.skills);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectCwd]);
 
   const toggleStep = (id: string) => {
     setExpandedSteps((prev) => {
@@ -246,6 +328,14 @@ export default function App() {
           });
           continue;
         }
+        if (msg?.type === "system" && msg.subtype === "init") {
+          if (Array.isArray(msg.slash_commands)) {
+            setSlashCommands(msg.slash_commands);
+          }
+          if (Array.isArray(msg.skills)) {
+            setSkills(msg.skills);
+          }
+        }
         setRetryInfo((cur) => (cur ? null : cur));
         setAllEvents((prev) =>
           applySDKMessage(prev, msg, (id) => setSessionId(id))
@@ -275,6 +365,30 @@ export default function App() {
   };
 
   const inProject = !!projectCwd;
+
+  const handlePickSlash = (cmd: string) => {
+    if (cmd === "skills") {
+      setSkillsPickerOpen(true);
+      setComposerValue("");
+      return;
+    }
+    if (cmd === "help") {
+      setHelpOpen(true);
+      setComposerValue("");
+      return;
+    }
+    if (cmd === "clear") {
+      handleNewChat();
+      setComposerValue("");
+      return;
+    }
+    if (cmd === "exit") {
+      goHome();
+      setComposerValue("");
+      return;
+    }
+    setComposerValue(`/${cmd} `);
+  };
 
   const pickFile = (_abs: string, rel: string) => {
     const token = `@${rel}`;
@@ -379,6 +493,8 @@ export default function App() {
                   onEffortChange={updateEffort}
                   value={composerValue}
                   onChange={setComposerValue}
+                  slashCommands={mergedSlashCommands}
+                  onPickSlash={handlePickSlash}
                 />
               </div>
             </div>
@@ -400,6 +516,17 @@ export default function App() {
           onOpen={openProject}
         />
       )}
+      {skillsPickerOpen && (
+        <SkillsPicker
+          skills={skills}
+          onClose={() => setSkillsPickerOpen(false)}
+          onPick={(s) => {
+            setSkillsPickerOpen(false);
+            setComposerValue(`/${s} `);
+          }}
+        />
+      )}
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
