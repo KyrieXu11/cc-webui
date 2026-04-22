@@ -6,6 +6,17 @@ export type TreeEntry = {
   type: "file" | "dir";
 };
 
+export async function readFile(
+  absPath: string
+): Promise<{ content: string; truncated: boolean } | null> {
+  const qs = new URLSearchParams({ path: absPath });
+  const res = await fetch(`/api/fs/read?${qs.toString()}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data?.content && data.content !== "") return null;
+  return { content: data.content, truncated: !!data.truncated };
+}
+
 export async function listTree(absPath: string): Promise<TreeEntry[]> {
   const qs = new URLSearchParams({ path: absPath });
   const res = await fetch(`/api/fs/tree?${qs.toString()}`);

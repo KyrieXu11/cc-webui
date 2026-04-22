@@ -46,13 +46,19 @@ async function readMdNames(dir: string): Promise<string[]> {
   }
 }
 
-async function scanClaudeCommands(): Promise<Scan> {
-  const home = os.homedir();
-  const root = path.join(home, ".claude");
-  const commandSet = new Set<string>(BUILTIN_COMMANDS);
-  const skillSet = new Set<string>();
+function expandHome(p: string | undefined): string | undefined {
+  if (!p) return undefined;
+  if (p === "~") return os.homedir();
+  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
 
-  // User-level skills and commands
+// Scan a `.claude/` root for user-style commands + skills (no plugin prefix).
+async function scanLocalClaudeRoot(
+  root: string,
+  commandSet: Set<string>,
+  skillSet: Set<string>
+) {
   for (const name of await readDirs(path.join(root, "skills"))) {
     commandSet.add(name);
     skillSet.add(name);
@@ -60,9 +66,27 @@ async function scanClaudeCommands(): Promise<Scan> {
   for (const name of await readMdNames(path.join(root, "commands"))) {
     commandSet.add(name);
   }
+}
 
-  // Plugin-level skills and commands
-  const pluginsCache = path.join(root, "plugins", "cache");
+async function scanClaudeCommands(cwd?: string): Promise<Scan> {
+  const home = os.homedir();
+  const homeRoot = path.join(home, ".claude");
+  const commandSet = new Set<string>(BUILTIN_COMMANDS);
+  const skillSet = new Set<string>();
+
+  // Global user-level skills and commands
+  await scanLocalClaudeRoot(homeRoot, commandSet, skillSet);
+
+  // Project-level overrides / additions at <cwd>/.claude
+  if (cwd) {
+    const projectRoot = path.join(cwd, ".claude");
+    if (projectRoot !== homeRoot) {
+      await scanLocalClaudeRoot(projectRoot, commandSet, skillSet);
+    }
+  }
+
+  // Plugin-level skills and commands (global only)
+  const pluginsCache = path.join(homeRoot, "plugins", "cache");
   const vendors = await readDirs(pluginsCache);
   for (const vendor of vendors) {
     const vendorPath = path.join(pluginsCache, vendor);
@@ -93,15 +117,18 @@ type CacheEntry = {
   ts: number;
   scan: Scan;
 };
-let cache: CacheEntry | null = null;
+const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60 * 1000;
 
 metaRoute.get("/", async (c) => {
-  if (cache && Date.now() - cache.ts < CACHE_TTL_MS) {
-    return c.json({ ...cache.scan, cached: true });
+  const cwd = expandHome(c.req.query("cwd") || process.env.CC_WEBUI_CWD);
+  const key = cwd ?? "__global__";
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return c.json({ ...cached.scan, cached: true });
   }
-  const scan = await scanClaudeCommands();
-  cache = { ts: Date.now(), scan };
+  const scan = await scanClaudeCommands(cwd);
+  cache.set(key, { ts: Date.now(), scan });
   return c.json({ ...scan, cached: false });
 });
 

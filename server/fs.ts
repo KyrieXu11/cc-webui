@@ -88,6 +88,36 @@ const TREE_IGNORE = new Set([
   ".DS_Store",
 ]);
 
+const READ_MAX_BYTES = 256 * 1024; // 256 KB cap for diff-context reads
+
+fsRoute.get("/read", async (c) => {
+  const p = c.req.query("path");
+  if (!p) return c.json({ error: "path required" }, 400);
+  try {
+    const stat = await fs.stat(p);
+    if (!stat.isFile()) return c.json({ error: "not a file" }, 400);
+    const truncated = stat.size > READ_MAX_BYTES;
+    const handle = await fs.open(p, "r");
+    try {
+      const buf = Buffer.alloc(Math.min(stat.size, READ_MAX_BYTES));
+      await handle.read(buf, 0, buf.length, 0);
+      const content = buf.toString("utf-8");
+      return c.json({
+        content,
+        size: stat.size,
+        truncated,
+      });
+    } finally {
+      await handle.close();
+    }
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      404
+    );
+  }
+});
+
 fsRoute.get("/tree", async (c) => {
   const dir = c.req.query("path");
   if (!dir) return c.json({ error: "path required" }, 400);

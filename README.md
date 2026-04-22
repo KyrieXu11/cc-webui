@@ -31,98 +31,53 @@
 - Node 20+
 - 本机已安装并登录 `claude` CLI（`claude --version` 能通过）
 
-## 安装
+## Installation
 
-```bash
-npm install
+### For Humans
+
+把下面这段原样粘给你的 LLM agent（Claude Code / Cursor / 其他都行），让它替你把
+项目跑起来 —— 路径参数你在它弹出的 `AskUserQuestion` 里选就好，不用手敲命令：
+
+```
+Install and configure cc-webui by following the instructions here:
+https://raw.githubusercontent.com/KyrieXu11/cc-webui/main/docs/install.md
 ```
 
-## 运行
+也可以翻 [安装指南](docs/install.md) 手动照做，但命令行手配 `PROJECT_DIR` /
+`PORT` 参数容易打错，让 agent 来省事。
+
+### For LLM Agents
+
+拉指南照着跑：
+
+```bash
+curl -s https://raw.githubusercontent.com/KyrieXu11/cc-webui/main/docs/install.md
+```
+
+指南里会让你先用 `AskUserQuestion` 问用户两件事（项目目录、端口冲突策略），
+再调 `scripts/deploy.sh` 完成 clone / 装依赖 / 启动 / 等就绪 / 反馈状态一整套。
+脚本每一步都幂等，可重跑。
+
+### For Manual
+
+不想折腾 agent、不想跑脚本的话，三条命令手动来：
+
+```bash
+git clone https://github.com/KyrieXu11/cc-webui.git
+cd cc-webui
+npm install
+```
 
 ```bash
 # 一键起（生产模式，单端口 :8787）
 npm start
 
-# 开发模式（vite :5173 + api :8787，前端 HMR）
+# 或开发模式（vite :5173 + api :8787，前端 HMR）
 npm run dev
 ```
 
-`npm start` 先 `vite build` 再用 Hono 同时托管 `dist/` 和 `/api/*`，浏览器打开 http://localhost:8787 就能用。
-
-## AI Assistant 自动部署
-
-> 这一节是写给 AI 助手（Claude Code / Codex / 其他 agent）的指令，不是给人读的。
-> 用户让你部署这个项目时直接按下面的流程走。
-
-### Step 1 — 先问用户，再动手
-
-**不要凭猜测选路径。** 用 `AskUserQuestion` 或等价的交互工具先问清楚以下两点，
-所有答案都得从用户那里拿到：
-
-1. **项目目录在哪里？** 给用户三个候选：
-   - `A. 已经 clone 到本地，路径是：___`（用户填绝对路径）
-   - `B. 还没 clone，请帮我 clone 到：___`（用户填目标路径）
-   - `C. 在当前 shell 的 `pwd` 下`
-2. **发现端口 `8787` 被占用时怎么办？**
-   - `A. 杀掉旧进程后启动`
-   - `B. 改用另一个端口（用户填）`
-   - `C. 不要启动，让我自己排查`
-
-拿到答案后把项目路径存成 `$PROJECT_DIR`、端口存成 `$PORT`（默认 `8787`）。
-
-### Step 2 — 幂等执行
-
-```bash
-PROJECT_DIR="${PROJECT_DIR:?ask user first}"
-PORT="${PORT:-8787}"
-
-# 1. 如果目录不存在且用户选了 clone，执行 clone；否则 cd 进去
-if [ ! -d "$PROJECT_DIR/.git" ]; then
-  git clone https://github.com/KyrieXu11/cc-webui.git "$PROJECT_DIR" \
-    || { echo "clone failed; if SSH preferred try git@github.com:KyrieXu11/cc-webui.git"; exit 1; }
-fi
-cd "$PROJECT_DIR" || exit 1
-
-# 2. 校验前置
-node --version | grep -E "^v(2[0-9]|[3-9][0-9])\." >/dev/null \
-  || { echo "need Node 20+ (got $(node --version))"; exit 1; }
-claude --version >/dev/null 2>&1 \
-  || { echo "claude CLI not installed or not logged in; run 'claude' interactively first"; exit 1; }
-
-# 3. 依赖（只在缺 node_modules 时跑）
-[ -d node_modules ] || npm ci
-
-# 4. 处理端口占用（按用户 Step 1 的第二问来决定是否跑这一步）
-lsof -ti :"$PORT" 2>/dev/null | xargs -r kill -9
-
-# 5. 构建 + 后台启动
-PORT="$PORT" nohup npm start >/tmp/cc-webui.log 2>&1 &
-
-# 6. 等待就绪（最多 15 秒）
-for i in $(seq 1 15); do
-  curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/" 2>/dev/null | grep -q 200 && break
-  sleep 1
-done
-
-# 7. 验证
-curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:$PORT/"
-```
-
-### Step 3 — 向用户反馈
-
-跑完后明确返回：
-
-- **服务状态**：`http 200` = 正常；其他码或连不上 = 读 `/tmp/cc-webui.log` 最后 30 行给用户
-- **访问 URL**：`http://localhost:$PORT`
-- **远程访问提示**（如果检测到用户在 SSH 会话里）：
-  - SSH 端口转发：`ssh -L $PORT:127.0.0.1:$PORT user@host`
-  - 或建议 Tailscale 之类的 mesh VPN
-
-### 停止服务
-
-```bash
-lsof -ti :"$PORT" | xargs -r kill -9
-```
+`npm start` 先 `vite build` 再用 Hono 同时托管 `dist/` 和 `/api/*`，
+浏览器打开 http://localhost:8787 就能用。
 
 ## 环境变量
 
@@ -134,51 +89,12 @@ lsof -ti :"$PORT" | xargs -r kill -9
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
 
-## 目录
-
-```
-cc-webui/
-├── server/
-│   ├── index.ts        # Hono 入口 + 生产静态托管
-│   ├── chat.ts         # /api/chat SSE：包装 SDK query()，串 canUseTool；图片走 async iterable 分支
-│   ├── fs.ts           # /api/fs/*：scan / tree / recents
-│   ├── sessions.ts     # /api/sessions/*：list / messages / delete
-│   ├── upload.ts       # /api/upload：multipart 落盘 + 回传 MIME
-│   └── permission.ts   # /api/permission/:id：用 Map<id, Promise> 串权限回调，带超时
-├── src/
-│   ├── App.tsx
-│   ├── lib/
-│   │   ├── api.ts        # 浏览器侧 SSE 解析 + 图片附件打包
-│   │   ├── processor.ts  # SDK 消息 → 前端 ChatEvent 状态机（流式 + 历史回放复用，含 thinking / tool_use / permission_request）
-│   │   ├── sessions.ts
-│   │   ├── settings.ts   # localStorage 持久化，含主题、effort 与模型联动
-│   │   ├── upload.ts     # 客户端 FileReader 读 base64（仅图片）
-│   │   ├── permission.ts
-│   │   ├── fs.ts
-│   │   └── types.ts
-│   └── components/
-│       ├── Header.tsx / HeaderSearch.tsx
-│       ├── Sidebar.tsx / ProjectSidebar.tsx / EmptyProjectSidebar.tsx
-│       ├── Composer.tsx
-│       ├── MessageList.tsx
-│       ├── UserBubble.tsx / AssistantText.tsx / SummaryCard.tsx
-│       ├── StepTimeline.tsx / EditDiff.tsx
-│       ├── ThinkingBlock.tsx
-│       ├── PermissionCard.tsx
-│       ├── FileExplorer.tsx
-│       ├── OpenProjectDialog.tsx
-│       ├── ModelSelector.tsx / ModeSelector.tsx / EffortSelector.tsx
-│       └── HomeView.tsx / Popover.tsx
-├── public/favicon.png
-├── index.html
-├── vite.config.ts
-└── package.json
-```
-
 ## 键盘快捷键
 
+- `↵` — 发送消息
+- `⇧↵` — 换行
 - `Ctrl+O` — 全局展开 / 收起所有 tool_call + thinking 详情
-- `⌘↵ / Ctrl↵` — 在 composer 里发送消息
+- `/` — 调出斜杠命令 / skill 菜单
 - `Backspace`（光标在 `@path` 末尾） — 整段删除该引用，附带一个相邻空格
 - `↑ ↓ ↵` — 在项目选择对话框 / header 搜索里导航
 - `Esc` — 关闭弹窗 / 搜索下拉

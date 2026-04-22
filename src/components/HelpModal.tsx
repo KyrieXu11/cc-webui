@@ -5,7 +5,8 @@ interface Props {
 }
 
 const SHORTCUTS: Array<[string, string]> = [
-  ["⌘↵ / Ctrl↵", "发送消息"],
+  ["↵", "发送消息"],
+  ["⇧↵", "换行"],
   ["Ctrl+O", "展开 / 收起所有 tool_call + thinking"],
   ["/", "调出斜杠命令 / skill 菜单"],
   ["↑ ↓ ↵", "在搜索 / 菜单 / 对话框中导航"],

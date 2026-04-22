@@ -227,18 +227,11 @@ export default function Composer({
                 setSlashIdx((i) => Math.max(i - 1, 0));
                 return;
               }
-              if (
-                (e.key === "Enter" || e.key === "Tab") &&
-                !e.metaKey &&
-                !e.ctrlKey &&
-                !e.shiftKey
-              ) {
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
                 const pick = slashInfo.matches[slashIdx];
-                if (pick) {
-                  e.preventDefault();
-                  pickSlash(pick);
-                  return;
-                }
+                if (pick) pickSlash(pick);
+                return;
               }
               if (e.key === "Escape") {
                 e.preventDefault();
@@ -246,7 +239,12 @@ export default function Composer({
                 return;
               }
             }
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.altKey &&
+              !e.nativeEvent.isComposing
+            ) {
               e.preventDefault();
               submit();
               return;
@@ -288,7 +286,9 @@ export default function Composer({
             }
           }}
           placeholder={
-            dragOver ? "松开上传文件" : "输入追问或补充说明…    ⌘↵ 发送"
+            dragOver
+              ? "松开上传文件"
+              : "输入追问或补充说明…    ↵ 发送 · ⇧↵ 换行"
           }
           rows={1}
           className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-[1.6] text-fg placeholder:text-subtle focus:outline-none"
