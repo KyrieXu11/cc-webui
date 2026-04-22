@@ -3,10 +3,15 @@ import { listTree, type TreeEntry } from "../lib/fs";
 
 interface Props {
   cwd: string;
-  onPickFile: (absPath: string, relPath: string) => void;
+  onInsertFile: (absPath: string, relPath: string) => void;
+  onPreviewFile: (absPath: string, relPath: string) => void;
 }
 
-export default function FileExplorer({ cwd, onPickFile }: Props) {
+export default function FileExplorer({
+  cwd,
+  onInsertFile,
+  onPreviewFile,
+}: Props) {
   const [rootEntries, setRootEntries] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,10 +27,11 @@ export default function FileExplorer({ cwd, onPickFile }: Props) {
     };
   }, [cwd]);
 
-  const pickFile = (abs: string) => {
-    const rel = abs.startsWith(cwd + "/") ? abs.slice(cwd.length + 1) : abs;
-    onPickFile(abs, rel);
-  };
+  const toRel = (abs: string) =>
+    abs.startsWith(cwd + "/") ? abs.slice(cwd.length + 1) : abs;
+
+  const insertFile = (abs: string) => onInsertFile(abs, toRel(abs));
+  const previewFile = (abs: string) => onPreviewFile(abs, toRel(abs));
 
   return (
     <aside className="w-[280px] shrink-0 border-l border-line flex flex-col bg-canvas">
@@ -49,14 +55,16 @@ export default function FileExplorer({ cwd, onPickFile }: Props) {
                 key={e.path}
                 entry={e}
                 depth={0}
-                onPickFile={pickFile}
+                onInsertFile={insertFile}
+                onPreviewFile={previewFile}
               />
             ) : (
               <FileRow
                 key={e.path}
                 entry={e}
                 depth={0}
-                onPickFile={pickFile}
+                onInsertFile={insertFile}
+                onPreviewFile={previewFile}
               />
             )
           )
@@ -69,11 +77,13 @@ export default function FileExplorer({ cwd, onPickFile }: Props) {
 function DirRow({
   entry,
   depth,
-  onPickFile,
+  onInsertFile,
+  onPreviewFile,
 }: {
   entry: TreeEntry;
   depth: number;
-  onPickFile: (abs: string) => void;
+  onInsertFile: (abs: string) => void;
+  onPreviewFile: (abs: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
@@ -119,14 +129,16 @@ function DirRow({
                 key={c.path}
                 entry={c}
                 depth={depth + 1}
-                onPickFile={onPickFile}
+                onInsertFile={onInsertFile}
+                onPreviewFile={onPreviewFile}
               />
             ) : (
               <FileRow
                 key={c.path}
                 entry={c}
                 depth={depth + 1}
-                onPickFile={onPickFile}
+                onInsertFile={onInsertFile}
+                onPreviewFile={onPreviewFile}
               />
             )
           )}
@@ -139,18 +151,37 @@ function DirRow({
 function FileRow({
   entry,
   depth,
-  onPickFile,
+  onInsertFile,
+  onPreviewFile,
 }: {
   entry: TreeEntry;
   depth: number;
-  onPickFile: (abs: string) => void;
+  onInsertFile: (abs: string) => void;
+  onPreviewFile: (abs: string) => void;
 }) {
+  const onClick = (e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      onPreviewFile(entry.path);
+      return;
+    }
+    onInsertFile(entry.path);
+  };
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      onPreviewFile(entry.path);
+    }
+  };
+
   return (
     <button
-      onClick={() => onPickFile(entry.path)}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
       className="w-full flex items-center gap-1.5 py-1 pr-2 text-left text-muted hover:text-fg hover:bg-fg/[0.025] transition-colors rounded-sm"
       style={{ paddingLeft: 8 + depth * 12 + 10 }}
-      title={entry.path}
+      title={`${entry.path}\n(单击插入 · Ctrl/⌘+单击预览)`}
     >
       <FileIcon />
       <span className="font-mono text-[12px] truncate">{entry.name}</span>

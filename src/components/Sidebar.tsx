@@ -3,6 +3,7 @@ import type { Theme } from "../lib/settings";
 interface Props {
   onToggleSidebar?: () => void;
   onOpenProject?: () => void;
+  onOpenHelp?: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -10,6 +11,7 @@ interface Props {
 export default function Sidebar({
   onToggleSidebar,
   onOpenProject,
+  onOpenHelp,
   theme,
   onToggleTheme,
 }: Props) {
@@ -33,17 +35,40 @@ export default function Sidebar({
           <PlusIcon />
         </button>
       </div>
-      <button
-        onClick={onToggleTheme}
-        aria-label={theme === "dark" ? "切换到日间" : "切换到夜间"}
-        title={theme === "dark" ? "切换到日间" : "切换到夜间"}
-        className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
-      >
-        {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-      </button>
+      <div className="flex flex-col items-center gap-1">
+        <button
+          onClick={onOpenHelp}
+          aria-label="操作手册"
+          title="操作手册（快捷键说明）"
+          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+        >
+          <HelpIcon />
+        </button>
+        <button
+          onClick={onToggleTheme}
+          aria-label={theme === "dark" ? "切换到日间" : "切换到夜间"}
+          title={theme === "dark" ? "切换到日间" : "切换到夜间"}
+          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+        >
+          {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+        </button>
+      </div>
     </aside>
   );
 }
+
+const HelpIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+    <circle cx="8" cy="8" r="6.3" stroke="currentColor" strokeWidth="1.3" />
+    <path
+      d="M6 6.2C6 5 6.9 4.3 8 4.3C9.1 4.3 10 5 10 6.2C10 7 9.5 7.4 8.8 7.8C8.2 8.1 8 8.4 8 9"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
+    <circle cx="8" cy="11.3" r="0.75" fill="currentColor" />
+  </svg>
+);
 
 const SidebarIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none">

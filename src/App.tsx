@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import ProjectSidebar from "./components/ProjectSidebar";
 import EmptyProjectSidebar from "./components/EmptyProjectSidebar";
 import FileExplorer from "./components/FileExplorer";
+import FilePreviewWindow from "./components/FilePreviewWindow";
 import Header from "./components/Header";
 import Composer from "./components/Composer";
 import MessageList from "./components/MessageList";
@@ -19,7 +20,8 @@ import {
   type PermissionMode,
   type Settings,
 } from "./lib/settings";
-import { addRecent, getHome } from "./lib/fs";
+import { addRecent, getHome, readFile } from "./lib/fs";
+import { isImageFile, isTextFile, rawFileUrl } from "./lib/filepreview";
 import { getSessionMessages, type SessionSummary } from "./lib/sessions";
 import { sendPermission } from "./lib/permission";
 
@@ -299,11 +301,8 @@ export default function App() {
     const userEvt: ChatEvent = {
       id: `u-${Date.now()}`,
       type: "user",
-      text:
-        text ||
-        (images && images.length > 0
-          ? `[${images.length} 张图片]`
-          : ""),
+      text,
+      images: images && images.length > 0 ? images : undefined,
     };
     setAllEvents((prev) => [...prev, userEvt]);
     setVisibleCount((c) => Math.max(c, INITIAL_VISIBLE));
@@ -390,7 +389,7 @@ export default function App() {
     setComposerValue(`/${cmd} `);
   };
 
-  const pickFile = (_abs: string, rel: string) => {
+  const insertFile = (_abs: string, rel: string) => {
     const token = `@${rel}`;
     setComposerValue((v) => {
       const trimmed = v.trimEnd();
@@ -400,11 +399,97 @@ export default function App() {
     });
   };
 
+  const [preview, setPreview] = useState<{
+    absPath: string;
+    relPath: string;
+    kind: "text" | "image";
+    content: string;
+    imageUrl: string | null;
+    truncated: boolean;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+
+  const previewFile = async (abs: string, rel: string) => {
+    const name = abs.slice(abs.lastIndexOf("/") + 1);
+
+    if (isImageFile(name)) {
+      setPreview({
+        absPath: abs,
+        relPath: rel,
+        kind: "image",
+        content: "",
+        imageUrl: rawFileUrl(abs),
+        truncated: false,
+        loading: false,
+        error: null,
+      });
+      return;
+    }
+
+    if (!isTextFile(name)) {
+      setPreview({
+        absPath: abs,
+        relPath: rel,
+        kind: "text",
+        content: "",
+        imageUrl: null,
+        truncated: false,
+        loading: false,
+        error: `不支持预览：${name} 不是已知的文本或图片文件类型`,
+      });
+      return;
+    }
+    setPreview({
+      absPath: abs,
+      relPath: rel,
+      kind: "text",
+      content: "",
+      imageUrl: null,
+      truncated: false,
+      loading: true,
+      error: null,
+    });
+    try {
+      const result = await readFile(abs);
+      if (!result) {
+        setPreview((cur) =>
+          cur && cur.absPath === abs
+            ? { ...cur, loading: false, error: "读取失败" }
+            : cur
+        );
+        return;
+      }
+      setPreview((cur) =>
+        cur && cur.absPath === abs
+          ? {
+              ...cur,
+              content: result.content,
+              truncated: result.truncated,
+              loading: false,
+              error: null,
+            }
+          : cur
+      );
+    } catch (err) {
+      setPreview((cur) =>
+        cur && cur.absPath === abs
+          ? {
+              ...cur,
+              loading: false,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          : cur
+      );
+    }
+  };
+
   return (
     <div className="flex h-full bg-canvas">
       <Sidebar
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         onOpenProject={() => setDialogOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
         theme={settings.theme}
         onToggleTheme={() =>
           setSettings((s) => ({
@@ -508,7 +593,27 @@ export default function App() {
         )}
       </div>
       {inProject && filesOpen && (
-        <FileExplorer cwd={projectCwd} onPickFile={pickFile} />
+        <FileExplorer
+          cwd={projectCwd}
+          onInsertFile={insertFile}
+          onPreviewFile={previewFile}
+        />
+      )}
+      {preview && (
+        <FilePreviewWindow
+          absPath={preview.absPath}
+          relPath={preview.relPath}
+          kind={preview.kind}
+          content={preview.content}
+          imageUrl={preview.imageUrl}
+          truncated={preview.truncated}
+          loading={preview.loading}
+          error={preview.error}
+          onClose={() => setPreview(null)}
+          onInsert={() => {
+            insertFile(preview.absPath, preview.relPath);
+          }}
+        />
       )}
       {dialogOpen && (
         <OpenProjectDialog

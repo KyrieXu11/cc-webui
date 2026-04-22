@@ -68,12 +68,22 @@ chat.post("/chat", async (c) => {
     return c.json({ error: "prompt or images required" }, 400);
   }
 
+  const reqId = randomUUID().slice(0, 8);
+  const t0 = Date.now();
+  const elapsed = () => `${((Date.now() - t0) / 1000).toFixed(2)}s`;
+  console.log(
+    `[chat ${reqId}] start resume=${sessionId ?? "-"} cwd=${cwd ?? "-"}` +
+      ` model=${model ?? "default"} mode=${permissionMode ?? "default"}` +
+      ` images=${images.length} prompt=${JSON.stringify(prompt.slice(0, 80))}`
+  );
+
   return streamSSE(c, async (stream) => {
     let aborted = false;
     const ac = new AbortController();
     stream.onAbort(() => {
       aborted = true;
       ac.abort();
+      console.log(`[chat ${reqId}] SSE aborted at ${elapsed()}`);
     });
 
     try {
@@ -126,16 +136,28 @@ chat.post("/chat", async (c) => {
         },
       });
 
+      let msgCount = 0;
       for await (const msg of response) {
         if (aborted) break;
+        msgCount++;
+        const tag =
+          (msg as any).type +
+          ((msg as any).subtype ? `:${(msg as any).subtype}` : "");
+        if (msgCount <= 20 || msgCount % 50 === 0) {
+          console.log(`[chat ${reqId}] msg #${msgCount} ${tag} @${elapsed()}`);
+        }
         await stream.writeSSE({
           event: msg.type,
           data: JSON.stringify(msg),
         });
       }
 
+      console.log(
+        `[chat ${reqId}] done aborted=${aborted} msgs=${msgCount} in ${elapsed()}`
+      );
       await stream.writeSSE({ event: "done", data: "" });
     } catch (err) {
+      console.error(`[chat ${reqId}] ERROR at ${elapsed()}:`, err);
       await stream.writeSSE({
         event: "error",
         data: JSON.stringify({

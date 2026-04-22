@@ -74,10 +74,18 @@ export default function MessageList({
         const ev = b.event;
         switch (ev.type) {
           case "user":
-            return <UserBubble key={ev.id} text={ev.text} delay={0} />;
+            return (
+              <UserBubble
+                key={ev.id}
+                text={ev.text}
+                images={ev.images}
+                delay={0}
+              />
+            );
           case "assistant":
             return <AssistantText key={ev.id} text={ev.text} delay={0} />;
           case "thinking":
+            if (!ev.text.trim()) return null;
             return (
               <ThinkingBlock
                 key={ev.id}

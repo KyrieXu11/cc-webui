@@ -1,4 +1,4 @@
-import type { ChatEvent } from "./types";
+import type { ChatEvent, ImageAttachment } from "./types";
 import type { SessionMessage } from "./sessions";
 
 type OnSession = (id: string) => void;
@@ -152,6 +152,21 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
       if (typeof c === "string" && c.trim()) {
         events.push({ id: `u-${m.uuid}`, type: "user", text: c });
       } else if (Array.isArray(c)) {
+        const images: ImageAttachment[] = [];
+        for (const b of c) {
+          if (b?.type === "image" && b.source?.type === "base64") {
+            images.push({
+              mediaType: b.source.media_type ?? "image/png",
+              data: b.source.data ?? "",
+            });
+          }
+        }
+        let attachedImages = false;
+        const attachIfFirst = () => {
+          if (images.length === 0 || attachedImages) return undefined;
+          attachedImages = true;
+          return images;
+        };
         for (const b of c) {
           if (b?.type === "tool_result") {
             const idx = events.findIndex(
@@ -172,8 +187,17 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
               id: `u-${m.uuid}-${events.length}`,
               type: "user",
               text: b.text,
+              images: attachIfFirst(),
             });
           }
+        }
+        if (images.length > 0 && !attachedImages) {
+          events.push({
+            id: `u-${m.uuid}-img`,
+            type: "user",
+            text: "",
+            images,
+          });
         }
       }
     } else if (m.type === "assistant") {

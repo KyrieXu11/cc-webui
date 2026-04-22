@@ -1,14 +1,29 @@
 import { useEffect, useState } from "react";
 import { WORKING_WORDS, pickFrom } from "../lib/thinking-words";
 
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m${s.toString().padStart(2, "0")}s`;
+}
+
 export default function PendingHint() {
   const [label, setLabel] = useState(() => pickFrom(WORKING_WORDS));
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    const t = setInterval(() => {
+    const start = Date.now();
+    const labelTimer = setInterval(() => {
       setLabel((cur) => pickFrom(WORKING_WORDS, cur));
     }, 1800);
-    return () => clearInterval(t);
+    const tickTimer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => {
+      clearInterval(labelTimer);
+      clearInterval(tickTimer);
+    };
   }, []);
 
   return (
@@ -33,6 +48,9 @@ export default function PendingHint() {
       </svg>
       <span className="font-mono text-[11.5px] text-muted tracking-[0.02em]">
         {label}…
+      </span>
+      <span className="font-mono text-[11px] text-subtle tabular-nums">
+        · {formatElapsed(elapsed)}
       </span>
     </div>
   );

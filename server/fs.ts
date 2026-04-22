@@ -89,6 +89,19 @@ const TREE_IGNORE = new Set([
 ]);
 
 const READ_MAX_BYTES = 256 * 1024; // 256 KB cap for diff-context reads
+const RAW_MAX_BYTES = 10 * 1024 * 1024; // 10 MB cap for image preview
+
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+};
 
 fsRoute.get("/read", async (c) => {
   const p = c.req.query("path");
@@ -110,6 +123,33 @@ fsRoute.get("/read", async (c) => {
     } finally {
       await handle.close();
     }
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      404
+    );
+  }
+});
+
+fsRoute.get("/raw", async (c) => {
+  const p = c.req.query("path");
+  if (!p) return c.json({ error: "path required" }, 400);
+  try {
+    const stat = await fs.stat(p);
+    if (!stat.isFile()) return c.json({ error: "not a file" }, 400);
+    if (stat.size > RAW_MAX_BYTES) {
+      return c.json({ error: `file too large (> ${RAW_MAX_BYTES} bytes)` }, 413);
+    }
+    const ext = path.extname(p).slice(1).toLowerCase();
+    const mime = IMAGE_MIME[ext] ?? "application/octet-stream";
+    const data = await fs.readFile(p);
+    return new Response(data, {
+      headers: {
+        "content-type": mime,
+        "cache-control": "private, max-age=60",
+        "content-length": String(stat.size),
+      },
+    });
   } catch (err) {
     return c.json(
       { error: err instanceof Error ? err.message : String(err) },

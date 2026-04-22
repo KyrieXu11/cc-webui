@@ -10,8 +10,16 @@ const SHORTCUTS: Array<[string, string]> = [
   ["Ctrl+O", "展开 / 收起所有 tool_call + thinking"],
   ["/", "调出斜杠命令 / skill 菜单"],
   ["↑ ↓ ↵", "在搜索 / 菜单 / 对话框中导航"],
-  ["Esc", "关闭弹窗 / 菜单"],
+  ["Esc", "关闭弹窗 / 菜单 / 预览浮窗"],
   ["Backspace（@path 末尾）", "整段删除引用"],
+];
+
+const FILE_TREE: Array<[string, string]> = [
+  ["单击文件", "把 @相对路径 插入到对话框"],
+  ["Ctrl / ⌘ + 单击", "打开文件预览浮窗"],
+  ["浮窗标题栏拖拽", "移动预览浮窗"],
+  ["浮窗右下角拖拽", "调整预览浮窗大小"],
+  ["浮窗 @ 插入按钮", "把当前预览文件插入对话框"],
 ];
 
 const LOCAL_COMMANDS: Array<[string, string]> = [
@@ -65,6 +73,24 @@ export default function HelpModal({ onClose }: Props) {
             </h4>
             <dl className="text-[13px]">
               {SHORTCUTS.map(([key, desc]) => (
+                <div
+                  key={key}
+                  className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
+                >
+                  <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">
+                    {key}
+                  </dt>
+                  <dd className="text-muted">{desc}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <section>
+            <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
+              文件树 & 预览
+            </h4>
+            <dl className="text-[13px]">
+              {FILE_TREE.map(([key, desc]) => (
                 <div
                   key={key}
                   className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"

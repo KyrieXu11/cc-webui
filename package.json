@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n web,api -c magenta,cyan \"vite\" \"tsx watch server/index.ts\"",
+    "dev": "concurrently -k -n web,api -c magenta,cyan \"vite\" \"PORT=8788 VITE_DEV_PORT=8787 tsx watch server/index.ts\"",
     "build": "vite build",
     "start": "npm run build && NODE_ENV=production tsx server/index.ts",
     "serve": "npm start",

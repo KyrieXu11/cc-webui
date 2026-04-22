@@ -1,10 +1,7 @@
 import type { EffortLevel, PermissionMode } from "./settings";
+import type { ImageAttachment } from "./types";
 
-export type ImageAttachment = {
-  name?: string;
-  mediaType: string;
-  data: string;
-};
+export type { ImageAttachment };
 
 export interface StreamChatParams {
   prompt: string;

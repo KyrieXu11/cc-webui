@@ -30,10 +30,11 @@ if (isProd) {
 }
 
 const port = Number(process.env.PORT) || 8787;
+const viteDevPort = Number(process.env.VITE_DEV_PORT) || 8787;
 
 serve({ fetch: app.fetch, port }, (info) => {
   const url = isProd
     ? `http://localhost:${info.port}`
-    : `http://localhost:${info.port} (api only; web on vite http://localhost:5173)`;
+    : `http://localhost:${info.port} (api only; web on vite http://localhost:${viteDevPort})`;
   console.log(`[cc-webui] ${isProd ? "serving" : "api"} at ${url}`);
 });

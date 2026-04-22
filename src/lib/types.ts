@@ -1,7 +1,18 @@
 export type StepStatus = "ok" | "pending" | "error";
 
+export type ImageAttachment = {
+  name?: string;
+  mediaType: string;
+  data: string;
+};
+
 export type ChatEvent =
-  | { id: string; type: "user"; text: string }
+  | {
+      id: string;
+      type: "user";
+      text: string;
+      images?: ImageAttachment[];
+    }
   | { id: string; type: "assistant"; text: string }
   | { id: string; type: "thinking"; text: string }
   | {
