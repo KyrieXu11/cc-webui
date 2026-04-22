@@ -38,6 +38,12 @@ export default function App() {
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   const [filesOpen, setFilesOpen] = useState(false);
   const [composerValue, setComposerValue] = useState("");
+  const [retryInfo, setRetryInfo] = useState<{
+    attempt: number;
+    maxRetries: number;
+    retryDelayMs: number;
+    errorStatus: number | null;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const prevScrollHeight = useRef<number | null>(null);
@@ -231,6 +237,16 @@ export default function App() {
         effort: settings.effort,
         images,
       })) {
+        if (msg?.type === "system" && msg.subtype === "api_retry") {
+          setRetryInfo({
+            attempt: msg.attempt ?? 0,
+            maxRetries: msg.max_retries ?? 0,
+            retryDelayMs: msg.retry_delay_ms ?? 0,
+            errorStatus: msg.error_status ?? null,
+          });
+          continue;
+        }
+        setRetryInfo((cur) => (cur ? null : cur));
         setAllEvents((prev) =>
           applySDKMessage(prev, msg, (id) => setSessionId(id))
         );
@@ -248,6 +264,7 @@ export default function App() {
       ]);
     } finally {
       setIsStreaming(false);
+      setRetryInfo(null);
     }
   };
 
@@ -338,6 +355,7 @@ export default function App() {
                           isStreaming &&
                           allEvents[allEvents.length - 1]?.type === "user"
                         }
+                        retryInfo={retryInfo}
                       />
                     </>
                   )}

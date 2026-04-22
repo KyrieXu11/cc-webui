@@ -23,10 +23,27 @@ export const THINKING_WORDS = [
   "Plotting",
 ];
 
-export function pickThinkingWord(prev?: string): string {
-  if (THINKING_WORDS.length < 2) return THINKING_WORDS[0];
+export const WORKING_WORDS = [
+  "Working",
+  "Warming up",
+  "Spinning up",
+  "Starting",
+  "Reaching out",
+  "Connecting",
+  "Processing",
+  "Loading",
+  "Preparing",
+];
+
+export function pickFrom(list: string[], prev?: string): string {
+  if (list.length === 0) return "";
+  if (list.length < 2) return list[0];
   while (true) {
-    const w = THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)];
+    const w = list[Math.floor(Math.random() * list.length)];
     if (w !== prev) return w;
   }
+}
+
+export function pickThinkingWord(prev?: string): string {
+  return pickFrom(THINKING_WORDS, prev);
 }

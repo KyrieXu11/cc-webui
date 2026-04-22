@@ -6,6 +6,14 @@ import PermissionCard from "./PermissionCard";
 import SummaryCard from "./SummaryCard";
 import ThinkingBlock from "./ThinkingBlock";
 import PendingHint from "./PendingHint";
+import RetryHint from "./RetryHint";
+
+export type RetryInfo = {
+  attempt: number;
+  maxRetries: number;
+  retryDelayMs: number;
+  errorStatus: number | null;
+};
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
 
@@ -27,6 +35,7 @@ interface Props {
     message?: string
   ) => void;
   isPending?: boolean;
+  retryInfo?: RetryInfo | null;
 }
 
 export default function MessageList({
@@ -35,6 +44,7 @@ export default function MessageList({
   onToggleStep,
   onAnswerPermission,
   isPending,
+  retryInfo,
 }: Props) {
   const blocks: Block[] = [];
   for (const ev of events) {
@@ -100,7 +110,16 @@ export default function MessageList({
             );
         }
       })}
-      {isPending && blocks.length > 0 && <PendingHint />}
+      {retryInfo ? (
+        <RetryHint
+          attempt={retryInfo.attempt}
+          maxRetries={retryInfo.maxRetries}
+          retryDelayMs={retryInfo.retryDelayMs}
+          errorStatus={retryInfo.errorStatus}
+        />
+      ) : (
+        isPending && blocks.length > 0 && <PendingHint />
+      )}
     </div>
   );
 }
