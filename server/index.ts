@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { chat } from "./chat.ts";
+import { codexChat } from "./codex-chat.ts";
 import { fsRoute } from "./fs.ts";
 import { sessionsRoute } from "./sessions.ts";
 import { uploadRoute } from "./upload.ts";
@@ -12,6 +13,7 @@ import { bashTasksRoute } from "./bash-tasks.ts";
 const app = new Hono();
 
 app.route("/api", chat);
+app.route("/api/codex", codexChat);
 app.route("/api/fs", fsRoute);
 app.route("/api/sessions", sessionsRoute);
 app.route("/api/upload", uploadRoute);

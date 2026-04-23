@@ -1,4 +1,4 @@
-import type { ChatEvent, ImageAttachment } from "./types";
+import type { ChatEvent, ImageAttachment, StepStatus } from "./types";
 import type { SessionMessage } from "./sessions";
 
 const TOOL_ALIAS: Record<string, string> = {
@@ -54,6 +54,31 @@ export function applySDKMessage(
   onSession: OnSession
 ): ChatEvent[] {
   if (!msg || typeof msg !== "object") return events;
+
+  if (msg.type === "thread.started" && msg.thread_id) {
+    onSession(msg.thread_id);
+    return events;
+  }
+
+  if (msg.type === "turn.failed" && msg.error?.message) {
+    return [
+      ...events,
+      {
+        id: `e-codex-${Date.now()}`,
+        type: "assistant",
+        text: `[错误] ${msg.error.message}`,
+      },
+    ];
+  }
+
+  if (
+    (msg.type === "item.started" ||
+      msg.type === "item.updated" ||
+      msg.type === "item.completed") &&
+    msg.item
+  ) {
+    return applyCodexItem(events, msg.item);
+  }
 
   if (msg.type === "system" && msg.subtype === "init") {
     if (msg.session_id) onSession(msg.session_id);
@@ -285,6 +310,115 @@ export function applySDKMessage(
   }
 
   return events;
+}
+
+function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
+  switch (item.type) {
+    case "agent_message":
+      return upsertTextEvent(events, {
+        id: `a-codex-${item.id}`,
+        type: "assistant",
+        text: item.text ?? "",
+      });
+    case "reasoning":
+      return upsertTextEvent(events, {
+        id: `t-codex-${item.id}`,
+        type: "thinking",
+        text: item.text ?? "",
+      });
+    case "command_execution":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "CodexShell",
+        arg: truncate(item.command, 96),
+        status: codexStatus(item.status),
+        input: { command: item.command },
+        output: item.aggregated_output ?? "",
+      });
+    case "file_change":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "ApplyPatch",
+        arg: `${(item.changes ?? []).length} files`,
+        status: item.status === "failed" ? "error" : "ok",
+        input: { changes: item.changes ?? [] },
+        output: stringifyToolResult(item.changes ?? []),
+      });
+    case "mcp_tool_call":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: `${item.server ?? "mcp"}.${item.tool ?? "tool"}`,
+        arg: summarize(`${item.server ?? "mcp"}.${item.tool ?? "tool"}`, item.arguments),
+        status: codexStatus(item.status),
+        input:
+          item.arguments && typeof item.arguments === "object"
+            ? item.arguments
+            : { arguments: item.arguments },
+        output: item.error?.message ?? stringifyToolResult(item.result),
+      });
+    case "web_search":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "WebSearch",
+        arg: item.query,
+        status: "ok",
+        input: { query: item.query },
+      });
+    case "todo_list":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "TodoWrite",
+        arg: `${(item.items ?? []).length} items`,
+        status: "ok",
+        input: { todos: item.items ?? [] },
+      });
+    case "error":
+      return [
+        ...events,
+        {
+          id: `e-codex-${item.id ?? Date.now()}`,
+          type: "assistant",
+          text: `[错误] ${item.message ?? "Codex error"}`,
+        },
+      ];
+    default:
+      return events;
+  }
+}
+
+function codexStatus(status: string | undefined): StepStatus {
+  if (status === "failed") return "error";
+  if (status === "completed") return "ok";
+  return "pending";
+}
+
+function upsertTextEvent(
+  events: ChatEvent[],
+  next: Extract<ChatEvent, { type: "assistant" | "thinking" }>
+): ChatEvent[] {
+  const idx = events.findIndex((e) => e.id === next.id);
+  if (idx < 0) return next.text ? [...events, next] : events;
+  return [...events.slice(0, idx), next, ...events.slice(idx + 1)];
+}
+
+function upsertStepEvent(
+  events: ChatEvent[],
+  next: Extract<ChatEvent, { type: "step" }>
+): ChatEvent[] {
+  const idx = events.findIndex((e) => e.id === next.id);
+  if (idx < 0) return [...events, next];
+  const existing = events[idx];
+  if (existing.type !== "step") return events;
+  return [
+    ...events.slice(0, idx),
+    { ...existing, ...next },
+    ...events.slice(idx + 1),
+  ];
 }
 
 export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {

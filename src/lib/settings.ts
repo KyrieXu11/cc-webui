@@ -6,10 +6,13 @@ export type PermissionMode =
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
+export type AgentProvider = "claude" | "codex";
+
 export type Theme = "light" | "dark";
 
 export type Settings = {
   cwd: string;
+  agentProvider: AgentProvider;
   model: string;
   permissionMode: PermissionMode;
   effort: EffortLevel;
@@ -21,6 +24,7 @@ const RECENTS_KEY = "cc-webui:cwd-recents";
 
 export const DEFAULT_SETTINGS: Settings = {
   cwd: "",
+  agentProvider: "claude",
   model: "sonnet",
   permissionMode: "acceptEdits",
   effort: "medium",
@@ -65,12 +69,41 @@ export function pushCwdRecent(value: string) {
   }
 }
 
-export const MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
+export const PROVIDER_OPTIONS: Array<{
+  id: AgentProvider;
+  label: string;
+  hint: string;
+}> = [
+  { id: "claude", label: "Claude", hint: "Claude Code SDK" },
+  { id: "codex", label: "Codex", hint: "Codex SDK" },
+];
+
+const CLAUDE_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
     { id: "opus", label: "Opus 4.7", hint: "最强 · 较慢" },
     { id: "sonnet", label: "Sonnet 4.6", hint: "均衡" },
     { id: "haiku", label: "Haiku 4.5", hint: "快 · 便宜" },
   ];
+
+const CODEX_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
+  [
+    { id: "gpt-5.4", label: "GPT-5.4", hint: "Codex 默认" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", hint: "快 · 便宜" },
+  ];
+
+export const MODEL_OPTIONS = CLAUDE_MODEL_OPTIONS;
+
+export function providerLabel(id: AgentProvider): string {
+  return PROVIDER_OPTIONS.find((p) => p.id === id)?.label ?? id;
+}
+
+export function modelOptionsForProvider(provider: AgentProvider) {
+  return provider === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
+}
+
+export function defaultModelForProvider(provider: AgentProvider): string {
+  return modelOptionsForProvider(provider)[0]?.id ?? DEFAULT_SETTINGS.model;
+}
 
 export const MODE_OPTIONS: Array<{
   id: PermissionMode;
@@ -84,7 +117,11 @@ export const MODE_OPTIONS: Array<{
 ];
 
 export function modelLabel(id: string): string {
-  return MODEL_OPTIONS.find((m) => m.id === id)?.label ?? id;
+  return (
+    CLAUDE_MODEL_OPTIONS.find((m) => m.id === id)?.label ??
+    CODEX_MODEL_OPTIONS.find((m) => m.id === id)?.label ??
+    id
+  );
 }
 
 export function modeLabel(id: PermissionMode): string {

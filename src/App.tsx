@@ -20,6 +20,9 @@ import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
   loadSettings,
   saveSettings,
+  defaultModelForProvider,
+  modelOptionsForProvider,
+  type AgentProvider,
   type PermissionMode,
   type Settings,
 } from "./lib/settings";
@@ -34,6 +37,7 @@ const ACTIVE_TURN_KEY = "cc-webui:activeTurn";
 
 type ActiveTurn = {
   clientTurnId: string;
+  agentProvider: AgentProvider;
   cwd: string;
   sessionId: string | null;
   prompt: string;
@@ -53,6 +57,7 @@ function loadActiveTurn(): ActiveTurn | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ActiveTurn;
     if (!parsed?.clientTurnId || !parsed.cwd) return null;
+    parsed.agentProvider = parsed.agentProvider ?? "claude";
     if (Date.now() - (parsed.startedAt || 0) > 60 * 60 * 1000) {
       localStorage.removeItem(ACTIVE_TURN_KEY);
       return null;
@@ -285,9 +290,9 @@ export default function App() {
   };
 
   const attachKey = activeTurn?.clientTurnId
-    ? `turn:${activeTurn.clientTurnId}`
+    ? `${activeTurn.agentProvider}:turn:${activeTurn.clientTurnId}`
     : sessionId
-      ? `session:${sessionId}`
+      ? `${settings.agentProvider}:session:${sessionId}`
       : "";
 
   // Auto-attach to any in-flight SDK turn. The clientTurnId path covers a
@@ -299,6 +304,7 @@ export default function App() {
     if (loadingSession) return;
     const clientTurnId = activeTurn?.clientTurnId ?? null;
     const attachSessionId = activeTurn?.sessionId ?? sessionId;
+    const attachProvider = activeTurn?.agentProvider ?? settings.agentProvider;
     let closed = false;
     setAttachedStreaming(true);
     const finishAttach = (reason: "done" | "error" | "no-inflight") => {
@@ -318,7 +324,7 @@ export default function App() {
       }
     };
     const unsub = connectAttach(
-      { sessionId: attachSessionId, clientTurnId },
+      { sessionId: attachSessionId, clientTurnId, agentProvider: attachProvider },
       (msg) => {
         if (msg?.type === "foreground_started" && msg.fgId) {
           setActiveForegrounds((prev) =>
@@ -361,7 +367,7 @@ export default function App() {
       setActiveForegrounds([]);
       unsub();
     };
-  }, [attachKey, isStreaming, loadingSession, projectCwd]);
+  }, [attachKey, isStreaming, loadingSession, projectCwd, settings.agentProvider]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -459,6 +465,11 @@ export default function App() {
     clearActiveTurnState();
     setProjectCwd(s.cwd);
     setSessionId(s.sessionId);
+    setSettings((cur) =>
+      cur.agentProvider === "claude"
+        ? cur
+        : { ...cur, agentProvider: "claude", model: defaultModelForProvider("claude") }
+    );
     setSidebarOpen(true);
     setDialogOpen(false);
     setAllEvents([]);
@@ -489,11 +500,33 @@ export default function App() {
   const updateModel = (model: string) =>
     setSettings((s) => {
       const next = { ...s, model };
-      if (model !== "opus" && s.effort === "xhigh") {
+      if (
+        (s.agentProvider !== "claude" || model !== "opus") &&
+        s.effort === "xhigh"
+      ) {
         next.effort = "high";
       }
       return next;
     });
+
+  const updateProvider = (agentProvider: AgentProvider) => {
+    clearActiveTurnState();
+    setAllEvents([]);
+    setVisibleCount(INITIAL_VISIBLE);
+    setSessionId(null);
+    setSettings((s) => {
+      const modelOptions = modelOptionsForProvider(agentProvider);
+      const model = modelOptions.some((m) => m.id === s.model)
+        ? s.model
+        : defaultModelForProvider(agentProvider);
+      return {
+        ...s,
+        agentProvider,
+        model,
+        effort: agentProvider === "claude" ? s.effort : "medium",
+      };
+    });
+  };
 
   const updateMode = (permissionMode: PermissionMode) =>
     setSettings((s) => ({ ...s, permissionMode }));
@@ -505,6 +538,7 @@ export default function App() {
     const clientTurnId = createClientTurnId();
     setActiveTurnState({
       clientTurnId,
+      agentProvider: settings.agentProvider,
       cwd: projectCwd,
       sessionId,
       prompt: text,
@@ -526,6 +560,7 @@ export default function App() {
         sessionId,
         clientTurnId,
         cwd: projectCwd,
+        agentProvider: settings.agentProvider,
         model: settings.model,
         permissionMode: settings.permissionMode,
         effort: settings.effort,
@@ -605,7 +640,11 @@ export default function App() {
     const turnId = activeTurn?.clientTurnId ?? null;
     if (!sessionId && !turnId) return;
     try {
-      await cancelChat({ sessionId, clientTurnId: turnId });
+      await cancelChat({
+        sessionId,
+        clientTurnId: turnId,
+        agentProvider: activeTurn?.agentProvider ?? settings.agentProvider,
+      });
     } catch (err) {
       console.error("cancel failed:", err);
     }
@@ -831,6 +870,8 @@ export default function App() {
                   onSend={handleSend}
                   onCancel={handleCancel}
                   disabled={busy}
+                  provider={settings.agentProvider}
+                  onProviderChange={updateProvider}
                   model={settings.model}
                   onModelChange={updateModel}
                   mode={settings.permissionMode}
