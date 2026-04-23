@@ -139,3 +139,35 @@ export function connectAttach(
   });
   return () => es.close();
 }
+
+// Poll the server for the set of sessionIds currently generating. Used by
+// the sidebar to render an "in-flight" indicator next to each session.
+export async function getInflightSessions(): Promise<Set<string>> {
+  const res = await fetch("/api/chat/inflight");
+  if (!res.ok) return new Set();
+  const data = (await res.json().catch(() => null)) as
+    | { sessionIds?: string[] }
+    | null;
+  return new Set(data?.sessionIds ?? []);
+}
+
+// Request the server to stop an in-flight turn. Lookup prefers clientTurnId,
+// falls back to sessionId. Fire-and-forget from the client's perspective —
+// the stream's "done" event arrives via the existing SSE channel.
+export async function cancelChat(params: {
+  sessionId?: string | null;
+  clientTurnId?: string | null;
+}): Promise<{ ok: boolean; reason?: string }> {
+  const res = await fetch("/api/chat/cancel", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: params.sessionId || undefined,
+      clientTurnId: params.clientTurnId || undefined,
+    }),
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`cancel failed: ${res.status}`);
+  }
+  return res.json().catch(() => ({ ok: false }));
+}

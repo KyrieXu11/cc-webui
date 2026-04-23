@@ -208,11 +208,7 @@ export default function TasksModal({ sessionId, onClose }: Props) {
           <div className="w-[260px] shrink-0 border-r border-line overflow-y-auto">
             {!hasTasks && !loading && (
               <div className="p-5 text-[12.5px] text-subtle leading-relaxed">
-                还没有后台任务。
-                <br />
-                让 Claude 执行{" "}
-                <span className="font-mono">run_in_background=true</span>
-                {" "}的 bash 命令即可创建。
+                暂无后台任务
               </div>
             )}
             <ul className="py-1">

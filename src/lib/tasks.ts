@@ -41,6 +41,19 @@ export async function getTaskOutput(id: string): Promise<TaskOutput> {
   return res.json();
 }
 
+export async function detachForeground(
+  fgId: string
+): Promise<{ ok: boolean; bashTaskId?: string; reason?: string }> {
+  const res = await fetch(
+    `/api/bash/tasks/foreground/${encodeURIComponent(fgId)}/detach`,
+    { method: "POST" }
+  );
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`detachForeground failed: ${res.status}`);
+  }
+  return res.json().catch(() => ({ ok: false }));
+}
+
 export async function killTask(
   id: string
 ): Promise<{ ok: boolean; reason?: string; status: TaskStatus }> {

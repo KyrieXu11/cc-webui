@@ -89,6 +89,10 @@ interface InFlightChat {
   status: "running" | "done" | "error";
   errorMsg?: string;
   sessionId: string | undefined;
+  cancelRequested: boolean;
+  // Calls response.return() on the SDK iterator to force the for-await in
+  // the detached task to exit early. Set after `query()` returns.
+  cancelIterator?: () => Promise<void>;
 }
 
 const activeChats = new Map<string, InFlightChat>();
@@ -274,6 +278,7 @@ chat.post("/chat", async (c) => {
     subscribers: new Set(),
     status: "running",
     sessionId,
+    cancelRequested: false,
   };
   if (sessionId) activeChats.set(sessionId, entry);
   if (clientTurnId) activeChatsByClientTurn.set(clientTurnId, entry);
@@ -317,6 +322,10 @@ chat.post("/chat", async (c) => {
       const bashMcp = createBashMcpServer({
         cwd,
         getSessionId: () => currentSessionId,
+        // Pipe foreground lifecycle events into the chat SSE fanout so
+        // connected clients can track which fgId is currently pending (Ctrl+B
+        // detaches the most recent).
+        onForegroundEvent: fanout,
       });
 
       const response = query({
@@ -357,6 +366,10 @@ chat.post("/chat", async (c) => {
                 id,
                 tool: displayTool,
                 input,
+                // Carry the SDK's toolUseID so the client can match the card
+                // to the corresponding step (`s-<toolUseID>`) and know when
+                // the step is actually executing vs waiting on approval.
+                toolUseId: opts.toolUseID,
               })
             );
             const decision = await awaitPermission(id, opts.signal);
@@ -372,9 +385,21 @@ chat.post("/chat", async (c) => {
         },
       });
 
+      // Give the cancel route a way to terminate the iterator early. SDK's
+      // query() doesn't accept an external AbortSignal, so calling .return()
+      // on the async iterator is the only handle.
+      entry.cancelIterator = async () => {
+        try {
+          await (response as any).return?.();
+        } catch {
+          /* iterator may throw on return — ignore */
+        }
+      };
+
       let msgCount = 0;
       let currentStreamMessageId: string | undefined;
       for await (const msg of response) {
+        if (entry.cancelRequested) break;
         msgCount++;
         const tag =
           (msg as any).type +
@@ -447,7 +472,7 @@ chat.post("/chat", async (c) => {
       }
 
       console.log(
-        `[chat ${reqId}] done msgs=${msgCount} in ${elapsed()}`
+        `[chat ${reqId}] ${entry.cancelRequested ? "cancelled" : "done"} msgs=${msgCount} in ${elapsed()}`
       );
       entry.status = "done";
       fanout("done", "");
@@ -471,6 +496,46 @@ chat.post("/chat", async (c) => {
   return streamSSE(c, async (stream) => {
     await attachStreamToEntry(stream, entry);
   });
+});
+
+// ============================================================
+// POST /chat/cancel — stop an in-flight turn
+// ============================================================
+
+chat.post("/chat/cancel", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const sessionId: string | undefined =
+    typeof body.sessionId === "string" ? body.sessionId : undefined;
+  const clientTurnId: string | undefined =
+    typeof body.clientTurnId === "string" ? body.clientTurnId : undefined;
+
+  const entry =
+    (clientTurnId ? activeChatsByClientTurn.get(clientTurnId) : undefined) ??
+    (sessionId ? activeChats.get(sessionId) : undefined);
+  if (!entry) return c.json({ ok: false, reason: "not_found" }, 404);
+  if (entry.status !== "running") {
+    return c.json({ ok: false, reason: `already_${entry.status}` });
+  }
+
+  entry.cancelRequested = true;
+  console.log(`[chat ${entry.reqId}] cancel requested`);
+  // Fire-and-forget — the iterator's return() unblocks the detached for-await,
+  // which then goes through its finally and closes subscribers cleanly.
+  entry.cancelIterator?.().catch(() => {});
+  return c.json({ ok: true });
+});
+
+// ============================================================
+// GET /chat/inflight — list sessions with an active turn
+// ============================================================
+//
+// Used by the sidebar to draw a pulsing dot on sessions that are currently
+// generating. Lightweight: clients poll this every few seconds rather than
+// subscribing via SSE.
+
+chat.get("/chat/inflight", (c) => {
+  const sessionIds = Array.from(activeChats.keys());
+  return c.json({ sessionIds });
 });
 
 // ============================================================

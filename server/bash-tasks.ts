@@ -6,6 +6,8 @@ import {
   killBackgroundTaskById,
   subscribeListChanges,
   subscribeTaskOutput,
+  detachForegroundToBackground,
+  listForegroundInvocations,
   type TaskOutputEvent,
 } from "./bash-mcp.ts";
 
@@ -205,6 +207,30 @@ route.get("/:id/stream", (c) => {
     }
     clearInterval(keepAlive);
   });
+});
+
+// List currently-running foreground invocations (Ctrl+B can target the latest
+// one). Filtered by sessionId when provided, same semantics as /api/bash/tasks.
+route.get("/foreground", (c) => {
+  const sessionIdRaw = c.req.query("sessionId");
+  const filter =
+    sessionIdRaw === undefined
+      ? undefined
+      : { sessionId: sessionIdRaw === "" ? null : sessionIdRaw };
+  return c.json({ foreground: listForegroundInvocations(filter) });
+});
+
+// Detach a running foreground bash to a BackgroundTask. The foreground SDK
+// tool call resolves immediately with the new bashTaskId, the model sees it
+// as a normal tool result and can continue, and the proc keeps running under
+// the task lifecycle.
+route.post("/foreground/:fgId/detach", (c) => {
+  const fgId = c.req.param("fgId");
+  const result = detachForegroundToBackground(fgId);
+  if (!result.ok && result.reason === "not_found") {
+    return c.json({ error: "not_found" }, 404);
+  }
+  return c.json(result);
 });
 
 export { route as bashTasksRoute };

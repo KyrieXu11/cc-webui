@@ -3,7 +3,13 @@ import EditDiff from "./EditDiff";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
 
-const CheckIcon = ({ status }: { status: StepEvent["status"] }) => {
+const CheckIcon = ({
+  status,
+  waiting,
+}: {
+  status: StepEvent["status"];
+  waiting?: boolean;
+}) => {
   if (status === "error") {
     return (
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
@@ -18,15 +24,43 @@ const CheckIcon = ({ status }: { status: StepEvent["status"] }) => {
     );
   }
   if (status === "pending") {
+    // Waiting for user approval: static dashed circle (not executing yet).
+    if (waiting) {
+      return (
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+          <circle
+            cx="7"
+            cy="7"
+            r="6"
+            stroke="var(--color-subtle)"
+            strokeWidth="1.3"
+            strokeDasharray="3 2"
+          />
+        </svg>
+      );
+    }
+    // Approved and actually executing: spinner.
     return (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        fill="none"
+        aria-hidden
+        className="animate-spin"
+      >
         <circle
           cx="7"
           cy="7"
           r="6"
-          stroke="var(--color-subtle)"
-          strokeWidth="1.3"
-          strokeDasharray="3 2"
+          stroke="var(--color-line-strong)"
+          strokeWidth="1.5"
+        />
+        <path
+          d="M13 7a6 6 0 0 0-6-6"
+          stroke="var(--color-blue)"
+          strokeWidth="1.7"
+          strokeLinecap="round"
         />
       </svg>
     );
@@ -118,6 +152,9 @@ interface Props {
   delay?: number;
   expandedIds: Set<string>;
   onToggle: (id: string) => void;
+  // Step ids (`s-<toolUseId>`) that still have an unanswered permission card.
+  // These render a static dashed circle; otherwise pending renders a spinner.
+  awaitingPermission?: Set<string>;
 }
 
 export default function StepTimeline({
@@ -125,6 +162,7 @@ export default function StepTimeline({
   delay = 0,
   expandedIds,
   onToggle,
+  awaitingPermission,
 }: Props) {
   return (
     <div
@@ -144,7 +182,10 @@ export default function StepTimeline({
                 className="relative flex items-center py-[6px] gap-3 w-full text-left group hover:bg-fg/[0.02] rounded-sm transition-colors"
               >
                 <div className="relative z-10 shrink-0 bg-canvas">
-                  <CheckIcon status={s.status} />
+                  <CheckIcon
+                    status={s.status}
+                    waiting={awaitingPermission?.has(s.id)}
+                  />
                 </div>
                 <div className="flex items-baseline gap-2 text-[13px] min-w-0 flex-1">
                   <span className="font-mono text-fg">{s.tool}</span>

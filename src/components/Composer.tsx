@@ -10,6 +10,7 @@ type ImagePart = { name?: string; mediaType: string; data: string };
 
 interface Props {
   onSend?: (text: string, images?: ImagePart[]) => void;
+  onCancel?: () => void;
   disabled?: boolean;
   model: string;
   onModelChange: (v: string) => void;
@@ -26,6 +27,7 @@ interface Props {
 
 export default function Composer({
   onSend,
+  onCancel,
   disabled,
   model,
   onModelChange,
@@ -324,22 +326,35 @@ export default function Composer({
               />
             </svg>
           </button>
-          <button
-            onClick={submit}
-            disabled={!canSend}
-            aria-label="发送"
-            className="w-9 h-9 rounded-full bg-blue hover:bg-blue-hover disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-95"
-          >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
-                stroke="white"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
+          {disabled && onCancel ? (
+            <button
+              onClick={onCancel}
+              aria-label="停止生成"
+              title="停止生成"
+              className="w-9 h-9 rounded-full bg-red hover:brightness-110 flex items-center justify-center transition-all active:scale-95"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <rect x="2" y="2" width="8" height="8" rx="1.5" fill="white" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              disabled={!canSend}
+              aria-label="发送"
+              className="w-9 h-9 rounded-full bg-blue hover:bg-blue-hover disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-95"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
+                  stroke="white"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
       <div className="mt-2 flex items-center justify-between">

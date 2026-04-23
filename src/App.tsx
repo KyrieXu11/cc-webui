@@ -14,7 +14,8 @@ import HelpModal from "./components/HelpModal";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
 import type { ChatEvent, PermissionDecision } from "./lib/types";
-import { streamChat, connectAttach, type ImageAttachment } from "./lib/api";
+import { streamChat, connectAttach, cancelChat, type ImageAttachment } from "./lib/api";
+import { detachForeground } from "./lib/tasks";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
   loadSettings,
@@ -126,6 +127,9 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
+  const [activeForegrounds, setActiveForegrounds] = useState<
+    Array<{ fgId: string; command: string }>
+  >([]);
 
   const LOCAL_COMMANDS = ["skills", "help", "clear", "exit"];
   const mergedSlashCommands = [
@@ -316,6 +320,20 @@ export default function App() {
     const unsub = connectAttach(
       { sessionId: attachSessionId, clientTurnId },
       (msg) => {
+        if (msg?.type === "foreground_started" && msg.fgId) {
+          setActiveForegrounds((prev) =>
+            prev.some((f) => f.fgId === msg.fgId)
+              ? prev
+              : [...prev, { fgId: msg.fgId, command: msg.command ?? "" }]
+          );
+          return;
+        }
+        if (msg?.type === "foreground_ended" && msg.fgId) {
+          setActiveForegrounds((prev) =>
+            prev.filter((f) => f.fgId !== msg.fgId)
+          );
+          return;
+        }
         if (msg?.type === "system" && msg.subtype === "init") {
           if (Array.isArray(msg.slash_commands)) {
             setSlashCommands(msg.slash_commands);
@@ -340,6 +358,7 @@ export default function App() {
     return () => {
       closed = true;
       setAttachedStreaming(false);
+      setActiveForegrounds([]);
       unsub();
     };
   }, [attachKey, isStreaming, loadingSession, projectCwd]);
@@ -356,10 +375,21 @@ export default function App() {
           prev.size > 0 ? new Set() : new Set(stepIds)
         );
       }
+      // Ctrl+B: detach the most recent running foreground bash to a background
+      // task. Silent no-op when no foreground is active so the key never
+      // accidentally disrupts typing.
+      if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "b") {
+        if (activeForegrounds.length === 0) return;
+        e.preventDefault();
+        const latest = activeForegrounds[activeForegrounds.length - 1];
+        detachForeground(latest.fgId).catch((err) =>
+          console.error("detachForeground failed:", err)
+        );
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [allEvents]);
+  }, [allEvents, activeForegrounds]);
 
   const events = useMemo(
     () =>
@@ -510,6 +540,18 @@ export default function App() {
           });
           continue;
         }
+        if (msg?.type === "foreground_started" && msg.fgId) {
+          setActiveForegrounds((prev) =>
+            prev.some((f) => f.fgId === msg.fgId)
+              ? prev
+              : [...prev, { fgId: msg.fgId, command: msg.command ?? "" }]
+          );
+          continue;
+        }
+        if (msg?.type === "foreground_ended" && msg.fgId) {
+          setActiveForegrounds((prev) => prev.filter((f) => f.fgId !== msg.fgId));
+          continue;
+        }
         if (msg?.type === "system" && msg.subtype === "init") {
           if (Array.isArray(msg.slash_commands)) {
             setSlashCommands(msg.slash_commands);
@@ -558,6 +600,16 @@ export default function App() {
 
   const inProject = !!projectCwd;
   const busy = isStreaming || attachedStreaming;
+
+  const handleCancel = async () => {
+    const turnId = activeTurn?.clientTurnId ?? null;
+    if (!sessionId && !turnId) return;
+    try {
+      await cancelChat({ sessionId, clientTurnId: turnId });
+    } catch (err) {
+      console.error("cancel failed:", err);
+    }
+  };
 
   const handlePickSlash = (cmd: string) => {
     if (cmd === "skills") {
@@ -777,6 +829,7 @@ export default function App() {
               <div className="max-w-[820px] mx-auto w-full">
                 <Composer
                   onSend={handleSend}
+                  onCancel={handleCancel}
                   disabled={busy}
                   model={settings.model}
                   onModelChange={updateModel}

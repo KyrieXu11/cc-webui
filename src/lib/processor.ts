@@ -71,6 +71,7 @@ export function applySDKMessage(
         permissionId: msg.id,
         tool: msg.tool ?? "unknown",
         input: msg.input ?? {},
+        toolUseId: typeof msg.toolUseId === "string" ? msg.toolUseId : undefined,
       },
     ];
   }

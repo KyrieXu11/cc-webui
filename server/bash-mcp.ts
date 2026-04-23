@@ -116,6 +116,60 @@ function emitDone(t: BackgroundTask): void {
   t.outputSubscribers.clear();
 }
 
+// Foreground invocations are tracked so the UI can offer a Ctrl+B "detach to
+// background" action while a blocking bash call is in flight. Each entry
+// exposes a `detach()` method that hijacks the proc + current buffers into a
+// freshly-created BackgroundTask, resolves the foreground Promise with the
+// new bashTaskId, and deregisters itself.
+export interface ForegroundSummary {
+  fgId: string;
+  sessionId: string | undefined;
+  command: string;
+  cwd: string | undefined;
+  startedAt: number;
+}
+
+interface ForegroundInvocation extends ForegroundSummary {
+  detach: () =>
+    | { ok: true; bashTaskId: string }
+    | { ok: false; reason: string };
+}
+
+const foregroundInvocations = new Map<string, ForegroundInvocation>();
+
+export function listForegroundInvocations(filter?: {
+  sessionId?: string | null;
+}): ForegroundSummary[] {
+  const all: ForegroundSummary[] = [];
+  for (const inv of foregroundInvocations.values()) {
+    if (
+      filter &&
+      "sessionId" in filter &&
+      inv.sessionId !== (filter.sessionId ?? undefined)
+    ) {
+      continue;
+    }
+    all.push({
+      fgId: inv.fgId,
+      sessionId: inv.sessionId,
+      command: inv.command,
+      cwd: inv.cwd,
+      startedAt: inv.startedAt,
+    });
+  }
+  return all.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+export function detachForegroundToBackground(
+  fgId: string
+):
+  | { ok: true; bashTaskId: string }
+  | { ok: false; reason: string } {
+  const inv = foregroundInvocations.get(fgId);
+  if (!inv) return { ok: false, reason: "not_found" };
+  return inv.detach();
+}
+
 export function listBackgroundTasks(filter?: {
   sessionId?: string | null;
 }): BackgroundTask[] {
@@ -208,6 +262,10 @@ export function killBackgroundTaskById(id: string): {
 interface Options {
   cwd?: string;
   getSessionId?: () => string | undefined;
+  // Emits "foreground_started" / "foreground_ended" events into the chat SSE
+  // fanout so clients can know which fgId is currently pending (to drive
+  // Ctrl+B detach).
+  onForegroundEvent?: (event: string, data: string) => void;
 }
 
 type CallToolResult = {
@@ -257,7 +315,9 @@ export function createBashMcpServer(
         args.command,
         opts.cwd,
         args.timeout ?? DEFAULT_TIMEOUT_MS,
-        signal
+        signal,
+        opts.getSessionId?.(),
+        opts.onForegroundEvent
       );
     }
   );
@@ -297,10 +357,15 @@ function runForeground(
   command: string,
   cwd: string | undefined,
   timeoutMs: number,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  sessionId: string | undefined,
+  onForegroundEvent: Options["onForegroundEvent"]
 ): Promise<CallToolResult> {
   return new Promise((resolve) => {
+    const fgId = "fg-" + randomUUID().slice(0, 8);
+    const startedAt = Date.now();
     let settled = false;
+    let detachedTo: BackgroundTask | null = null;
     let stdout = "";
     let stderr = "";
     let stdoutDropped = 0;
@@ -314,21 +379,54 @@ function runForeground(
     });
 
     const timer = setTimeout(() => {
-      if (!settled) {
+      if (!settled && !detachedTo) {
         proc.kill("SIGKILL");
         finalize(-1, "timeout");
       }
     }, timeoutMs);
 
     const abortHandler = () => {
-      if (!settled) {
+      if (!settled && !detachedTo) {
         proc.kill("SIGKILL");
         finalize(-1, "aborted");
       }
     };
     signal?.addEventListener("abort", abortHandler, { once: true });
 
+    // Append to BackgroundTask's rolling buffer (used after detach). Mirrors
+    // runBackground's appendOut.
+    const appendToTask = (buf: Buffer, target: "stdout" | "stderr") => {
+      if (!detachedTo) return;
+      const task = detachedTo;
+      if (task.status !== "running") return;
+      const chunk = buf.toString("utf-8");
+      if (!chunk) return;
+      const cur = target === "stdout" ? task.stdout : task.stderr;
+      const combined = cur + chunk;
+      let next = combined;
+      let droppedNow = 0;
+      if (combined.length > MAX_OUTPUT_BYTES) {
+        droppedNow = combined.length - MAX_OUTPUT_BYTES;
+        next = combined.slice(droppedNow);
+      }
+      if (target === "stdout") {
+        task.stdout = next;
+        task.stdoutDropped += droppedNow;
+      } else {
+        task.stderr = next;
+        task.stderrDropped += droppedNow;
+      }
+      const firstTruncate = droppedNow > 0 && !task.truncated;
+      if (droppedNow > 0) task.truncated = true;
+      notifyTaskOutput(task, { type: target, chunk });
+      if (firstTruncate) emitStatus(task);
+    };
+
     const appendOut = (buf: Buffer, target: "stdout" | "stderr") => {
+      if (detachedTo) {
+        appendToTask(buf, target);
+        return;
+      }
       const chunk = buf.toString("utf-8");
       if (!chunk) return;
       const cur = target === "stdout" ? stdout : stderr;
@@ -353,18 +451,142 @@ function runForeground(
     proc.stderr?.on("data", (b) => appendOut(b, "stderr"));
 
     proc.on("error", (err) => {
+      if (detachedTo) {
+        const task = detachedTo;
+        if (task.status === "running") {
+          task.status = "failed";
+          task.endReason = `spawn error: ${err.message}`;
+          task.finishedAt = Date.now();
+          emitStatus(task);
+          emitDone(task);
+          notifyList();
+        }
+        return;
+      }
       if (!settled) finalize(-1, `spawn error: ${err.message}`);
     });
 
     proc.on("close", (code) => {
+      if (detachedTo) {
+        const task = detachedTo;
+        if (task.status === "running") {
+          task.exitCode = code ?? 0;
+          task.status = code === 0 ? "completed" : "failed";
+          if (code !== 0 && !task.endReason)
+            task.endReason = `exit code ${code}`;
+          task.finishedAt = Date.now();
+        } else {
+          if (task.exitCode === null) task.exitCode = code ?? 0;
+          if (task.finishedAt === null) task.finishedAt = Date.now();
+        }
+        emitStatus(task);
+        emitDone(task);
+        notifyList();
+        return;
+      }
       if (!settled) finalize(code ?? 0, null);
     });
+
+    const detach = ():
+      | { ok: true; bashTaskId: string }
+      | { ok: false; reason: string } => {
+      if (settled) return { ok: false, reason: "already_finished" };
+      if (detachedTo)
+        return { ok: false, reason: "already_detached" };
+
+      const bgId = "bg-" + randomUUID().slice(0, 8);
+      const task: BackgroundTask = {
+        id: bgId,
+        sessionId,
+        command,
+        cwd,
+        startedAt,
+        finishedAt: null,
+        proc,
+        stdout,
+        stderr,
+        stdoutDropped,
+        stderrDropped,
+        exitCode: null,
+        status: "running",
+        truncated,
+        readStdoutOffset: 0,
+        readStderrOffset: 0,
+        endReason: null,
+        outputSubscribers: new Set(),
+      };
+      tasks.set(bgId, task);
+      detachedTo = task;
+      notifyList();
+
+      // Cancel the foreground-specific timers / signal handler. The task now
+      // has its own lifecycle.
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abortHandler);
+
+      // Resolve the foreground Promise immediately so the SDK tool call
+      // returns — model gets the new bashTaskId and can keep working.
+      settled = true;
+      foregroundInvocations.delete(fgId);
+      onForegroundEvent?.(
+        "foreground_ended",
+        JSON.stringify({
+          type: "foreground_ended",
+          fgId,
+          reason: "detached",
+          bashTaskId: bgId,
+        })
+      );
+      resolve({
+        content: [
+          {
+            type: "text",
+            text:
+              `Detached to background. bashTaskId: ${bgId}\n` +
+              `command: ${command}\n` +
+              `cwd: ${cwd ?? "(default)"}\n` +
+              `Poll with mcp__bash__output (bash_id="${bgId}") or terminate with mcp__bash__kill.`,
+          },
+        ],
+        isError: false,
+      });
+      return { ok: true, bashTaskId: bgId };
+    };
+
+    foregroundInvocations.set(fgId, {
+      fgId,
+      sessionId,
+      command,
+      cwd,
+      startedAt,
+      detach,
+    });
+    onForegroundEvent?.(
+      "foreground_started",
+      JSON.stringify({
+        type: "foreground_started",
+        fgId,
+        sessionId,
+        command,
+        cwd,
+        startedAt,
+      })
+    );
 
     function finalize(exitCode: number, reason: string | null) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abortHandler);
+      foregroundInvocations.delete(fgId);
+      onForegroundEvent?.(
+        "foreground_ended",
+        JSON.stringify({
+          type: "foreground_ended",
+          fgId,
+          reason: reason ?? "completed",
+        })
+      );
 
       const parts: string[] = [];
       if (stdout) parts.push(stdout);

@@ -4,7 +4,10 @@ import {
   deleteSession as deleteSessionApi,
   type SessionSummary,
 } from "../lib/sessions";
+import { getInflightSessions } from "../lib/api";
 import { tildify } from "../lib/fs";
+
+const INFLIGHT_POLL_MS = 3000;
 
 interface Props {
   cwd: string;
@@ -29,7 +32,28 @@ export default function ProjectSidebar({
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [limit, setLimit] = useState(15);
   const [loading, setLoading] = useState(true);
+  const [inflight, setInflight] = useState<Set<string>>(() => new Set());
   const loaderRef = useRef<HTMLDivElement>(null);
+
+  // Poll for which sessions have an active SDK turn. Powers the pulsing dot
+  // next to each entry so users can see "still generating" after switching
+  // sessions or opening a new tab.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      getInflightSessions()
+        .then((set) => {
+          if (alive) setInflight(set);
+        })
+        .catch(() => {});
+    };
+    tick();
+    const timer = setInterval(tick, INFLIGHT_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,6 +154,13 @@ export default function ProjectSidebar({
                       active ? "bg-blue" : "bg-transparent"
                     }`}
                   />
+                  {inflight.has(s.sessionId) && (
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-amber pulse-dot shrink-0"
+                      aria-label="正在生成"
+                      title="该会话有活跃的 SDK 对话"
+                    />
+                  )}
                   <span className="text-[12.5px] truncate flex-1">
                     {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
                   </span>

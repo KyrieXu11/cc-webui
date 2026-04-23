@@ -7,11 +7,18 @@ interface Props {
 const SHORTCUTS: Array<[string, string]> = [
   ["↵", "发送消息"],
   ["⇧↵", "换行"],
+  ["Ctrl+B", "把当前运行中的前台 bash 转成后台任务（无前台任务时忽略）"],
   ["Ctrl+O", "展开 / 收起所有 tool_call + thinking"],
   ["/", "调出斜杠命令 / skill 菜单"],
   ["↑ ↓ ↵", "在搜索 / 菜单 / 对话框中导航"],
   ["Esc", "关闭弹窗 / 菜单 / 预览浮窗"],
   ["Backspace（@path 末尾）", "整段删除引用"],
+];
+
+const COMPOSER_ACTIONS: Array<[string, string]> = [
+  ["蓝色 ↑", "发送（未生成时）"],
+  ["红色 ■", "停止当前生成（仅丢弃未完成的文本，已流出的保留显示）"],
+  ["+", "附加图片 / 文件"],
 ];
 
 const FILE_TREE: Array<[string, string]> = [
@@ -74,6 +81,24 @@ export default function HelpModal({ onClose }: Props) {
             </h4>
             <dl className="text-[13px]">
               {SHORTCUTS.map(([key, desc]) => (
+                <div
+                  key={key}
+                  className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
+                >
+                  <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">
+                    {key}
+                  </dt>
+                  <dd className="text-muted">{desc}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <section>
+            <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
+              对话框按钮
+            </h4>
+            <dl className="text-[13px]">
+              {COMPOSER_ACTIONS.map(([key, desc]) => (
                 <div
                   key={key}
                   className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"

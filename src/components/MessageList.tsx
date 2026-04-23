@@ -49,12 +49,22 @@ export default function MessageList({
   onPreviewImage,
 }: Props) {
   const blocks: Block[] = [];
+  // Step ids that still have an unresolved permission card: those steps are
+  // "awaiting approval", not actually executing yet.
+  const awaitingPermission = new Set<string>();
   for (const ev of events) {
     if (ev.type === "step") {
       const last = blocks[blocks.length - 1];
       if (last && last.kind === "step-group") last.steps.push(ev);
       else blocks.push({ kind: "step-group", id: `g-${ev.id}`, steps: [ev] });
     } else {
+      if (
+        ev.type === "permission" &&
+        ev.resolved === undefined &&
+        ev.toolUseId
+      ) {
+        awaitingPermission.add(`s-${ev.toolUseId}`);
+      }
       blocks.push({ kind: "single", id: ev.id, event: ev });
     }
   }
@@ -70,6 +80,7 @@ export default function MessageList({
               delay={0}
               expandedIds={expandedSteps}
               onToggle={onToggleStep}
+              awaitingPermission={awaitingPermission}
             />
           );
         }

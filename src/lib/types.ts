@@ -33,6 +33,7 @@ export type ChatEvent =
       tool: string;
       input: Record<string, any>;
       resolved?: PermissionDecision;
+      toolUseId?: string;
     }
   | {
       id: string;
