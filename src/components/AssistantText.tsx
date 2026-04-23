@@ -22,7 +22,7 @@ export default function AssistantText({
       style={{ animationDelay: `${delay}ms` }}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
         components={{
           p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
           h1: ({ children }) => (

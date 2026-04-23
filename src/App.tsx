@@ -14,7 +14,7 @@ import HelpModal from "./components/HelpModal";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
 import type { ChatEvent, PermissionDecision } from "./lib/types";
-import { streamChat, type ImageAttachment } from "./lib/api";
+import { streamChat, connectAttach, type ImageAttachment } from "./lib/api";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
   loadSettings,
@@ -29,12 +29,82 @@ import { sendPermission } from "./lib/permission";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
+const ACTIVE_TURN_KEY = "cc-webui:activeTurn";
+
+type ActiveTurn = {
+  clientTurnId: string;
+  cwd: string;
+  sessionId: string | null;
+  prompt: string;
+  startedAt: number;
+};
+
+function createClientTurnId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `turn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function loadActiveTurn(): ActiveTurn | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TURN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ActiveTurn;
+    if (!parsed?.clientTurnId || !parsed.cwd) return null;
+    if (Date.now() - (parsed.startedAt || 0) > 60 * 60 * 1000) {
+      localStorage.removeItem(ACTIVE_TURN_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveTurn(turn: ActiveTurn): void {
+  try {
+    localStorage.setItem(ACTIVE_TURN_KEY, JSON.stringify(turn));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSavedActiveTurn(): void {
+  try {
+    localStorage.removeItem(ACTIVE_TURN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function activeTurnUserEvent(turn: ActiveTurn): ChatEvent {
+  return {
+    id: `u-${turn.clientTurnId}`,
+    type: "user",
+    text: turn.prompt,
+  };
+}
+
+function ensureActiveTurnUserEvent(
+  events: ChatEvent[],
+  turn: ActiveTurn | null,
+  cwd: string
+): ChatEvent[] {
+  if (!turn || turn.cwd !== cwd || !turn.prompt.trim()) return events;
+  const hasPrompt = events.some(
+    (e) => e.type === "user" && e.text.trim() === turn.prompt.trim()
+  );
+  return hasPrompt ? events : [...events, activeTurnUserEvent(turn)];
+}
 
 export default function App() {
   const [allEvents, setAllEvents] = useState<ChatEvent[]>([]);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [attachedStreaming, setAttachedStreaming] = useState(false);
+  const [activeTurn, setActiveTurn] = useState<ActiveTurn | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [projectCwd, setProjectCwd] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -68,6 +138,28 @@ export default function App() {
   const forceScrollBottom = useRef(false);
   const didRestore = useRef(false);
 
+  const setActiveTurnState = (turn: ActiveTurn) => {
+    saveActiveTurn(turn);
+    setActiveTurn(turn);
+  };
+
+  const updateActiveTurnSession = (id: string) => {
+    setActiveTurn((cur) => {
+      if (!cur || cur.sessionId === id) return cur;
+      const next = { ...cur, sessionId: id };
+      saveActiveTurn(next);
+      return next;
+    });
+  };
+
+  const clearActiveTurnState = (clientTurnId?: string) => {
+    setActiveTurn((cur) => {
+      if (clientTurnId && cur?.clientTurnId !== clientTurnId) return cur;
+      clearSavedActiveTurn();
+      return null;
+    });
+  };
+
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
@@ -85,25 +177,36 @@ export default function App() {
     if (didRestore.current) return;
     didRestore.current = true;
     try {
+      const active = loadActiveTurn();
+      if (active) setActiveTurn(active);
       const raw = localStorage.getItem("cc-webui:lastProject");
-      if (!raw) return;
-      const saved = JSON.parse(raw) as {
-        cwd?: string;
-        sessionId?: string | null;
-      };
-      if (!saved?.cwd) return;
-      setProjectCwd(saved.cwd);
+      const saved = raw
+        ? (JSON.parse(raw) as {
+            cwd?: string;
+            sessionId?: string | null;
+          })
+        : null;
+      const cwd = saved?.cwd || active?.cwd;
+      if (!cwd) return;
+      setProjectCwd(cwd);
       setSidebarOpen(true);
-      if (saved.sessionId) {
-        setSessionId(saved.sessionId);
+      const restoreSessionId = saved?.sessionId || active?.sessionId || null;
+      if (restoreSessionId) {
+        setSessionId(restoreSessionId);
         setLoadingSession(true);
-        getSessionMessages(saved.sessionId, saved.cwd)
+        getSessionMessages(restoreSessionId, cwd)
           .then((msgs) => {
             forceScrollBottom.current = true;
-            setAllEvents(sessionMessagesToEvents(msgs));
+            setAllEvents(
+              ensureActiveTurnUserEvent(sessionMessagesToEvents(msgs), active, cwd)
+            );
           })
-          .catch(() => setAllEvents([]))
+          .catch(() =>
+            setAllEvents(ensureActiveTurnUserEvent([], active, cwd))
+          )
           .finally(() => setLoadingSession(false));
+      } else if (active?.prompt && active.cwd === cwd) {
+        setAllEvents([activeTurnUserEvent(active)]);
       }
     } catch {
       /* ignore corrupt saved state */
@@ -177,6 +280,70 @@ export default function App() {
     }
   };
 
+  const attachKey = activeTurn?.clientTurnId
+    ? `turn:${activeTurn.clientTurnId}`
+    : sessionId
+      ? `session:${sessionId}`
+      : "";
+
+  // Auto-attach to any in-flight SDK turn. The clientTurnId path covers a
+  // refresh during the first seconds of a brand-new chat, before the SDK has
+  // emitted its real session_id.
+  useEffect(() => {
+    if (!attachKey) return;
+    if (isStreaming) return;
+    if (loadingSession) return;
+    const clientTurnId = activeTurn?.clientTurnId ?? null;
+    const attachSessionId = activeTurn?.sessionId ?? sessionId;
+    let closed = false;
+    setAttachedStreaming(true);
+    const finishAttach = (reason: "done" | "error" | "no-inflight") => {
+      if (closed) return;
+      setAttachedStreaming(false);
+      setRetryInfo(null);
+      if (clientTurnId) clearActiveTurnState(clientTurnId);
+      if (reason === "error") {
+        setAllEvents((prev) => [
+          ...prev,
+          {
+            id: `e-${Date.now()}`,
+            type: "assistant",
+            text: "[错误] 流式连接中断，请重新打开会话确认历史消息。",
+          },
+        ]);
+      }
+    };
+    const unsub = connectAttach(
+      { sessionId: attachSessionId, clientTurnId },
+      (msg) => {
+        if (msg?.type === "system" && msg.subtype === "init") {
+          if (Array.isArray(msg.slash_commands)) {
+            setSlashCommands(msg.slash_commands);
+          }
+          if (Array.isArray(msg.skills)) {
+            setSkills(msg.skills);
+          }
+        }
+        setAllEvents((prev) =>
+          applySDKMessage(
+            ensureActiveTurnUserEvent(prev, activeTurn, projectCwd),
+            msg,
+            (id) => {
+              setSessionId(id);
+              updateActiveTurnSession(id);
+            }
+          )
+        );
+      },
+      finishAttach
+    );
+    return () => {
+      closed = true;
+      setAttachedStreaming(false);
+      unsub();
+    };
+  }, [attachKey, isStreaming, loadingSession, projectCwd]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "o") {
@@ -244,6 +411,7 @@ export default function App() {
   }, [events, loadingSession]);
 
   const openProject = (cwd: string) => {
+    clearActiveTurnState();
     setProjectCwd(cwd);
     setSidebarOpen(true);
     setDialogOpen(false);
@@ -258,6 +426,7 @@ export default function App() {
       console.warn("session has no cwd, cannot resume");
       return;
     }
+    clearActiveTurnState();
     setProjectCwd(s.cwd);
     setSessionId(s.sessionId);
     setSidebarOpen(true);
@@ -279,6 +448,7 @@ export default function App() {
   };
 
   const goHome = () => {
+    clearActiveTurnState();
     setProjectCwd("");
     setSidebarOpen(false);
     setAllEvents([]);
@@ -302,8 +472,16 @@ export default function App() {
     setSettings((s) => ({ ...s, effort }));
 
   const handleSend = async (text: string, images?: ImageAttachment[]) => {
+    const clientTurnId = createClientTurnId();
+    setActiveTurnState({
+      clientTurnId,
+      cwd: projectCwd,
+      sessionId,
+      prompt: text,
+      startedAt: Date.now(),
+    });
     const userEvt: ChatEvent = {
-      id: `u-${Date.now()}`,
+      id: `u-${clientTurnId}`,
       type: "user",
       text,
       images: images && images.length > 0 ? images : undefined,
@@ -316,6 +494,7 @@ export default function App() {
       for await (const msg of streamChat({
         prompt: text,
         sessionId,
+        clientTurnId,
         cwd: projectCwd,
         model: settings.model,
         permissionMode: settings.permissionMode,
@@ -341,33 +520,44 @@ export default function App() {
         }
         setRetryInfo((cur) => (cur ? null : cur));
         setAllEvents((prev) =>
-          applySDKMessage(prev, msg, (id) => setSessionId(id))
+          applySDKMessage(prev, msg, (id) => {
+            setSessionId(id);
+            updateActiveTurnSession(id);
+          })
         );
       }
     } catch (err) {
       console.error("stream error:", err);
       const message = err instanceof Error ? err.message : String(err);
+      const isBusy =
+        message.startsWith("session_busy:") ||
+        message.startsWith("turn_busy:");
       setAllEvents((prev) => [
         ...prev,
         {
           id: `e-${Date.now()}`,
           type: "assistant",
-          text: `[错误] ${message}`,
+          text: isBusy
+            ? `[上一轮还在生成] ${message.slice("session_busy:".length).trim()}`
+            : `[错误] ${message}`,
         },
       ]);
     } finally {
       setIsStreaming(false);
       setRetryInfo(null);
+      clearActiveTurnState(clientTurnId);
     }
   };
 
   const handleNewChat = () => {
+    clearActiveTurnState();
     setAllEvents([]);
     setVisibleCount(INITIAL_VISIBLE);
     setSessionId(null);
   };
 
   const inProject = !!projectCwd;
+  const busy = isStreaming || attachedStreaming;
 
   const handlePickSlash = (cmd: string) => {
     if (cmd === "skills") {
@@ -568,7 +758,7 @@ export default function App() {
                         onToggleStep={toggleStep}
                         onAnswerPermission={answerPermission}
                         isPending={
-                          isStreaming &&
+                          busy &&
                           allEvents[allEvents.length - 1]?.type === "user"
                         }
                         retryInfo={retryInfo}
@@ -587,7 +777,7 @@ export default function App() {
               <div className="max-w-[820px] mx-auto w-full">
                 <Composer
                   onSend={handleSend}
-                  disabled={isStreaming}
+                  disabled={busy}
                   model={settings.model}
                   onModelChange={updateModel}
                   mode={settings.permissionMode}

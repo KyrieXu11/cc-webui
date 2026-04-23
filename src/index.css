@@ -74,6 +74,12 @@ body {
   background: rgba(91, 107, 255, 0.3);
 }
 
+.user-bubble ::selection,
+.user-bubble::selection {
+  background: #ffffff;
+  color: var(--color-blue);
+}
+
 textarea {
   font-family: inherit;
 }

@@ -21,11 +21,19 @@ interface BackgroundTask {
   startedAt: number;
   finishedAt: number | null;
   proc: ChildProcess;
+  // stdout / stderr are rolling windows of at most MAX_OUTPUT_BYTES chars.
+  // Once full, the oldest bytes are sliced off the front as new chunks arrive.
+  // *Dropped* counts how many chars have been rolled off in total.
   stdout: string;
   stderr: string;
+  stdoutDropped: number;
+  stderrDropped: number;
   exitCode: number | null;
   status: TaskStatus;
   truncated: boolean;
+  // readStdoutOffset / readStderrOffset store cumulative byte positions in the
+  // full stream (dropped + current buffer length), not indices into the current
+  // buffer — so they remain meaningful after rollover.
   readStdoutOffset: number;
   readStderrOffset: number;
   endReason: string | null;
@@ -295,6 +303,8 @@ function runForeground(
     let settled = false;
     let stdout = "";
     let stderr = "";
+    let stdoutDropped = 0;
+    let stderrDropped = 0;
     let truncated = false;
 
     const proc = spawn("bash", ["-lc", command], {
@@ -319,18 +329,24 @@ function runForeground(
     signal?.addEventListener("abort", abortHandler, { once: true });
 
     const appendOut = (buf: Buffer, target: "stdout" | "stderr") => {
-      if (truncated) return;
       const chunk = buf.toString("utf-8");
+      if (!chunk) return;
       const cur = target === "stdout" ? stdout : stderr;
-      const room = MAX_OUTPUT_BYTES - cur.length;
-      if (room <= 0) {
-        truncated = true;
-        return;
+      const combined = cur + chunk;
+      let next = combined;
+      let droppedNow = 0;
+      if (combined.length > MAX_OUTPUT_BYTES) {
+        droppedNow = combined.length - MAX_OUTPUT_BYTES;
+        next = combined.slice(droppedNow);
       }
-      const slice = chunk.length > room ? chunk.slice(0, room) : chunk;
-      if (target === "stdout") stdout += slice;
-      else stderr += slice;
-      if (chunk.length > room) truncated = true;
+      if (target === "stdout") {
+        stdout = next;
+        stdoutDropped += droppedNow;
+      } else {
+        stderr = next;
+        stderrDropped += droppedNow;
+      }
+      if (droppedNow > 0) truncated = true;
     };
 
     proc.stdout?.on("data", (b) => appendOut(b, "stdout"));
@@ -353,8 +369,18 @@ function runForeground(
       const parts: string[] = [];
       if (stdout) parts.push(stdout);
       if (stderr) parts.push(stderr);
-      if (truncated)
-        parts.push(`\n[output truncated: exceeded ${MAX_OUTPUT_BYTES} bytes]`);
+      if (truncated) {
+        const dropNotes: string[] = [];
+        if (stdoutDropped > 0)
+          dropNotes.push(`stdout: first ${stdoutDropped} chars dropped`);
+        if (stderrDropped > 0)
+          dropNotes.push(`stderr: first ${stderrDropped} chars dropped`);
+        parts.push(
+          `\n[rolling window: last ${MAX_OUTPUT_BYTES} chars kept per stream` +
+            (dropNotes.length ? ` · ${dropNotes.join("; ")}` : "") +
+            `]`
+        );
+      }
       if (reason === "timeout")
         parts.push(`\n[command timed out after ${timeoutMs}ms]`);
       else if (reason === "aborted")
@@ -394,6 +420,8 @@ function runBackground(
     proc,
     stdout: "",
     stderr: "",
+    stdoutDropped: 0,
+    stderrDropped: 0,
     exitCode: null,
     status: "running",
     truncated: false,
@@ -406,22 +434,27 @@ function runBackground(
   notifyList();
 
   const appendOut = (buf: Buffer, target: "stdout" | "stderr") => {
-    if (task.truncated) return;
     const chunk = buf.toString("utf-8");
+    if (!chunk) return;
     const cur = target === "stdout" ? task.stdout : task.stderr;
-    const room = MAX_OUTPUT_BYTES - cur.length;
-    if (room <= 0) {
-      task.truncated = true;
-      emitStatus(task);
-      return;
+    const combined = cur + chunk;
+    let next = combined;
+    let droppedNow = 0;
+    if (combined.length > MAX_OUTPUT_BYTES) {
+      droppedNow = combined.length - MAX_OUTPUT_BYTES;
+      next = combined.slice(droppedNow);
     }
-    const slice = chunk.length > room ? chunk.slice(0, room) : chunk;
-    if (target === "stdout") task.stdout += slice;
-    else task.stderr += slice;
-    const nowTruncated = chunk.length > room;
-    if (nowTruncated) task.truncated = true;
-    if (slice) notifyTaskOutput(task, { type: target, chunk: slice });
-    if (nowTruncated) emitStatus(task);
+    if (target === "stdout") {
+      task.stdout = next;
+      task.stdoutDropped += droppedNow;
+    } else {
+      task.stderr = next;
+      task.stderrDropped += droppedNow;
+    }
+    const firstTruncate = droppedNow > 0 && !task.truncated;
+    if (droppedNow > 0) task.truncated = true;
+    notifyTaskOutput(task, { type: target, chunk });
+    if (firstTruncate) emitStatus(task);
   };
 
   proc.stdout?.on("data", (b) => appendOut(b, "stdout"));
@@ -478,10 +511,22 @@ function readBackgroundOutput(id: string): CallToolResult {
     };
   }
 
-  const newStdout = t.stdout.slice(t.readStdoutOffset);
-  const newStderr = t.stderr.slice(t.readStderrOffset);
-  t.readStdoutOffset = t.stdout.length;
-  t.readStderrOffset = t.stderr.length;
+  // readStdoutOffset / readStderrOffset are cumulative positions. Convert to
+  // an index into the current (rolling) buffer by subtracting how much has
+  // rolled off. If the poll falls behind the rollover, overrun tells us how
+  // many bytes were dropped before this call could see them.
+  const stdoutTotal = t.stdoutDropped + t.stdout.length;
+  const stderrTotal = t.stderrDropped + t.stderr.length;
+  const stdoutOverrun = Math.max(0, t.stdoutDropped - t.readStdoutOffset);
+  const stderrOverrun = Math.max(0, t.stderrDropped - t.readStderrOffset);
+  const newStdout = t.stdout.slice(
+    Math.max(0, t.readStdoutOffset - t.stdoutDropped)
+  );
+  const newStderr = t.stderr.slice(
+    Math.max(0, t.readStderrOffset - t.stderrDropped)
+  );
+  t.readStdoutOffset = stdoutTotal;
+  t.readStderrOffset = stderrTotal;
 
   const parts: string[] = [];
   const statusLine =
@@ -492,11 +537,22 @@ function readBackgroundOutput(id: string): CallToolResult {
       : ` · ${((Date.now() - t.startedAt) / 1000).toFixed(1)}s elapsed`);
   parts.push(statusLine);
 
+  if (stdoutOverrun > 0)
+    parts.push(
+      `[${stdoutOverrun} stdout chars rolled off before this poll]`
+    );
   if (newStdout) parts.push("--- stdout ---\n" + newStdout.trimEnd());
+  if (stderrOverrun > 0)
+    parts.push(
+      `[${stderrOverrun} stderr chars rolled off before this poll]`
+    );
   if (newStderr) parts.push("--- stderr ---\n" + newStderr.trimEnd());
-  if (!newStdout && !newStderr) parts.push("(no new output since last poll)");
+  if (!newStdout && !newStderr && stdoutOverrun === 0 && stderrOverrun === 0)
+    parts.push("(no new output since last poll)");
   if (t.truncated)
-    parts.push(`[output truncated: exceeded ${MAX_OUTPUT_BYTES} bytes]`);
+    parts.push(
+      `[rolling window: only last ${MAX_OUTPUT_BYTES} chars retained per stream]`
+    );
   if (t.endReason) parts.push(`[${t.endReason}]`);
 
   return {

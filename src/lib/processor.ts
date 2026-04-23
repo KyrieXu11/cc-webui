@@ -13,6 +13,41 @@ function normalizeToolName(name: string): string {
 
 type OnSession = (id: string) => void;
 
+function streamBlockId(prefix: "a" | "t", msg: any, index: number): string {
+  const base =
+    msg.stream_message_id ??
+    msg.event?.message?.id ??
+    msg.message?.id ??
+    msg.uuid ??
+    "unknown";
+  return `${prefix}-${base}-${index}`;
+}
+
+function findLastEventIndex(
+  events: ChatEvent[],
+  type: ChatEvent["type"]
+): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === type) return i;
+  }
+  return -1;
+}
+
+function findCompatibleTextEventIndex(
+  events: ChatEvent[],
+  type: "assistant" | "thinking",
+  text: string
+): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (ev.type !== type) continue;
+    if (!ev.text || text.startsWith(ev.text) || ev.text.startsWith(text)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function applySDKMessage(
   events: ChatEvent[],
   msg: any,
@@ -26,10 +61,12 @@ export function applySDKMessage(
   }
 
   if (msg.type === "permission_request" && msg.id) {
+    const id = `p-${msg.id}`;
+    if (events.some((e) => e.id === id)) return events;
     return [
       ...events,
       {
-        id: `p-${msg.id}`,
+        id,
         type: "permission",
         permissionId: msg.id,
         tool: msg.tool ?? "unknown",
@@ -43,22 +80,49 @@ export function applySDKMessage(
 
     if (ev.type === "content_block_start") {
       const block = ev.content_block;
+      // Idempotent: on re-delivery (attach replay after initial disconnect),
+      // reset the existing event at this id back to empty so subsequent
+      // deltas re-fill it. Without this we'd accumulate duplicates.
       if (block?.type === "text") {
+        const id = streamBlockId("a", msg, ev.index);
+        const idx = events.findIndex((e) => e.id === id);
+        if (idx >= 0) {
+          return [
+            ...events.slice(0, idx),
+            { ...events[idx], text: "" } as ChatEvent,
+            ...events.slice(idx + 1),
+          ];
+        }
         return [
           ...events,
-          {
-            id: `a-${msg.uuid}-${ev.index}`,
-            type: "assistant",
-            text: "",
-          },
+          { id, type: "assistant", text: "" },
         ];
       }
       if (block?.type === "tool_use") {
+        const id = `s-${block.id}`;
+        const idx = events.findIndex((e) => e.id === id);
         const toolName = normalizeToolName(block.name);
+        if (idx >= 0) {
+          const existing = events[idx];
+          if (existing.type === "step") {
+            return [
+              ...events.slice(0, idx),
+              {
+                ...existing,
+                tool: toolName,
+                arg: summarize(toolName, block.input) ?? existing.arg,
+                status: "pending",
+                input: block.input,
+                output: undefined,
+              },
+              ...events.slice(idx + 1),
+            ];
+          }
+        }
         return [
           ...events,
           {
-            id: `s-${block.id}`,
+            id,
             type: "step",
             tool: toolName,
             arg: summarize(toolName, block.input),
@@ -68,34 +132,57 @@ export function applySDKMessage(
         ];
       }
       if (block?.type === "thinking") {
+        const id = streamBlockId("t", msg, ev.index);
+        const idx = events.findIndex((e) => e.id === id);
+        if (idx >= 0) {
+          return [
+            ...events.slice(0, idx),
+            { ...events[idx], text: block.thinking ?? "" } as ChatEvent,
+            ...events.slice(idx + 1),
+          ];
+        }
         return [
           ...events,
-          {
-            id: `t-${msg.uuid}-${ev.index}`,
-            type: "thinking",
-            text: block.thinking ?? "",
-          },
+          { id, type: "thinking", text: block.thinking ?? "" },
         ];
       }
     }
 
     if (ev.type === "content_block_delta") {
+      // Target the specific block event by id, not "last" — after an attach
+      // replay the last event may not be the one we intend to append to.
       if (ev.delta?.type === "text_delta") {
-        const last = events[events.length - 1];
-        if (last?.type === "assistant") {
-          return [
-            ...events.slice(0, -1),
-            { ...last, text: last.text + ev.delta.text },
-          ];
+        const id = streamBlockId("a", msg, ev.index);
+        let idx = events.findIndex((e) => e.id === id);
+        if (idx < 0 && !msg.stream_message_id) {
+          idx = findLastEventIndex(events, "assistant");
+        }
+        if (idx >= 0) {
+          const target = events[idx];
+          if (target.type === "assistant") {
+            return [
+              ...events.slice(0, idx),
+              { ...target, text: target.text + ev.delta.text },
+              ...events.slice(idx + 1),
+            ];
+          }
         }
       }
       if (ev.delta?.type === "thinking_delta") {
-        const last = events[events.length - 1];
-        if (last?.type === "thinking") {
-          return [
-            ...events.slice(0, -1),
-            { ...last, text: last.text + (ev.delta.thinking ?? "") },
-          ];
+        const id = streamBlockId("t", msg, ev.index);
+        let idx = events.findIndex((e) => e.id === id);
+        if (idx < 0 && !msg.stream_message_id) {
+          idx = findLastEventIndex(events, "thinking");
+        }
+        if (idx >= 0) {
+          const target = events[idx];
+          if (target.type === "thinking") {
+            return [
+              ...events.slice(0, idx),
+              { ...target, text: target.text + (ev.delta.thinking ?? "") },
+              ...events.slice(idx + 1),
+            ];
+          }
         }
       }
     }
@@ -104,7 +191,51 @@ export function applySDKMessage(
 
   if (msg.type === "assistant" && msg.message?.content) {
     let result = events;
-    for (const block of msg.message.content) {
+    const messageId = msg.message.id ?? msg.uuid;
+    for (let i = 0; i < msg.message.content.length; i++) {
+      const block = msg.message.content[i];
+      if (block.type === "text") {
+        const id = `a-${messageId}-${i}`;
+        const text = block.text ?? "";
+        let idx = result.findIndex((e) => e.id === id);
+        if (idx < 0 && text) {
+          idx = findCompatibleTextEventIndex(result, "assistant", text);
+        }
+        if (idx >= 0) {
+          const existing = result[idx];
+          if (existing.type === "assistant") {
+            result = [
+              ...result.slice(0, idx),
+              { ...existing, text },
+              ...result.slice(idx + 1),
+            ];
+          }
+        } else if (text) {
+          result = [...result, { id, type: "assistant", text }];
+        }
+        continue;
+      }
+      if (block.type === "thinking") {
+        const id = `t-${messageId}-${i}`;
+        const text = block.thinking ?? "";
+        let idx = result.findIndex((e) => e.id === id);
+        if (idx < 0 && text) {
+          idx = findCompatibleTextEventIndex(result, "thinking", text);
+        }
+        if (idx >= 0) {
+          const existing = result[idx];
+          if (existing.type === "thinking") {
+            result = [
+              ...result.slice(0, idx),
+              { ...existing, text },
+              ...result.slice(idx + 1),
+            ];
+          }
+        } else if (text) {
+          result = [...result, { id, type: "thinking", text }];
+        }
+        continue;
+      }
       if (block.type === "tool_use") {
         const idx = result.findIndex((e) => e.id === `s-${block.id}`);
         if (idx >= 0) {
@@ -216,16 +347,17 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
       const msg = m.message as any;
       const content = msg?.content;
       if (Array.isArray(content)) {
+        const messageId = msg?.id ?? m.uuid;
         content.forEach((b, i) => {
           if (b?.type === "text" && b.text) {
             events.push({
-              id: `a-${m.uuid}-${i}`,
+              id: `a-${messageId}-${i}`,
               type: "assistant",
               text: b.text,
             });
           } else if (b?.type === "thinking" && b.thinking) {
             events.push({
-              id: `t-${m.uuid}-${i}`,
+              id: `t-${messageId}-${i}`,
               type: "thinking",
               text: b.thinking,
             });

@@ -13,6 +13,10 @@ interface Props {
   onClose: () => void;
 }
 
+// Match server's MAX_OUTPUT_BYTES rolling window so client view stays in sync
+// with what `init` seeds: 256K JS chars per stream.
+const OUTPUT_WINDOW_CHARS = 256 * 1024;
+
 const STATUS_DOT: Record<TaskStatus, string> = {
   running: "bg-amber pulse-dot",
   completed: "bg-green",
@@ -87,16 +91,20 @@ export default function TasksModal({ sessionId, onClose }: Props) {
       setOutput((cur) => {
         if (!cur) return cur;
         if (ev.type === "stdout") {
+          const combined = cur.stdout + ev.chunk;
+          const overflow = Math.max(0, combined.length - OUTPUT_WINDOW_CHARS);
           return {
             ...cur,
-            stdout: cur.stdout + ev.chunk,
+            stdout: overflow ? combined.slice(overflow) : combined,
             stdoutBytes: cur.stdoutBytes + ev.chunk.length,
           };
         }
         if (ev.type === "stderr") {
+          const combined = cur.stderr + ev.chunk;
+          const overflow = Math.max(0, combined.length - OUTPUT_WINDOW_CHARS);
           return {
             ...cur,
-            stderr: cur.stderr + ev.chunk,
+            stderr: overflow ? combined.slice(overflow) : combined,
             stderrBytes: cur.stderrBytes + ev.chunk.length,
           };
         }
@@ -342,7 +350,7 @@ function renderOutput(o: TaskOutput): string {
   }
   if (o.truncated) {
     if (parts.length) parts.push("");
-    parts.push("[output truncated: exceeded 256KB buffer]");
+    parts.push("[rolling window: only the last 256K chars are kept per stream]");
   }
   if (!o.stdout && !o.stderr) {
     return o.status === "running" ? "(还没有输出)" : "(无输出)";

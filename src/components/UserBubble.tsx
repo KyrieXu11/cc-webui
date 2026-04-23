@@ -26,7 +26,7 @@ export default function UserBubble({
       className="flex justify-end msg-enter"
       style={{ animationDelay: `${delay}ms` }}
     >
-      <div className="max-w-[78%] bg-blue text-white px-4 py-2.5 rounded-2xl text-[14.5px] leading-[1.6] flex flex-col gap-2">
+      <div className="user-bubble max-w-[78%] bg-blue text-white px-4 py-2.5 rounded-2xl text-[14.5px] leading-[1.6] flex flex-col gap-2">
         {hasImages && (
           <div className="flex flex-wrap gap-1.5">
             {images!.map((img, i) => (

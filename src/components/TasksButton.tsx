@@ -20,32 +20,26 @@ export default function TasksButton({ sessionId, onOpen, refreshKey }: Props) {
   }, [refreshKey, sessionId]);
 
   const { running, total } = data;
+  if (total === 0) return null;
+
   const label =
-    total === 0
-      ? "no background tasks"
-      : running > 0
-        ? `${running} running · ${total} total`
-        : `${total} finished`;
+    running > 0
+      ? `${running} shell${running > 1 ? "s" : ""}`
+      : `${total} done`;
+  const dotClass = running > 0 ? "bg-amber pulse-dot" : "bg-fg/25";
 
   return (
     <button
       onClick={onOpen}
       className={[
-        "group flex items-center gap-2 px-2.5 h-6 rounded",
+        "flex items-center gap-1.5 px-1.5 h-6 rounded",
         "font-mono text-[11px] tracking-tight",
-        "border border-fg/10 bg-canvas/40 hover:border-fg/25 hover:bg-raised",
         "text-subtle hover:text-fg transition-colors",
       ].join(" ")}
       title="打开后台任务面板"
     >
-      <span
-        className={[
-          "w-1.5 h-1.5 rounded-full",
-          running > 0 ? "bg-amber pulse-dot" : "bg-fg/20",
-        ].join(" ")}
-      />
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
       <span>{label}</span>
-      <span className="text-fg/30 group-hover:text-fg/60">↗</span>
     </button>
   );
 }

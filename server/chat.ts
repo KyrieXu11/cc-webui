@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { SSEStreamingApi } from "hono/streaming";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import os from "node:os";
 import path from "node:path";
@@ -49,9 +50,7 @@ const ALLOWED_EFFORTS: EffortLevel[] = [
 
 // Session-scoped tool allowances: when the user picks "allow_session" on a
 // permission prompt, the tool name is remembered here and future calls for the
-// same sessionId auto-approve without re-prompting. Keyed by the SDK session_id,
-// which can be emitted mid-stream on the very first turn; we migrate the set to
-// the real id when that happens.
+// same sessionId auto-approve without re-prompting.
 const sessionAllowances = new Map<string, Set<string>>();
 
 function getOrCreateAllowance(id: string | undefined): Set<string> {
@@ -64,10 +63,151 @@ function getOrCreateAllowance(id: string | undefined): Set<string> {
   return set;
 }
 
+// ============================================================
+// In-flight chat registry
+// ============================================================
+//
+// Each active SDK turn is represented by an InFlightChat. The turn runs as a
+// detached async task — independent of the HTTP request that started it — so
+// that a browser refresh / tab close / session switch doesn't cancel the
+// generation. All SDK-produced messages are buffered in `messages` and fanned
+// out to every Subscriber. A late-joining client (via GET /chat/attach)
+// replays the buffer and then follows live until the turn ends.
+
+type BufferedMsg = { event: string; data: string };
+
+interface Subscriber {
+  write: (event: string, data: string) => void;
+  close: () => void;
+}
+
+interface InFlightChat {
+  reqId: string;
+  clientTurnId: string | undefined;
+  messages: BufferedMsg[];
+  subscribers: Set<Subscriber>;
+  status: "running" | "done" | "error";
+  errorMsg?: string;
+  sessionId: string | undefined;
+}
+
+const activeChats = new Map<string, InFlightChat>();
+const activeChatsByClientTurn = new Map<string, InFlightChat>();
+
+function removeEntryIfSelf(entry: InFlightChat): void {
+  if (entry.sessionId && activeChats.get(entry.sessionId) === entry) {
+    activeChats.delete(entry.sessionId);
+  }
+  if (
+    entry.clientTurnId &&
+    activeChatsByClientTurn.get(entry.clientTurnId) === entry
+  ) {
+    activeChatsByClientTurn.delete(entry.clientTurnId);
+  }
+}
+
+// Attach a stream to an entry as a subscriber. Replays the current buffer
+// snapshot, then drains live messages until the entry terminates or the
+// stream disconnects. Returns a promise that resolves when the subscriber
+// has fully drained.
+async function attachStreamToEntry(
+  stream: SSEStreamingApi,
+  entry: InFlightChat
+): Promise<void> {
+  const subId = Math.random().toString(36).slice(2, 7);
+  const tag = `[sub ${entry.reqId}/${subId}]`;
+  let writeCount = 0;
+  const queue: BufferedMsg[] = [];
+  let closed = false;
+  let wake: (() => void) | null = null;
+  const doWake = () => {
+    if (wake) {
+      const r = wake;
+      wake = null;
+      r();
+    }
+  };
+
+  // Take a snapshot of already-buffered messages for replay. Subscriber is
+  // registered in the same synchronous block — since JS can't interleave, no
+  // fanout can happen between the two, so no dedup / skip logic is needed:
+  // every message is either in `snapshot` (replayed) or arrives via
+  // sub.write afterwards (queued). Never both, never lost.
+  const snapshot = entry.messages.slice();
+
+  const sub: Subscriber = {
+    write: (event, data) => {
+      if (closed) return;
+      queue.push({ event, data });
+      doWake();
+    },
+    close: () => {
+      closed = true;
+      doWake();
+    },
+  };
+  entry.subscribers.add(sub);
+  console.log(
+    `${tag} attached, snapshot=${snapshot.length}, status=${entry.status}`
+  );
+  stream.onAbort(() => {
+    closed = true;
+    doWake();
+    console.log(`${tag} onAbort, wrote=${writeCount}`);
+  });
+
+  try {
+    // Replay existing buffer (includes done/error if entry has terminated).
+    for (const m of snapshot) {
+      if (closed) break;
+      try {
+        await stream.writeSSE(m);
+        writeCount++;
+      } catch (e) {
+        console.log(`${tag} replay write threw after ${writeCount}:`, (e as any)?.message);
+        closed = true;
+        break;
+      }
+    }
+    // Drain live queue until closed. Keep draining even after close as long
+    // as there are queued items (done/error usually arrives right before
+    // close and we want the client to see it).
+    while (!closed || queue.length > 0) {
+      if (queue.length === 0) {
+        if (closed) break;
+        await new Promise<void>((r) => {
+          wake = r;
+        });
+        continue;
+      }
+      const item = queue.shift()!;
+      try {
+        await stream.writeSSE(item);
+        writeCount++;
+      } catch (e) {
+        console.log(`${tag} live write threw after ${writeCount}:`, (e as any)?.message);
+        closed = true;
+        break;
+      }
+    }
+  } finally {
+    entry.subscribers.delete(sub);
+    console.log(`${tag} detached, total wrote=${writeCount}`);
+  }
+}
+
+// ============================================================
+// POST /chat — start a new turn
+// ============================================================
+
 chat.post("/chat", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const prompt: string = body.prompt ?? "";
   const sessionId: string | undefined = body.sessionId;
+  const clientTurnId: string | undefined =
+    typeof body.clientTurnId === "string" && body.clientTurnId
+      ? body.clientTurnId
+      : undefined;
   const cwd = expandHome(body.cwd || process.env.CC_WEBUI_CWD);
   const model: string | undefined = body.model;
   const permissionMode: PermissionMode | undefined = ALLOWED_MODES.includes(
@@ -95,6 +235,29 @@ chat.post("/chat", async (c) => {
     return c.json({ error: "prompt or images required" }, 400);
   }
 
+  // Reject if same session already has an in-flight turn. Caller should wait
+  // for the prior turn to finish (or switch to attach endpoint to observe it).
+  if (sessionId && activeChats.has(sessionId)) {
+    const prior = activeChats.get(sessionId)!;
+    return c.json(
+      {
+        error: "session_busy",
+        message: `Session ${sessionId} is still processing prior message (reqId ${prior.reqId})`,
+      },
+      409
+    );
+  }
+  if (clientTurnId && activeChatsByClientTurn.has(clientTurnId)) {
+    const prior = activeChatsByClientTurn.get(clientTurnId)!;
+    return c.json(
+      {
+        error: "turn_busy",
+        message: `Turn ${clientTurnId} is still processing (reqId ${prior.reqId})`,
+      },
+      409
+    );
+  }
+
   const reqId = randomUUID().slice(0, 8);
   const t0 = Date.now();
   const elapsed = () => `${((Date.now() - t0) / 1000).toFixed(2)}s`;
@@ -104,18 +267,29 @@ chat.post("/chat", async (c) => {
       ` images=${images.length} prompt=${JSON.stringify(prompt.slice(0, 80))}`
   );
 
-  return streamSSE(c, async (stream) => {
-    let aborted = false;
-    const ac = new AbortController();
-    stream.onAbort(() => {
-      aborted = true;
-      ac.abort();
-      console.log(`[chat ${reqId}] SSE aborted at ${elapsed()}`);
-    });
+  const entry: InFlightChat = {
+    reqId,
+    clientTurnId,
+    messages: [],
+    subscribers: new Set(),
+    status: "running",
+    sessionId,
+  };
+  if (sessionId) activeChats.set(sessionId, entry);
+  if (clientTurnId) activeChatsByClientTurn.set(clientTurnId, entry);
 
-    let currentSessionId = sessionId;
-    const allowance = getOrCreateAllowance(currentSessionId);
+  let currentSessionId = sessionId;
+  const allowance = getOrCreateAllowance(currentSessionId);
 
+  // Broadcast: append to buffer + push to every subscriber synchronously.
+  const fanout = (event: string, data: string) => {
+    const item: BufferedMsg = { event, data };
+    entry.messages.push(item);
+    for (const sub of entry.subscribers) sub.write(event, data);
+  };
+
+  // Detached SDK run — lives past the HTTP request's lifetime.
+  (async () => {
     try {
       const queryPrompt =
         images.length > 0
@@ -174,15 +348,17 @@ chat.post("/chat", async (c) => {
             const id = randomUUID();
             const displayTool =
               toolName === MCP_BASH_RUN ? "Bash" : toolName;
-            await stream.writeSSE({
-              event: "permission_request",
-              data: JSON.stringify({
+            // Fan out the permission prompt so any subscriber (initiator or
+            // reconnect attach) can surface the card and answer it.
+            fanout(
+              "permission_request",
+              JSON.stringify({
                 type: "permission_request",
                 id,
                 tool: displayTool,
                 input,
-              }),
-            });
+              })
+            );
             const decision = await awaitPermission(id, opts.signal);
             if (decision.behavior === "allow") {
               return { behavior: "allow", updatedInput: input };
@@ -197,8 +373,8 @@ chat.post("/chat", async (c) => {
       });
 
       let msgCount = 0;
+      let currentStreamMessageId: string | undefined;
       for await (const msg of response) {
-        if (aborted) break;
         msgCount++;
         const tag =
           (msg as any).type +
@@ -206,7 +382,44 @@ chat.post("/chat", async (c) => {
         if (msgCount <= 20 || msgCount % 50 === 0) {
           console.log(`[chat ${reqId}] msg #${msgCount} ${tag} @${elapsed()}`);
         }
-        const emittedId = (msg as any).session_id as string | undefined;
+        // Diagnostic: dump status messages and any tool_use content blocks so
+        // we can see why the model isn't actually invoking mcp__bash__run.
+        const m = msg as any;
+        if (m.type === "system" && m.subtype === "status") {
+          console.log(
+            `[chat ${reqId}] status payload: ${JSON.stringify(m).slice(0, 500)}`
+          );
+        }
+        if (
+          m.type === "stream_event" &&
+          m.event?.type === "content_block_start"
+        ) {
+          const cb = m.event.content_block;
+          if (cb?.type === "tool_use") {
+            console.log(
+              `[chat ${reqId}] tool_use: ${cb.name} input=${JSON.stringify(cb.input ?? {}).slice(0, 200)}`
+            );
+          }
+        }
+
+        let outboundMsg = msg as any;
+        if (outboundMsg.type === "stream_event" && outboundMsg.event) {
+          const ev = outboundMsg.event;
+          if (ev.type === "message_start") {
+            currentStreamMessageId =
+              ev.message?.id ?? outboundMsg.uuid ?? currentStreamMessageId;
+          }
+          if (currentStreamMessageId) {
+            outboundMsg = {
+              ...outboundMsg,
+              stream_message_id: currentStreamMessageId,
+            };
+          }
+        }
+
+        // Migrate session identity the moment SDK emits a real session_id.
+        // Re-key sessionAllowances, task sessionIds, and activeChats together.
+        const emittedId = m.session_id as string | undefined;
         if (emittedId && emittedId !== currentSessionId) {
           const previousId = currentSessionId;
           if (!previousId) {
@@ -216,27 +429,70 @@ chat.post("/chat", async (c) => {
             sessionAllowances.set(emittedId, allowance);
           }
           relabelTasksSessionId(previousId, emittedId);
+          if (previousId && activeChats.get(previousId) === entry) {
+            activeChats.delete(previousId);
+          }
+          activeChats.set(emittedId, entry);
+          entry.sessionId = emittedId;
           currentSessionId = emittedId;
         }
-        await stream.writeSSE({
-          event: msg.type,
-          data: JSON.stringify(msg),
-        });
+
+        fanout(outboundMsg.type, JSON.stringify(outboundMsg));
+        if (
+          outboundMsg.type === "stream_event" &&
+          outboundMsg.event?.type === "message_stop"
+        ) {
+          currentStreamMessageId = undefined;
+        }
       }
 
       console.log(
-        `[chat ${reqId}] done aborted=${aborted} msgs=${msgCount} in ${elapsed()}`
+        `[chat ${reqId}] done msgs=${msgCount} in ${elapsed()}`
       );
-      await stream.writeSSE({ event: "done", data: "" });
+      entry.status = "done";
+      fanout("done", "");
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error(`[chat ${reqId}] ERROR at ${elapsed()}:`, err);
-      await stream.writeSSE({
-        event: "error",
-        data: JSON.stringify({
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      });
+      entry.status = "error";
+      entry.errorMsg = message;
+      fanout("error", JSON.stringify({ message }));
+    } finally {
+      // Close subscribers so their drain loops wake up and exit. The terminal
+      // event ("done" / "error") has already been fanned out into their
+      // queues; the drain loop is keyed off `!closed || queue.length > 0`.
+      for (const sub of [...entry.subscribers]) sub.close();
+      removeEntryIfSelf(entry);
     }
+  })().catch((err) =>
+    console.error(`[chat ${reqId}] unhandled in detached task:`, err)
+  );
+
+  return streamSSE(c, async (stream) => {
+    await attachStreamToEntry(stream, entry);
+  });
+});
+
+// ============================================================
+// GET /chat/attach — reconnect to an in-flight turn
+// ============================================================
+
+chat.get("/chat/attach", (c) => {
+  const sessionId = c.req.query("sessionId");
+  const clientTurnId = c.req.query("clientTurnId");
+  return streamSSE(c, async (stream) => {
+    if (!sessionId && !clientTurnId) {
+      await stream.writeSSE({ event: "no-inflight", data: "" });
+      return;
+    }
+    const entry =
+      (sessionId ? activeChats.get(sessionId) : undefined) ??
+      (clientTurnId ? activeChatsByClientTurn.get(clientTurnId) : undefined);
+    if (!entry) {
+      await stream.writeSSE({ event: "no-inflight", data: "" });
+      return;
+    }
+    await attachStreamToEntry(stream, entry);
   });
 });
 
