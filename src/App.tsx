@@ -99,6 +99,28 @@ function ensureActiveTurnUserEvent(
   return hasPrompt ? events : [...events, activeTurnUserEvent(turn)];
 }
 
+function isVisibleProgress(ev: ChatEvent): boolean {
+  if (ev.type === "assistant" || ev.type === "thinking") {
+    return ev.text.trim().length > 0;
+  }
+  return (
+    ev.type === "step" || ev.type === "permission" || ev.type === "summary"
+  );
+}
+
+function shouldShowPending(events: ChatEvent[], busy: boolean): boolean {
+  if (!busy) return false;
+  let lastUserIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "user") {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  if (lastUserIndex < 0) return false;
+  return !events.slice(lastUserIndex + 1).some(isVisibleProgress);
+}
+
 export default function App() {
   const [allEvents, setAllEvents] = useState<ChatEvent[]>([]);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
@@ -809,10 +831,7 @@ export default function App() {
                         expandedSteps={expandedSteps}
                         onToggleStep={toggleStep}
                         onAnswerPermission={answerPermission}
-                        isPending={
-                          busy &&
-                          allEvents[allEvents.length - 1]?.type === "user"
-                        }
+                        isPending={shouldShowPending(allEvents, busy)}
                         retryInfo={retryInfo}
                         onPreviewImage={previewAttachedImage}
                       />

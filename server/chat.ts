@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -18,6 +19,17 @@ const SYSTEM_PROMPT_BASH_APPEND =
   "Do not try to invoke the built-in Bash — it will be rejected.";
 
 const chat = new Hono();
+const KEEPALIVE_MS = 15_000;
+
+function streamSSEUnbuffered(
+  c: Context,
+  cb: (stream: SSEStreamingApi) => Promise<void>
+): Response {
+  const res = streamSSE(c, cb);
+  res.headers.set("Cache-Control", "no-cache, no-transform");
+  res.headers.set("X-Accel-Buffering", "no");
+  return res;
+}
 
 function expandHome(p: string | undefined): string | undefined {
   if (!p) return undefined;
@@ -151,6 +163,9 @@ async function attachStreamToEntry(
     },
   };
   entry.subscribers.add(sub);
+  const keepAlive = setInterval(() => {
+    sub.write("ping", "");
+  }, KEEPALIVE_MS);
   console.log(
     `${tag} attached, snapshot=${snapshot.length}, status=${entry.status}`
   );
@@ -161,6 +176,13 @@ async function attachStreamToEntry(
   });
 
   try {
+    try {
+      await stream.writeSSE({ event: "ping", data: "" });
+      writeCount++;
+    } catch (e) {
+      console.log(`${tag} initial ping threw:`, (e as any)?.message);
+      closed = true;
+    }
     // Replay existing buffer (includes done/error if entry has terminated).
     for (const m of snapshot) {
       if (closed) break;
@@ -195,6 +217,7 @@ async function attachStreamToEntry(
       }
     }
   } finally {
+    clearInterval(keepAlive);
     entry.subscribers.delete(sub);
     console.log(`${tag} detached, total wrote=${writeCount}`);
   }
@@ -493,7 +516,7 @@ chat.post("/chat", async (c) => {
     console.error(`[chat ${reqId}] unhandled in detached task:`, err)
   );
 
-  return streamSSE(c, async (stream) => {
+  return streamSSEUnbuffered(c, async (stream) => {
     await attachStreamToEntry(stream, entry);
   });
 });
@@ -545,7 +568,7 @@ chat.get("/chat/inflight", (c) => {
 chat.get("/chat/attach", (c) => {
   const sessionId = c.req.query("sessionId");
   const clientTurnId = c.req.query("clientTurnId");
-  return streamSSE(c, async (stream) => {
+  return streamSSEUnbuffered(c, async (stream) => {
     if (!sessionId && !clientTurnId) {
       await stream.writeSSE({ event: "no-inflight", data: "" });
       return;

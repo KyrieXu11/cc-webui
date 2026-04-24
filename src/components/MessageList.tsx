@@ -97,6 +97,7 @@ export default function MessageList({
               />
             );
           case "assistant":
+            if (!ev.text.trim()) return null;
             return <AssistantText key={ev.id} text={ev.text} delay={0} />;
           case "thinking":
             if (!ev.text.trim()) return null;
