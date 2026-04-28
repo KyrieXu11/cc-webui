@@ -2,6 +2,15 @@
 
 一个自托管的 Claude Code 网页客户端。把 `@anthropic-ai/claude-agent-sdk` 包成 SSE 流，配一个 React 前端，用浏览器跟 Claude Code 对话。
 
+![chat view](docs/screenshots/chat.png)
+
+<details>
+<summary>主页 / 最近项目</summary>
+
+![home view](docs/screenshots/home.png)
+
+</details>
+
 ## 功能
 
 - **项目管理** — 扫描 `$HOME` 列出所有候选目录，可搜索打开；最近项目按会话归类展示
