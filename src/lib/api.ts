@@ -122,6 +122,10 @@ export function connectAttach(
     "user",
     "stream_event",
     "permission_request",
+    "foreground_started",
+    "foreground_ended",
+    "wakeup_pending",
+    "wakeup_turn_started",
   ]) {
     es.addEventListener(t, forward);
   }

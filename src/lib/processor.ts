@@ -60,6 +60,19 @@ export function applySDKMessage(
     return events;
   }
 
+  if (msg.type === "wakeup_turn_started" && typeof msg.prompt === "string") {
+    const id = `u-wakeup-${msg.reqId ?? msg.sessionId ?? msg.prompt}`;
+    if (events.some((e) => e.id === id)) return events;
+    return [
+      ...events,
+      {
+        id,
+        type: "user",
+        text: msg.prompt,
+      },
+    ];
+  }
+
   if (msg.type === "permission_request" && msg.id) {
     const id = `p-${msg.id}`;
     if (events.some((e) => e.id === id)) return events;
@@ -72,6 +85,13 @@ export function applySDKMessage(
         tool: msg.tool ?? "unknown",
         input: msg.input ?? {},
         toolUseId: typeof msg.toolUseId === "string" ? msg.toolUseId : undefined,
+        title: typeof msg.title === "string" ? msg.title : undefined,
+        displayName:
+          typeof msg.displayName === "string" ? msg.displayName : undefined,
+        description:
+          typeof msg.description === "string" ? msg.description : undefined,
+        hasSessionPermissionSuggestions:
+          msg.hasSessionPermissionSuggestions === true,
       },
     ];
   }

@@ -1,6 +1,10 @@
 export type StepStatus = "ok" | "pending" | "error";
 
-export type PermissionDecision = "allow" | "allow_session" | "deny";
+export type PermissionDecision =
+  | "allow"
+  | "allow_session"
+  | "allow_tool_session"
+  | "deny";
 
 export type ImageAttachment = {
   name?: string;
@@ -34,6 +38,10 @@ export type ChatEvent =
       input: Record<string, any>;
       resolved?: PermissionDecision;
       toolUseId?: string;
+      title?: string;
+      displayName?: string;
+      description?: string;
+      hasSessionPermissionSuggestions?: boolean;
     }
   | {
       id: string;

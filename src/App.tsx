@@ -14,7 +14,13 @@ import HelpModal from "./components/HelpModal";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
 import type { ChatEvent, PermissionDecision } from "./lib/types";
-import { streamChat, connectAttach, cancelChat, type ImageAttachment } from "./lib/api";
+import {
+  streamChat,
+  connectAttach,
+  cancelChat,
+  getInflightSessions,
+  type ImageAttachment,
+} from "./lib/api";
 import { detachForeground } from "./lib/tasks";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
@@ -31,6 +37,7 @@ import { sendPermission } from "./lib/permission";
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
 const ACTIVE_TURN_KEY = "cc-webui:activeTurn";
+const INFLIGHT_ATTACH_POLL_MS = 3000;
 
 type ActiveTurn = {
   clientTurnId: string;
@@ -152,6 +159,7 @@ export default function App() {
   const [activeForegrounds, setActiveForegrounds] = useState<
     Array<{ fgId: string; command: string }>
   >([]);
+  const [attachRetryNonce, setAttachRetryNonce] = useState(0);
 
   const LOCAL_COMMANDS = ["skills", "help", "clear", "exit"];
   const mergedSlashCommands = [
@@ -292,15 +300,15 @@ export default function App() {
     decision: PermissionDecision,
     message?: string
   ) => {
-    setAllEvents((prev) =>
-      prev.map((e) =>
-        e.type === "permission" && e.permissionId === permissionId
-          ? { ...e, resolved: decision }
-          : e
-      )
-    );
     try {
       await sendPermission(permissionId, decision, message);
+      setAllEvents((prev) =>
+        prev.map((e) =>
+          e.type === "permission" && e.permissionId === permissionId
+            ? { ...e, resolved: decision }
+            : e
+        )
+      );
     } catch (err) {
       console.error("permission resolve failed:", err);
     }
@@ -311,6 +319,31 @@ export default function App() {
     : sessionId
       ? `session:${sessionId}`
       : "";
+
+  // Wakeup-triggered turns start on the server without an initiating browser
+  // request, so no EventSource exists yet. Poll the lightweight in-flight
+  // registry and nudge the normal attach effect when the currently-open
+  // session becomes active.
+  useEffect(() => {
+    if (!sessionId || !projectCwd) return;
+    let alive = true;
+    const tick = () => {
+      if (isStreaming || attachedStreaming || loadingSession) return;
+      getInflightSessions()
+        .then((set) => {
+          if (!alive) return;
+          if (set.has(sessionId)) {
+            setAttachRetryNonce((n) => n + 1);
+          }
+        })
+        .catch(() => {});
+    };
+    const timer = setInterval(tick, INFLIGHT_ATTACH_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [sessionId, projectCwd, isStreaming, attachedStreaming, loadingSession]);
 
   // Auto-attach to any in-flight SDK turn. The clientTurnId path covers a
   // refresh during the first seconds of a brand-new chat, before the SDK has
@@ -383,7 +416,7 @@ export default function App() {
       setActiveForegrounds([]);
       unsub();
     };
-  }, [attachKey, isStreaming, loadingSession, projectCwd]);
+  }, [attachKey, attachRetryNonce, isStreaming, loadingSession, projectCwd]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

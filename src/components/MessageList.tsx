@@ -116,6 +116,11 @@ export default function MessageList({
                 tool={ev.tool}
                 input={ev.input}
                 resolved={ev.resolved}
+                title={ev.title}
+                description={ev.description}
+                hasSessionPermissionSuggestions={
+                  ev.hasSessionPermissionSuggestions
+                }
                 delay={0}
                 onAnswer={(decision, message) =>
                   onAnswerPermission(ev.permissionId, decision, message)

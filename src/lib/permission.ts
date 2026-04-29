@@ -11,4 +11,6 @@ export async function sendPermission(
     body: JSON.stringify({ behavior, message }),
   });
   if (!res.ok) throw new Error(`permission resolve failed: ${res.status}`);
+  const data = await res.json().catch(() => null);
+  if (!data?.ok) throw new Error("permission request is no longer pending");
 }
