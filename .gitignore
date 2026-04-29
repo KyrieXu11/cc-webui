@@ -8,3 +8,4 @@ dist/
 .vite/
 .cache/
 .claude/
+.playwright-mcp/

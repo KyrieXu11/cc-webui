@@ -5,6 +5,9 @@ interface Props {
   tool: string;
   input: Record<string, any>;
   resolved?: PermissionDecision;
+  title?: string;
+  description?: string;
+  hasSessionPermissionSuggestions?: boolean;
   delay?: number;
   onAnswer: (decision: PermissionDecision, message?: string) => void;
 }
@@ -35,7 +38,8 @@ function summarizeInput(tool: string, input: Record<string, any>): string {
 
 const RESOLVED_LABEL: Record<PermissionDecision, string> = {
   allow: "已允许本次",
-  allow_session: "本次会话都允许",
+  allow_session: "已按规则允许本会话",
+  allow_tool_session: "已允许同名工具",
   deny: "已拒绝",
 };
 
@@ -43,6 +47,9 @@ export default function PermissionCard({
   tool,
   input,
   resolved,
+  title,
+  description,
+  hasSessionPermissionSuggestions = false,
   delay = 0,
   onAnswer,
 }: Props) {
@@ -75,6 +82,17 @@ export default function PermissionCard({
         )}
       </div>
 
+      {(title || description) && (
+        <div className="mb-3">
+          {title && <div className="text-[13px] text-fg">{title}</div>}
+          {description && (
+            <div className="mt-1 text-[12px] leading-relaxed text-muted">
+              {description}
+            </div>
+          )}
+        </div>
+      )}
+
       {summary && (
         <pre className="bg-canvas/50 border border-fg/10 rounded-md p-2.5 mb-4 max-h-[9em] overflow-y-auto font-mono text-[12px] leading-[1.55] text-muted whitespace-pre-wrap break-all">
           {summary}
@@ -105,9 +123,27 @@ export default function PermissionCard({
                 ? btnLocked
                 : btnIdle
           }`}
-          title={`本次对话内所有 ${tool} 调用都自动放行`}
+          title={
+            hasSessionPermissionSuggestions
+              ? "按 Claude Code 建议的会话规则放行同类请求"
+              : "当前请求没有 Claude Code 会话规则，将按同一工具和同一输入放行"
+          }
         >
-          本次会话都允许
+          按规则允许本会话
+        </button>
+        <button
+          disabled={locked}
+          onClick={() => onAnswer("allow_tool_session")}
+          className={`${btnBase} ${
+            resolved === "allow_tool_session"
+              ? "bg-blue border-blue text-white"
+              : locked
+                ? btnLocked
+                : btnIdle
+          }`}
+          title={`本次 WebUI 会话内所有 ${tool} 调用都自动放行`}
+        >
+          同名工具都允许
         </button>
         <button
           disabled={locked}

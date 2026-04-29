@@ -1,5 +1,5 @@
 import type { ChatEvent, ImageAttachment, StepStatus } from "./types";
-import type { SessionMessage } from "./sessions";
+import type { CodexSessionTurn, SessionHistoryItem, SessionMessage } from "./sessions";
 
 const TOOL_ALIAS: Record<string, string> = {
   "mcp__bash__run": "Bash",
@@ -85,6 +85,19 @@ export function applySDKMessage(
     return events;
   }
 
+  if (msg.type === "wakeup_turn_started" && typeof msg.prompt === "string") {
+    const id = `u-wakeup-${msg.reqId ?? msg.sessionId ?? msg.prompt}`;
+    if (events.some((e) => e.id === id)) return events;
+    return [
+      ...events,
+      {
+        id,
+        type: "user",
+        text: msg.prompt,
+      },
+    ];
+  }
+
   if (msg.type === "permission_request" && msg.id) {
     const id = `p-${msg.id}`;
     if (events.some((e) => e.id === id)) return events;
@@ -97,6 +110,13 @@ export function applySDKMessage(
         tool: msg.tool ?? "unknown",
         input: msg.input ?? {},
         toolUseId: typeof msg.toolUseId === "string" ? msg.toolUseId : undefined,
+        title: typeof msg.title === "string" ? msg.title : undefined,
+        displayName:
+          typeof msg.displayName === "string" ? msg.displayName : undefined,
+        description:
+          typeof msg.description === "string" ? msg.description : undefined,
+        hasSessionPermissionSuggestions:
+          msg.hasSessionPermissionSuggestions === true,
       },
     ];
   }
@@ -421,14 +441,30 @@ function upsertStepEvent(
   ];
 }
 
-export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
+export function sessionMessagesToEvents(msgs: SessionHistoryItem[]): ChatEvent[] {
   const events: ChatEvent[] = [];
   for (const m of msgs) {
-    if (m.type === "user") {
-      const msg = m.message as any;
+    if ((m as CodexSessionTurn).provider === "codex") {
+      const turn = m as CodexSessionTurn;
+      if (turn.prompt.trim()) {
+        events.push({
+          id: `u-codex-${turn.startedAt}`,
+          type: "user",
+          text: turn.prompt,
+        });
+      }
+      for (const ev of turn.events) {
+        const next = applySDKMessage(events, ev, () => {});
+        events.splice(0, events.length, ...next);
+      }
+      continue;
+    }
+    const claudeMsg = m as SessionMessage;
+    if (claudeMsg.type === "user") {
+      const msg = claudeMsg.message as any;
       const c = msg?.content;
       if (typeof c === "string" && c.trim()) {
-        events.push({ id: `u-${m.uuid}`, type: "user", text: c });
+        events.push({ id: `u-${claudeMsg.uuid}`, type: "user", text: c });
       } else if (Array.isArray(c)) {
         const images: ImageAttachment[] = [];
         for (const b of c) {
@@ -462,7 +498,7 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
             }
           } else if (b?.type === "text" && b.text) {
             events.push({
-              id: `u-${m.uuid}-${events.length}`,
+              id: `u-${claudeMsg.uuid}-${events.length}`,
               type: "user",
               text: b.text,
               images: attachIfFirst(),
@@ -471,18 +507,18 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
         }
         if (images.length > 0 && !attachedImages) {
           events.push({
-            id: `u-${m.uuid}-img`,
+            id: `u-${claudeMsg.uuid}-img`,
             type: "user",
             text: "",
             images,
           });
         }
       }
-    } else if (m.type === "assistant") {
-      const msg = m.message as any;
+    } else if (claudeMsg.type === "assistant") {
+      const msg = claudeMsg.message as any;
       const content = msg?.content;
       if (Array.isArray(content)) {
-        const messageId = msg?.id ?? m.uuid;
+        const messageId = msg?.id ?? claudeMsg.uuid;
         content.forEach((b, i) => {
           if (b?.type === "text" && b.text) {
             events.push({

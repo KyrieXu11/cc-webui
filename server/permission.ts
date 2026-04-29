@@ -8,6 +8,7 @@ type PendingEntry = {
 export type PermissionDecision =
   | { behavior: "allow" }
   | { behavior: "allow_session" }
+  | { behavior: "allow_tool_session" }
   | { behavior: "deny"; message: string };
 
 const pending = new Map<string, PendingEntry>();
@@ -77,10 +78,14 @@ permissionRoute.post("/:id", async (c) => {
   if (
     behavior !== "allow" &&
     behavior !== "allow_session" &&
+    behavior !== "allow_tool_session" &&
     behavior !== "deny"
   ) {
     return c.json(
-      { error: "behavior must be allow, allow_session, or deny" },
+      {
+        error:
+          "behavior must be allow, allow_session, allow_tool_session, or deny",
+      },
       400
     );
   }
@@ -89,6 +94,8 @@ permissionRoute.post("/:id", async (c) => {
       ? { behavior: "allow" }
       : behavior === "allow_session"
         ? { behavior: "allow_session" }
+        : behavior === "allow_tool_session"
+          ? { behavior: "allow_tool_session" }
         : { behavior: "deny", message: body.message || "user denied" };
   const ok = resolvePermission(id, decision);
   return c.json({ ok });

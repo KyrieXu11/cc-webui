@@ -14,7 +14,13 @@ import HelpModal from "./components/HelpModal";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
 import type { ChatEvent, PermissionDecision } from "./lib/types";
-import { streamChat, connectAttach, cancelChat, type ImageAttachment } from "./lib/api";
+import {
+  streamChat,
+  connectAttach,
+  cancelChat,
+  getInflightSessions,
+  type ImageAttachment,
+} from "./lib/api";
 import { detachForeground } from "./lib/tasks";
 import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
@@ -22,6 +28,7 @@ import {
   saveSettings,
   defaultModelForProvider,
   modelOptionsForProvider,
+  supportsXhighEffort,
   type AgentProvider,
   type PermissionMode,
   type Settings,
@@ -34,6 +41,7 @@ import { sendPermission } from "./lib/permission";
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
 const ACTIVE_TURN_KEY = "cc-webui:activeTurn";
+const INFLIGHT_ATTACH_POLL_MS = 3000;
 
 type ActiveTurn = {
   clientTurnId: string;
@@ -104,6 +112,28 @@ function ensureActiveTurnUserEvent(
   return hasPrompt ? events : [...events, activeTurnUserEvent(turn)];
 }
 
+function isVisibleProgress(ev: ChatEvent): boolean {
+  if (ev.type === "assistant" || ev.type === "thinking") {
+    return ev.text.trim().length > 0;
+  }
+  return (
+    ev.type === "step" || ev.type === "permission" || ev.type === "summary"
+  );
+}
+
+function shouldShowPending(events: ChatEvent[], busy: boolean): boolean {
+  if (!busy) return false;
+  let lastUserIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "user") {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  if (lastUserIndex < 0) return false;
+  return !events.slice(lastUserIndex + 1).some(isVisibleProgress);
+}
+
 export default function App() {
   const [allEvents, setAllEvents] = useState<ChatEvent[]>([]);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
@@ -135,6 +165,7 @@ export default function App() {
   const [activeForegrounds, setActiveForegrounds] = useState<
     Array<{ fgId: string; command: string }>
   >([]);
+  const [attachRetryNonce, setAttachRetryNonce] = useState(0);
 
   const LOCAL_COMMANDS = ["skills", "help", "clear", "exit"];
   const mergedSlashCommands = [
@@ -193,17 +224,28 @@ export default function App() {
         ? (JSON.parse(raw) as {
             cwd?: string;
             sessionId?: string | null;
+            agentProvider?: AgentProvider;
           })
         : null;
       const cwd = saved?.cwd || active?.cwd;
       if (!cwd) return;
+      const restoreProvider = saved?.agentProvider || active?.agentProvider || "claude";
+      setSettings((cur) =>
+        cur.agentProvider === restoreProvider
+          ? cur
+          : {
+              ...cur,
+              agentProvider: restoreProvider,
+              model: defaultModelForProvider(restoreProvider),
+            }
+      );
       setProjectCwd(cwd);
       setSidebarOpen(true);
       const restoreSessionId = saved?.sessionId || active?.sessionId || null;
       if (restoreSessionId) {
         setSessionId(restoreSessionId);
         setLoadingSession(true);
-        getSessionMessages(restoreSessionId, cwd)
+        getSessionMessages(restoreSessionId, cwd, 5000, restoreProvider)
           .then((msgs) => {
             forceScrollBottom.current = true;
             setAllEvents(
@@ -231,13 +273,17 @@ export default function App() {
       } else {
         localStorage.setItem(
           "cc-webui:lastProject",
-          JSON.stringify({ cwd: projectCwd, sessionId })
+          JSON.stringify({
+            cwd: projectCwd,
+            sessionId,
+            agentProvider: settings.agentProvider,
+          })
         );
       }
     } catch {
       /* ignore */
     }
-  }, [projectCwd, sessionId]);
+  }, [projectCwd, sessionId, settings.agentProvider]);
 
   useEffect(() => {
     if (!projectCwd) return;
@@ -275,15 +321,15 @@ export default function App() {
     decision: PermissionDecision,
     message?: string
   ) => {
-    setAllEvents((prev) =>
-      prev.map((e) =>
-        e.type === "permission" && e.permissionId === permissionId
-          ? { ...e, resolved: decision }
-          : e
-      )
-    );
     try {
       await sendPermission(permissionId, decision, message);
+      setAllEvents((prev) =>
+        prev.map((e) =>
+          e.type === "permission" && e.permissionId === permissionId
+            ? { ...e, resolved: decision }
+            : e
+        )
+      );
     } catch (err) {
       console.error("permission resolve failed:", err);
     }
@@ -294,6 +340,38 @@ export default function App() {
     : sessionId
       ? `${settings.agentProvider}:session:${sessionId}`
       : "";
+
+  // Wakeup-triggered turns start on the server without an initiating browser
+  // request, so no EventSource exists yet. Poll the lightweight in-flight
+  // registry and nudge the normal attach effect when the currently-open
+  // session becomes active.
+  useEffect(() => {
+    if (!sessionId || !projectCwd) return;
+    let alive = true;
+    const tick = () => {
+      if (isStreaming || attachedStreaming || loadingSession) return;
+      getInflightSessions(settings.agentProvider)
+        .then((set) => {
+          if (!alive) return;
+          if (set.has(sessionId)) {
+            setAttachRetryNonce((n) => n + 1);
+          }
+        })
+        .catch(() => {});
+    };
+    const timer = setInterval(tick, INFLIGHT_ATTACH_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [
+    sessionId,
+    projectCwd,
+    settings.agentProvider,
+    isStreaming,
+    attachedStreaming,
+    loadingSession,
+  ]);
 
   // Auto-attach to any in-flight SDK turn. The clientTurnId path covers a
   // refresh during the first seconds of a brand-new chat, before the SDK has
@@ -367,7 +445,14 @@ export default function App() {
       setActiveForegrounds([]);
       unsub();
     };
-  }, [attachKey, isStreaming, loadingSession, projectCwd, settings.agentProvider]);
+  }, [
+    attachKey,
+    attachRetryNonce,
+    isStreaming,
+    loadingSession,
+    projectCwd,
+    settings.agentProvider,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -465,11 +550,13 @@ export default function App() {
     clearActiveTurnState();
     setProjectCwd(s.cwd);
     setSessionId(s.sessionId);
-    setSettings((cur) =>
-      cur.agentProvider === "claude"
-        ? cur
-        : { ...cur, agentProvider: "claude", model: defaultModelForProvider("claude") }
-    );
+    setSettings((cur) => {
+      const modelOptions = modelOptionsForProvider(s.provider);
+      const model = modelOptions.some((m) => m.id === cur.model)
+        ? cur.model
+        : defaultModelForProvider(s.provider);
+      return { ...cur, agentProvider: s.provider, model };
+    });
     setSidebarOpen(true);
     setDialogOpen(false);
     setAllEvents([]);
@@ -477,7 +564,7 @@ export default function App() {
     setLoadingSession(true);
     addRecent(s.cwd).catch(() => {});
     try {
-      const msgs = await getSessionMessages(s.sessionId, s.cwd);
+      const msgs = await getSessionMessages(s.sessionId, s.cwd, 5000, s.provider);
       forceScrollBottom.current = true;
       setAllEvents(sessionMessagesToEvents(msgs));
     } catch (err) {
@@ -500,10 +587,7 @@ export default function App() {
   const updateModel = (model: string) =>
     setSettings((s) => {
       const next = { ...s, model };
-      if (
-        (s.agentProvider !== "claude" || model !== "opus") &&
-        s.effort === "xhigh"
-      ) {
+      if (!supportsXhighEffort(model) && s.effort === "xhigh") {
         next.effort = "high";
       }
       return next;
@@ -523,7 +607,10 @@ export default function App() {
         ...s,
         agentProvider,
         model,
-        effort: agentProvider === "claude" ? s.effort : "medium",
+        effort:
+          s.effort === "xhigh" && !supportsXhighEffort(model)
+            ? "high"
+            : s.effort,
       };
     });
   };
@@ -801,6 +888,7 @@ export default function App() {
           <ProjectSidebar
             cwd={projectCwd}
             home={home}
+            currentProvider={settings.agentProvider}
             currentSessionId={sessionId}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
@@ -848,10 +936,7 @@ export default function App() {
                         expandedSteps={expandedSteps}
                         onToggleStep={toggleStep}
                         onAnswerPermission={answerPermission}
-                        isPending={
-                          busy &&
-                          allEvents[allEvents.length - 1]?.type === "user"
-                        }
+                        isPending={shouldShowPending(allEvents, busy)}
                         retryInfo={retryInfo}
                         onPreviewImage={previewAttachedImage}
                       />
@@ -883,11 +968,13 @@ export default function App() {
                   slashCommands={mergedSlashCommands}
                   onPickSlash={handlePickSlash}
                   rightSlot={
-                    <TasksButton
-                      sessionId={sessionId}
-                      onOpen={() => setTasksOpen(true)}
-                      refreshKey={tasksRefreshKey}
-                    />
+                    settings.agentProvider === "claude" ? (
+                      <TasksButton
+                        sessionId={sessionId}
+                        onOpen={() => setTasksOpen(true)}
+                        refreshKey={tasksRefreshKey}
+                      />
+                    ) : null
                   }
                 />
               </div>
@@ -895,6 +982,8 @@ export default function App() {
           </>
         ) : (
           <HomeView
+            provider={settings.agentProvider}
+            onProviderChange={updateProvider}
             onOpenSession={openSession}
             onOpenProject={openProject}
             onClickOpen={() => setDialogOpen(true)}

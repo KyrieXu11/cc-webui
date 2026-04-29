@@ -1,6 +1,15 @@
 # cc-webui (Web Code)
 
-一个自托管的 Claude Code 网页客户端。把 `@anthropic-ai/claude-agent-sdk` 包成 SSE 流，配一个 React 前端，用浏览器跟 Claude Code 对话。
+一个自托管的 Code Agent 网页客户端。后端把 Claude Code SDK 和 Codex SDK 统一包成 SSE 流，前端用同一个工作台在浏览器里切换 provider、恢复会话和跟代码代理协作。
+
+![chat view](docs/screenshots/chat.png)
+
+<details>
+<summary>主页 / 最近项目</summary>
+
+![home view](docs/screenshots/home.png)
+
+</details>
 
 ## 功能
 
@@ -8,6 +17,7 @@
 - **会话恢复** — 直接打开 `~/.claude/projects/` 里已有的历史会话并继续聊
 - **搜索** — Header 中央搜索框同时匹配 **最近项目路径** 和 **会话标题**（`summary / firstPrompt / customTitle`），↑↓ 键盘导航
 - **流式渲染** — SDK 的 token 级 deltas、工具调用时间线、tool_result 结果
+- **Provider 入口** — Composer 模型菜单里可在 Claude / Codex 之间切换；项目侧栏按当前 provider 分开列会话，主页和搜索里用小标签标识历史会话来源
 - **刷新 / 切 session 不打断生成** — SDK 请求解耦于 HTTP 连接。回复到一半刷新页面或切到别的 session，后端继续跑到 turn 完整写到 jsonl；回来后自动 `attach` 续流，看到完整结果。多 tab 打开同 session 一起同步
 - **停止生成** — 生成中，send 按钮变成红色 ■，点一下调 `response.return()` 立刻终止 SDK 迭代器。已经流出的文字保留在 UI，turn 不写 jsonl（和 ChatGPT / Claude.ai 的 Stop 语义一致）
 - **侧边栏 in-flight 指示** — `ProjectSidebar` 每 3s 轮询 `/api/chat/inflight`，正在生成回复的 session 前面有个琥珀色脉冲点
@@ -35,9 +45,10 @@
   - **其他文件** → 落盘 `/tmp/cc-webui-uploads/`，路径以 `附件:` 形式带进 prompt，Claude 用 Read 访问
 - **`@path` 原子删除** — composer 里 Backspace 到 `@path` 末尾时整段一次性删掉，不用逐字符退
 - **模型 / 模式 / Effort** — 底栏直接选：
-  - 模型：Opus 4.7 / Sonnet 4.6 / Haiku 4.5
+  - Claude：Opus 4.7 / Sonnet 4.6 / Haiku 4.5
+  - Codex：GPT-5.3-Codex / GPT-5.1 Codex mini
   - 权限：Default / Accept Edits / Plan / Bypass
-  - Effort：Low / Medium / High / xHigh / Max（`xHigh` 只在 Opus 下显示；切换到其他模型会自动降到 High）
+  - Effort：Low / Medium / High / xHigh / Max（不支持 `xHigh` 的模型会自动降到 High）
 - **Markdown 渲染** — `react-markdown + remark-gfm`，支持标题 / 列表 / 表格 / 代码块 / 链接；中英混排下中文标点紧邻 URL 时自动分隔，autolink 不再吞中文；单 `~` 不会误触发删除线（`~~双~~` 才是）
 - **日夜主题** — 左侧栏底部太阳/月亮按钮切换，配置保存在 localStorage
 - **历史懒加载** — 首次打开一个会话只渲染最后 200 条消息，向上滚自动加更早
@@ -46,6 +57,7 @@
 
 - Node 20+
 - 本机已安装并登录 `claude` CLI（`claude --version` 能通过）
+- 使用 Codex provider 时，本机需要可运行 Codex CLI / `@openai/codex-sdk` 所需的 OpenAI 凭据
 
 ## Installation
 
@@ -100,8 +112,10 @@ npm run dev
 | 变量 | 含义 | 默认 |
 |------|------|------|
 | `PORT` | 服务端口 | `8787` |
+| `CC_WEBUI_HOST` | 服务 bind 的 host；默认 IPv4 loopback。想放 LAN 用 `0.0.0.0` | `127.0.0.1` |
 | `CC_WEBUI_CWD` | claude 的默认工作目录（UI 里也能切） | `process.cwd()` |
 | `CC_WEBUI_UPLOAD_DIR` | 文件上传落盘目录 | `os.tmpdir()/cc-webui-uploads` |
+| `CC_WEBUI_SESSION_INDEX` | WebUI 自己维护的 provider-aware session index（目前用于 Codex 历史） | `~/.cc-webui/sessions.json` |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
 

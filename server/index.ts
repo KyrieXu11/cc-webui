@@ -35,10 +35,15 @@ if (isProd) {
 
 const port = Number(process.env.PORT) || 8787;
 const viteDevPort = Number(process.env.VITE_DEV_PORT) || 8787;
+// Bind explicitly to IPv4 loopback by default. Without `hostname`, Node's
+// listen() binds to `::` on dual-stack systems, which can mismatch with
+// clients that resolve `localhost` to `127.0.0.1` (or vice versa). Set
+// CC_WEBUI_HOST=0.0.0.0 to expose on LAN.
+const host = process.env.CC_WEBUI_HOST ?? "127.0.0.1";
 
-serve({ fetch: app.fetch, port }, (info) => {
+serve({ fetch: app.fetch, port, hostname: host }, (info) => {
   const url = isProd
-    ? `http://localhost:${info.port}`
-    : `http://localhost:${info.port} (api only; web on vite http://localhost:${viteDevPort})`;
+    ? `http://${host}:${info.port}`
+    : `http://${host}:${info.port} (api only; web on vite http://${host}:${viteDevPort})`;
   console.log(`[cc-webui] ${isProd ? "serving" : "api"} at ${url}`);
 });

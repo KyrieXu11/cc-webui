@@ -4,14 +4,28 @@ import type { SSEStreamingApi } from "hono/streaming";
 import {
   Codex,
   type ApprovalMode,
+  type Input,
   type ModelReasoningEffort,
   type SandboxMode,
+  type UserInput,
 } from "@openai/codex-sdk";
 import os from "node:os";
 import path from "node:path";
+import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { appendCodexTurn } from "./session-store.ts";
 
 const codexChat = new Hono();
+const KEEPALIVE_MS = 15_000;
+const MAX_CODEX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const IMAGE_EXT_BY_MIME: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+};
 
 type BufferedMsg = { event: string; data: string };
 
@@ -40,6 +54,16 @@ function expandHome(p: string | undefined): string | undefined {
   if (p === "~") return os.homedir();
   if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
   return p;
+}
+
+function streamSSEUnbuffered(
+  c: Parameters<typeof streamSSE>[0],
+  cb: (stream: SSEStreamingApi) => Promise<void>
+): Response {
+  const res = streamSSE(c, cb);
+  res.headers.set("Cache-Control", "no-cache, no-transform");
+  res.headers.set("X-Accel-Buffering", "no");
+  return res;
 }
 
 function removeEntryIfSelf(entry: InFlightCodexChat): void {
@@ -84,6 +108,9 @@ async function attachStreamToEntry(
     },
   };
   entry.subscribers.add(sub);
+  const keepAlive = setInterval(() => {
+    sub.write("ping", "");
+  }, KEEPALIVE_MS);
   console.log(
     `${tag} attached, snapshot=${snapshot.length}, status=${entry.status}`
   );
@@ -130,6 +157,7 @@ async function attachStreamToEntry(
       }
     }
   } finally {
+    clearInterval(keepAlive);
     entry.subscribers.delete(sub);
     console.log(`${tag} detached, total wrote=${writeCount}`);
   }
@@ -156,6 +184,52 @@ function mapEffort(effort: string | undefined): ModelReasoningEffort {
   return "medium";
 }
 
+type IncomingImage = { name?: string; mediaType?: string; data?: string };
+
+async function createCodexInput(
+  prompt: string,
+  images: IncomingImage[]
+): Promise<{ input: Input; cleanup: () => Promise<void> }> {
+  const validImages = images.filter(
+    (img): img is { name?: string; mediaType: string; data: string } =>
+      typeof img?.mediaType === "string" &&
+      img.mediaType.startsWith("image/") &&
+      typeof img.data === "string" &&
+      img.data.length > 0
+  );
+  if (validImages.length === 0) {
+    return { input: prompt, cleanup: async () => {} };
+  }
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cc-webui-codex-"));
+  const input: UserInput[] = prompt.trim()
+    ? [{ type: "text", text: prompt }]
+    : [];
+
+  for (const img of validImages) {
+    const ext = IMAGE_EXT_BY_MIME[img.mediaType.toLowerCase()];
+    if (!ext) {
+      throw new Error(`unsupported image type: ${img.mediaType}`);
+    }
+    const buf = Buffer.from(img.data, "base64");
+    if (buf.length === 0 || buf.length > MAX_CODEX_IMAGE_BYTES) {
+      throw new Error(
+        `image ${img.name ?? ""} exceeds ${MAX_CODEX_IMAGE_BYTES} bytes`
+      );
+    }
+    const file = path.join(dir, `${randomUUID()}${ext}`);
+    await fs.writeFile(file, buf, { mode: 0o600 });
+    input.push({ type: "local_image", path: file });
+  }
+
+  return {
+    input,
+    cleanup: async () => {
+      await fs.rm(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 function fanoutFactory(entry: InFlightCodexChat) {
   return (event: string, data: string) => {
     const item: BufferedMsg = { event, data };
@@ -167,6 +241,7 @@ function fanoutFactory(entry: InFlightCodexChat) {
 codexChat.post("/chat", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const prompt: string = body.prompt ?? "";
+  const startedAt = Date.now();
   const threadId: string | undefined =
     typeof body.sessionId === "string" ? body.sessionId : undefined;
   const clientTurnId: string | undefined =
@@ -180,15 +255,12 @@ codexChat.post("/chat", async (c) => {
     typeof body.effort === "string" ? body.effort : undefined;
   const permissionMode: string | undefined =
     typeof body.permissionMode === "string" ? body.permissionMode : undefined;
+  const rawImages: IncomingImage[] = Array.isArray(body.images)
+    ? body.images
+    : [];
 
-  if (!prompt.trim()) {
-    return c.json({ error: "prompt required" }, 400);
-  }
-  if (Array.isArray(body.images) && body.images.length > 0) {
-    return c.json(
-      { error: "codex image attachments are not supported yet" },
-      400
-    );
+  if (!prompt.trim() && rawImages.length === 0) {
+    return c.json({ error: "prompt or images required" }, 400);
   }
   if (threadId && activeCodexChats.has(threadId)) {
     const prior = activeCodexChats.get(threadId)!;
@@ -236,8 +308,12 @@ codexChat.post("/chat", async (c) => {
   const fanout = fanoutFactory(entry);
 
   (async () => {
+    let cleanupInput: (() => Promise<void>) | undefined;
+    const turnEvents: unknown[] = [];
     try {
       const codex = new Codex();
+      const { input, cleanup } = await createCodexInput(prompt, rawImages);
+      cleanupInput = cleanup;
       const { sandboxMode, approvalPolicy } = mapPermissionMode(permissionMode);
       const threadOptions = {
         model,
@@ -250,7 +326,7 @@ codexChat.post("/chat", async (c) => {
       const thread = threadId
         ? codex.resumeThread(threadId, threadOptions)
         : codex.startThread(threadOptions);
-      const { events } = await thread.runStreamed(prompt, {
+      const { events } = await thread.runStreamed(input, {
         signal: entry.abort.signal,
       });
 
@@ -265,6 +341,7 @@ codexChat.post("/chat", async (c) => {
           entry.threadId = ev.thread_id;
           activeCodexChats.set(ev.thread_id, entry);
         }
+        turnEvents.push(ev);
         fanout("codex_event", JSON.stringify(ev));
       }
 
@@ -280,11 +357,26 @@ codexChat.post("/chat", async (c) => {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
+      turnEvents.push({ type: "error", message });
       console.error(`[codex ${reqId}] ERROR at ${elapsed()}:`, err);
       entry.status = "error";
       entry.errorMsg = message;
       fanout("error", JSON.stringify({ message }));
     } finally {
+      if (entry.threadId && turnEvents.length > 0) {
+        await appendCodexTurn({
+          sessionId: entry.threadId,
+          cwd,
+          prompt,
+          startedAt,
+          events: turnEvents,
+        }).catch((err) => {
+          console.error(`[codex ${reqId}] failed to persist session:`, err);
+        });
+      }
+      if (cleanupInput) {
+        await cleanupInput().catch(() => {});
+      }
       for (const sub of [...entry.subscribers]) sub.close();
       removeEntryIfSelf(entry);
     }
@@ -292,7 +384,7 @@ codexChat.post("/chat", async (c) => {
     console.error(`[codex ${reqId}] unhandled in detached task:`, err)
   );
 
-  return streamSSE(c, async (stream) => {
+  return streamSSEUnbuffered(c, async (stream) => {
     await attachStreamToEntry(stream, entry);
   });
 });
@@ -322,7 +414,7 @@ codexChat.get("/chat/inflight", (c) => {
 codexChat.get("/chat/attach", (c) => {
   const threadId = c.req.query("sessionId");
   const clientTurnId = c.req.query("clientTurnId");
-  return streamSSE(c, async (stream) => {
+  return streamSSEUnbuffered(c, async (stream) => {
     if (!threadId && !clientTurnId) {
       await stream.writeSSE({ event: "no-inflight", data: "" });
       return;

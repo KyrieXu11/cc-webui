@@ -6,12 +6,14 @@ import {
 } from "../lib/sessions";
 import { getInflightSessions } from "../lib/api";
 import { tildify } from "../lib/fs";
+import { providerLabel, type AgentProvider } from "../lib/settings";
 
 const INFLIGHT_POLL_MS = 3000;
 
 interface Props {
   cwd: string;
   home: string;
+  currentProvider: AgentProvider;
   currentSessionId: string | null;
   onNewChat: () => void;
   onOpenSession: (s: SessionSummary) => void;
@@ -25,6 +27,7 @@ function basename(p: string) {
 export default function ProjectSidebar({
   cwd,
   home,
+  currentProvider,
   currentSessionId,
   onNewChat,
   onOpenSession,
@@ -41,7 +44,7 @@ export default function ProjectSidebar({
   useEffect(() => {
     let alive = true;
     const tick = () => {
-      getInflightSessions()
+      getInflightSessions(currentProvider)
         .then((set) => {
           if (alive) setInflight(set);
         })
@@ -53,12 +56,12 @@ export default function ProjectSidebar({
       alive = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [currentProvider]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    listSessions(200, cwd)
+    listSessions(200, cwd, currentProvider)
       .then((xs) => {
         if (cancelled) return;
         setSessions(xs);
@@ -68,7 +71,7 @@ export default function ProjectSidebar({
     return () => {
       cancelled = true;
     };
-  }, [cwd, currentSessionId]);
+  }, [cwd, currentProvider, currentSessionId]);
 
   useEffect(() => {
     if (sessions.length <= limit) return;
@@ -90,8 +93,10 @@ export default function ProjectSidebar({
 
   const remove = async (s: SessionSummary, e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteSessionApi(s.sessionId, s.cwd);
-    setSessions((xs) => xs.filter((x) => x.sessionId !== s.sessionId));
+    await deleteSessionApi(s.sessionId, s.cwd, s.provider);
+    setSessions((xs) =>
+      xs.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider)
+    );
   };
 
   return (
@@ -124,7 +129,7 @@ export default function ProjectSidebar({
               strokeLinecap="round"
             />
           </svg>
-          新建会话
+          新建 {providerLabel(currentProvider)} 会话
         </button>
       </div>
 
@@ -138,10 +143,11 @@ export default function ProjectSidebar({
         ) : (
           <>
             {shown.map((s) => {
-              const active = s.sessionId === currentSessionId;
+              const active =
+                s.sessionId === currentSessionId && s.provider === currentProvider;
               return (
                 <button
-                  key={s.sessionId}
+                  key={`${s.provider}:${s.sessionId}`}
                   onClick={() => onOpenSession(s)}
                   className={`group w-full text-left px-3.5 py-2 flex items-center gap-2 transition-colors min-w-0 ${
                     active
@@ -164,6 +170,7 @@ export default function ProjectSidebar({
                   <span className="text-[12.5px] truncate flex-1">
                     {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
                   </span>
+                  <ProviderBadge provider={s.provider} />
                   <button
                     onClick={(e) => remove(s, e)}
                     aria-label="删除"
@@ -194,5 +201,13 @@ export default function ProjectSidebar({
         )}
       </div>
     </aside>
+  );
+}
+
+function ProviderBadge({ provider }: { provider: AgentProvider }) {
+  return (
+    <span className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.08em] text-subtle">
+      {provider}
+    </span>
   );
 }

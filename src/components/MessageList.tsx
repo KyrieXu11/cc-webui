@@ -97,6 +97,7 @@ export default function MessageList({
               />
             );
           case "assistant":
+            if (!ev.text.trim()) return null;
             return <AssistantText key={ev.id} text={ev.text} delay={0} />;
           case "thinking":
             if (!ev.text.trim()) return null;
@@ -115,6 +116,11 @@ export default function MessageList({
                 tool={ev.tool}
                 input={ev.input}
                 resolved={ev.resolved}
+                title={ev.title}
+                description={ev.description}
+                hasSessionPermissionSuggestions={
+                  ev.hasSessionPermissionSuggestions
+                }
                 delay={0}
                 onAnswer={(decision, message) =>
                   onAnswerPermission(ev.permissionId, decision, message)

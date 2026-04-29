@@ -87,8 +87,12 @@ const CLAUDE_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
 
 const CODEX_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
-    { id: "gpt-5.4", label: "GPT-5.4", hint: "Codex 默认" },
-    { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", hint: "快 · 便宜" },
+    { id: "gpt-5.3-codex", label: "GPT-5.3-Codex", hint: "Codex 默认" },
+    {
+      id: "gpt-5.1-codex-mini",
+      label: "GPT-5.1 Codex mini",
+      hint: "快 · 便宜",
+    },
   ];
 
 export const MODEL_OPTIONS = CLAUDE_MODEL_OPTIONS;
@@ -137,12 +141,16 @@ export const EFFORT_OPTIONS: Array<{
   { id: "low", label: "Low", hint: "几乎不思考 · 最快" },
   { id: "medium", label: "Medium", hint: "均衡（默认）" },
   { id: "high", label: "High", hint: "更深入的推理" },
-  { id: "xhigh", label: "xHigh", hint: "长时间思考 · 仅 Opus", opusOnly: true },
+  { id: "xhigh", label: "xHigh", hint: "长时间思考", opusOnly: true },
   { id: "max", label: "Max", hint: "最大限度 · 最慢" },
 ];
 
+export function supportsXhighEffort(model: string): boolean {
+  return model === "opus" || model.includes("codex");
+}
+
 export function availableEffortOptions(model: string) {
-  if (model === "opus") return EFFORT_OPTIONS;
+  if (supportsXhighEffort(model)) return EFFORT_OPTIONS;
   return EFFORT_OPTIONS.filter((o) => !o.opusOnly);
 }
 
