@@ -14,10 +14,30 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { appendCodexTurn } from "./session-store.ts";
+import {
+  createCodexMcpConfig,
+  createCodexMcpEnv,
+  getCodexMcpUrl,
+} from "./codex-mcp-config.ts";
+import {
+  registerCodexMcpContext,
+  unregisterCodexMcpContext,
+  updateCodexMcpSession,
+} from "./codex-mcp-context.ts";
+import {
+  relabelTasksSessionId,
+  resolveTaskSessionId,
+  subscribeForegroundEvents,
+} from "./bash-mcp.ts";
 
 const codexChat = new Hono();
 const KEEPALIVE_MS = 15_000;
 const MAX_CODEX_IMAGE_BYTES = 10 * 1024 * 1024;
+const CODEX_RUNTIME_PROMPT =
+  "WEBUI RUNTIME: For shell commands, prefer the MCP bash tools. " +
+  "Use mcp__bash__run with run_in_background=true for long-running commands; " +
+  "poll with mcp__bash__output, terminate with mcp__bash__kill, and discover existing tasks with mcp__bash__list. " +
+  "Foreground mcp__bash__run commands can be detached by the UI.";
 
 const IMAGE_EXT_BY_MIME: Record<string, string> = {
   "image/png": ".png",
@@ -198,13 +218,21 @@ async function createCodexInput(
       img.data.length > 0
   );
   if (validImages.length === 0) {
-    return { input: prompt, cleanup: async () => {} };
+    return {
+      input: `${CODEX_RUNTIME_PROMPT}\n\nUSER REQUEST:\n${prompt}`,
+      cleanup: async () => {},
+    };
   }
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cc-webui-codex-"));
-  const input: UserInput[] = prompt.trim()
-    ? [{ type: "text", text: prompt }]
-    : [];
+  const input: UserInput[] = [
+    {
+      type: "text",
+      text: prompt.trim()
+        ? `${CODEX_RUNTIME_PROMPT}\n\nUSER REQUEST:\n${prompt}`
+        : CODEX_RUNTIME_PROMPT,
+    },
+  ];
 
   for (const img of validImages) {
     const ext = IMAGE_EXT_BY_MIME[img.mediaType.toLowerCase()];
@@ -309,9 +337,35 @@ codexChat.post("/chat", async (c) => {
 
   (async () => {
     let cleanupInput: (() => Promise<void>) | undefined;
+    let unsubscribeForeground: (() => void) | undefined;
+    const mcpToken = randomUUID();
+    let taskSessionId = threadId ?? clientTurnId ?? `codex-turn-${reqId}`;
     const turnEvents: unknown[] = [];
     try {
-      const codex = new Codex();
+      registerCodexMcpContext({
+        token: mcpToken,
+        sessionId: taskSessionId,
+        cwd,
+      });
+      unsubscribeForeground = subscribeForegroundEvents((event, data) => {
+        try {
+          const payload = JSON.parse(data) as { sessionId?: string };
+          // Compare canonical (alias-resolved) ids on both sides so events
+          // emitted under a placeholder id (before thread.started) still
+          // match after the session is relabeled to its real thread_id.
+          const a = resolveTaskSessionId(payload.sessionId);
+          const b = resolveTaskSessionId(taskSessionId);
+          if (a !== b) return;
+          fanout(event, data);
+        } catch {
+          /* ignore malformed foreground event */
+        }
+      });
+
+      const codex = new Codex({
+        config: createCodexMcpConfig(getCodexMcpUrl()),
+        env: createCodexMcpEnv(mcpToken),
+      });
       const { input, cleanup } = await createCodexInput(prompt, rawImages);
       cleanupInput = cleanup;
       const { sandboxMode, approvalPolicy } = mapPermissionMode(permissionMode);
@@ -338,6 +392,12 @@ codexChat.post("/chat", async (c) => {
           console.log(`[codex ${reqId}] event #${eventCount} ${ev.type} @${elapsed()}`);
         }
         if (ev.type === "thread.started") {
+          const previousTaskSessionId = taskSessionId;
+          taskSessionId = ev.thread_id;
+          updateCodexMcpSession(mcpToken, ev.thread_id);
+          if (previousTaskSessionId !== ev.thread_id) {
+            relabelTasksSessionId(previousTaskSessionId, ev.thread_id);
+          }
           entry.threadId = ev.thread_id;
           activeCodexChats.set(ev.thread_id, entry);
         }
@@ -377,6 +437,8 @@ codexChat.post("/chat", async (c) => {
       if (cleanupInput) {
         await cleanupInput().catch(() => {});
       }
+      unsubscribeForeground?.();
+      unregisterCodexMcpContext(mcpToken);
       for (const sub of [...entry.subscribers]) sub.close();
       removeEntryIfSelf(entry);
     }

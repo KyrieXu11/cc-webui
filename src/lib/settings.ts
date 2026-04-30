@@ -87,12 +87,15 @@ const CLAUDE_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
 
 const CODEX_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
-    { id: "gpt-5.3-codex", label: "GPT-5.3-Codex", hint: "Codex 默认" },
+    { id: "gpt-5.5", label: "GPT-5.5", hint: "前沿 · 复杂编码与研究" },
+    { id: "gpt-5.4", label: "GPT-5.4", hint: "日常编码主力" },
     {
-      id: "gpt-5.1-codex-mini",
-      label: "GPT-5.1 Codex mini",
-      hint: "快 · 便宜",
+      id: "gpt-5.4-mini",
+      label: "GPT-5.4 mini",
+      hint: "快 · 便宜 · 简单任务",
     },
+    { id: "gpt-5.3-codex", label: "GPT-5.3-Codex", hint: "Coding 优化" },
+    { id: "gpt-5.2", label: "GPT-5.2", hint: "长时任务 · 专业工作" },
   ];
 
 export const MODEL_OPTIONS = CLAUDE_MODEL_OPTIONS;
@@ -146,7 +149,8 @@ export const EFFORT_OPTIONS: Array<{
 ];
 
 export function supportsXhighEffort(model: string): boolean {
-  return model === "opus" || model.includes("codex");
+  if (model === "opus") return true;
+  return CODEX_MODEL_OPTIONS.some((m) => m.id === model);
 }
 
 export function availableEffortOptions(model: string) {

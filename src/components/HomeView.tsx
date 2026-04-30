@@ -10,7 +10,6 @@ import {
   providerLabel,
   type AgentProvider,
 } from "../lib/settings";
-import Popover from "./Popover";
 
 interface Props {
   provider: AgentProvider;
@@ -105,7 +104,7 @@ export default function HomeView({
             <ProviderPicker value={provider} onChange={onProviderChange} />
             <button
               onClick={onClickOpen}
-              className="h-8 px-3.5 rounded-md bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+              className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
             >
               <FolderIcon />
               打开项目
@@ -140,6 +139,11 @@ export default function HomeView({
   );
 }
 
+const PROVIDER_ACCENT: Record<AgentProvider, string> = {
+  claude: "#ef9d5a",
+  codex: "#3ecf8e",
+};
+
 function ProviderPicker({
   value,
   onChange,
@@ -148,52 +152,51 @@ function ProviderPicker({
   onChange: (provider: AgentProvider) => void;
 }) {
   return (
-    <Popover
-      align="right"
-      width={220}
-      triggerClassName="h-8 px-3 rounded-md bg-canvas border border-line-strong text-[12px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
-      trigger={
-        <>
-          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-subtle">
-            Provider
-          </span>
-          <span className="font-mono text-[12px]">{providerLabel(value)}</span>
-          <Caret />
-        </>
-      }
+    <div
+      role="tablist"
+      aria-label="Agent provider"
+      className="relative inline-flex items-stretch h-9 p-0.5 rounded-lg bg-canvas border border-line-strong shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
     >
-      {({ close }) => (
-        <div className="p-1">
-          {PROVIDER_OPTIONS.map((p) => {
-            const active = p.id === value;
-            return (
-              <button
-                key={p.id}
-                onClick={() => {
-                  onChange(p.id);
-                  close();
-                }}
-                className="w-full flex items-center justify-between gap-3 px-2.5 py-2 rounded-md text-left hover:bg-fg/5 transition-colors"
-              >
-                <div className="min-w-0">
-                  <div
-                    className={`font-mono text-[12.5px] ${
-                      active ? "text-fg" : "text-muted"
-                    }`}
-                  >
-                    {p.label}
-                  </div>
-                  <div className="text-[10.5px] text-subtle mt-0.5">
-                    {p.hint}
-                  </div>
-                </div>
-                {active && <div className="w-1.5 h-1.5 rounded-full bg-blue" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </Popover>
+      {PROVIDER_OPTIONS.map((p) => {
+        const active = p.id === value;
+        const accent = PROVIDER_ACCENT[p.id];
+        return (
+          <button
+            key={p.id}
+            role="tab"
+            aria-selected={active}
+            onClick={() => {
+              if (!active) onChange(p.id);
+            }}
+            title={p.hint}
+            className={`group relative flex items-center gap-2 px-3 rounded-md transition-all duration-200 ${
+              active
+                ? "bg-surface text-fg shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_18px_-12px_rgba(0,0,0,0.6)]"
+                : "text-muted hover:text-fg"
+            }`}
+          >
+            <span
+              aria-hidden
+              className="w-1.5 h-1.5 rounded-full transition-all duration-200"
+              style={{
+                background: active ? accent : "transparent",
+                outline: active
+                  ? `3px solid ${accent}22`
+                  : `1px solid var(--color-line-strong)`,
+                outlineOffset: 0,
+              }}
+            />
+            <span
+              className={`text-[12.5px] tracking-tight ${
+                active ? "font-semibold" : "font-medium"
+              }`}
+            >
+              {p.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -251,7 +254,6 @@ function ProjectBlock({
               <span className="text-subtle shrink-0 font-mono text-[11px] select-none">
                 └
               </span>
-              <ProviderBadge provider={s.provider} />
               <span className="text-[13px] text-muted group-hover/conv:text-fg truncate transition-colors">
                 {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
               </span>
@@ -290,14 +292,6 @@ function ProjectBlock({
   );
 }
 
-function ProviderBadge({ provider }: { provider: AgentProvider }) {
-  return (
-    <span className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.08em] text-subtle">
-      {provider}
-    </span>
-  );
-}
-
 function Wordmark() {
   return (
     <div className="inline-flex flex-col items-start select-none gap-1" aria-label="Web Code">
@@ -333,20 +327,3 @@ const FolderIcon = () => (
   </svg>
 );
 
-const Caret = () => (
-  <svg
-    width="10"
-    height="10"
-    viewBox="0 0 10 10"
-    fill="none"
-    aria-hidden
-  >
-    <path
-      d="M2.5 3.75L5 6.25L7.5 3.75"
-      stroke="currentColor"
-      strokeWidth="1.25"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);

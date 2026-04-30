@@ -9,6 +9,7 @@ import { uploadRoute } from "./upload.ts";
 import { metaRoute } from "./meta.ts";
 import { permissionRoute } from "./permission.ts";
 import { bashTasksRoute } from "./bash-tasks.ts";
+import { mcpBashRoute } from "./mcp-bash-route.ts";
 
 const app = new Hono();
 
@@ -20,6 +21,7 @@ app.route("/api/upload", uploadRoute);
 app.route("/api/permission", permissionRoute);
 app.route("/api/meta", metaRoute);
 app.route("/api/bash/tasks", bashTasksRoute);
+app.route("/api/mcp", mcpBashRoute);
 
 const isProd = process.env.NODE_ENV === "production";
 if (isProd) {

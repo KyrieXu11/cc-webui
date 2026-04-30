@@ -7,8 +7,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_TIMEOUT_MS = 600_000;
+export const DEFAULT_TIMEOUT_MS = 120_000;
+export const MAX_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 
 export type TaskStatus = "running" | "completed" | "killed" | "failed";
@@ -56,6 +56,7 @@ export type TaskOutputEvent =
 type TaskOutputSubscriber = (ev: TaskOutputEvent) => void;
 
 const tasks = new Map<string, BackgroundTask>();
+const sessionAliases = new Map<string, string>();
 
 // Fans out list-level state changes (added / status transitions / sessionId
 // relabeling). Subscribers typically re-read listBackgroundTasks() when fired.
@@ -137,15 +138,64 @@ interface ForegroundInvocation extends ForegroundSummary {
 
 const foregroundInvocations = new Map<string, ForegroundInvocation>();
 
+type ForegroundEventSubscriber = (event: string, data: string) => void;
+const foregroundEventSubscribers = new Set<ForegroundEventSubscriber>();
+
+export function subscribeForegroundEvents(
+  sub: ForegroundEventSubscriber
+): () => void {
+  foregroundEventSubscribers.add(sub);
+  return () => {
+    foregroundEventSubscribers.delete(sub);
+  };
+}
+
+function emitForegroundEvent(event: string, data: string): void {
+  for (const sub of foregroundEventSubscribers) {
+    try {
+      sub(event, data);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function dispatchForegroundEvent(
+  local: Options["onForegroundEvent"],
+  event: string,
+  payload: Record<string, unknown>
+): void {
+  const data = JSON.stringify(payload);
+  local?.(event, data);
+  emitForegroundEvent(event, data);
+}
+
+export function resolveTaskSessionId(
+  sessionId: string | undefined
+): string | undefined {
+  if (!sessionId) return undefined;
+  let current = sessionId;
+  const seen = new Set<string>();
+  while (sessionAliases.has(current) && !seen.has(current)) {
+    seen.add(current);
+    current = sessionAliases.get(current)!;
+  }
+  return current;
+}
+
 export function listForegroundInvocations(filter?: {
   sessionId?: string | null;
 }): ForegroundSummary[] {
+  const filterSessionId =
+    filter && "sessionId" in filter
+      ? resolveTaskSessionId(filter.sessionId ?? undefined)
+      : undefined;
   const all: ForegroundSummary[] = [];
   for (const inv of foregroundInvocations.values()) {
     if (
       filter &&
       "sessionId" in filter &&
-      inv.sessionId !== (filter.sessionId ?? undefined)
+      inv.sessionId !== filterSessionId
     ) {
       continue;
     }
@@ -173,10 +223,14 @@ export function detachForegroundToBackground(
 export function listBackgroundTasks(filter?: {
   sessionId?: string | null;
 }): BackgroundTask[] {
+  const filterSessionId =
+    filter && "sessionId" in filter
+      ? resolveTaskSessionId(filter.sessionId ?? undefined)
+      : undefined;
   const all = Array.from(tasks.values());
   const filtered =
     filter && "sessionId" in filter
-      ? all.filter((t) => t.sessionId === (filter.sessionId ?? undefined))
+      ? all.filter((t) => t.sessionId === filterSessionId)
       : all;
   return filtered.sort((a, b) => b.startedAt - a.startedAt);
 }
@@ -188,10 +242,17 @@ export function relabelTasksSessionId(
   from: string | undefined,
   to: string
 ): void {
+  if (from) sessionAliases.set(from, to);
   let changed = false;
   for (const t of tasks.values()) {
     if (t.sessionId === from) {
       t.sessionId = to;
+      changed = true;
+    }
+  }
+  for (const inv of foregroundInvocations.values()) {
+    if (inv.sessionId === from) {
+      inv.sessionId = to;
       changed = true;
     }
   }
@@ -273,6 +334,58 @@ type CallToolResult = {
   isError?: boolean;
 };
 
+interface BashRunArgs {
+  command: string;
+  timeout?: number;
+  description?: string;
+  run_in_background?: boolean;
+}
+
+export function runBashTool(
+  args: BashRunArgs,
+  opts: Options,
+  signal?: AbortSignal
+): CallToolResult | Promise<CallToolResult> {
+  const sessionId = resolveTaskSessionId(opts.getSessionId?.());
+  if (args.run_in_background) {
+    return runBackground(args.command, opts.cwd, sessionId);
+  }
+  return runForeground(
+    args.command,
+    opts.cwd,
+    args.timeout ?? DEFAULT_TIMEOUT_MS,
+    signal,
+    sessionId,
+    opts.onForegroundEvent
+  );
+}
+
+export function listBackgroundTasksForTool(
+  sessionId: string | undefined
+): CallToolResult {
+  const resolvedSessionId = resolveTaskSessionId(sessionId);
+  const items = listBackgroundTasks({
+    sessionId: resolvedSessionId ?? null,
+  });
+  if (items.length === 0) {
+    return {
+      content: [{ type: "text", text: "No background bash tasks." }],
+      isError: false,
+    };
+  }
+  const lines = items.map((t) => {
+    const ageMs = (t.finishedAt ?? Date.now()) - t.startedAt;
+    const age = `${(ageMs / 1000).toFixed(1)}s`;
+    const exit = t.exitCode == null ? "" : ` exit=${t.exitCode}`;
+    const reason = t.endReason ? ` [${t.endReason}]` : "";
+    return `${t.id} ${t.status}${exit} ${age}${reason}\n  ${t.command}`;
+  });
+  return {
+    content: [{ type: "text", text: lines.join("\n") }],
+    isError: false,
+  };
+}
+
 export function createBashMcpServer(
   opts: Options
 ): McpSdkServerConfigWithInstance {
@@ -308,17 +421,7 @@ export function createBashMcpServer(
     },
     async (args, extra) => {
       const signal: AbortSignal | undefined = (extra as any)?.signal;
-      if (args.run_in_background) {
-        return runBackground(args.command, opts.cwd, opts.getSessionId?.());
-      }
-      return runForeground(
-        args.command,
-        opts.cwd,
-        args.timeout ?? DEFAULT_TIMEOUT_MS,
-        signal,
-        opts.getSessionId?.(),
-        opts.onForegroundEvent
-      );
+      return runBashTool(args, opts, signal);
     }
   );
 
@@ -346,10 +449,17 @@ export function createBashMcpServer(
     async (args) => killBackground(args.bash_id)
   );
 
+  const listTool = tool(
+    "list",
+    "List background bash tasks for this conversation, including task id, status, exit code and command.",
+    {},
+    async () => listBackgroundTasksForTool(opts.getSessionId?.())
+  );
+
   return createSdkMcpServer({
     name: "bash",
     version: "0.2.0",
-    tools: [runTool, outputTool, killTool],
+    tools: [runTool, outputTool, killTool, listTool],
   });
 }
 
@@ -494,10 +604,14 @@ function runForeground(
       if (detachedTo)
         return { ok: false, reason: "already_detached" };
 
+      // Resolve to the canonical sessionId at the moment of creation so the
+      // task / event are tagged correctly even if a session id migration
+      // (relabelTasksSessionId) happened between runForeground entry and detach.
+      const liveSessionId = resolveTaskSessionId(sessionId);
       const bgId = "bg-" + randomUUID().slice(0, 8);
       const task: BackgroundTask = {
         id: bgId,
-        sessionId,
+        sessionId: liveSessionId,
         command,
         cwd,
         startedAt,
@@ -528,14 +642,16 @@ function runForeground(
       // returns — model gets the new bashTaskId and can keep working.
       settled = true;
       foregroundInvocations.delete(fgId);
-      onForegroundEvent?.(
+      dispatchForegroundEvent(
+        onForegroundEvent,
         "foreground_ended",
-        JSON.stringify({
+        {
           type: "foreground_ended",
           fgId,
+          sessionId: liveSessionId,
           reason: "detached",
           bashTaskId: bgId,
-        })
+        }
       );
       resolve({
         content: [
@@ -561,16 +677,17 @@ function runForeground(
       startedAt,
       detach,
     });
-    onForegroundEvent?.(
+    dispatchForegroundEvent(
+      onForegroundEvent,
       "foreground_started",
-      JSON.stringify({
+      {
         type: "foreground_started",
         fgId,
         sessionId,
         command,
         cwd,
         startedAt,
-      })
+      }
     );
 
     function finalize(exitCode: number, reason: string | null) {
@@ -578,14 +695,19 @@ function runForeground(
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abortHandler);
+      // Use the live (post-relabel) sessionId — the captured `sessionId`
+      // closure may be stale if a Codex thread.started arrived mid-run.
+      const liveSessionId = resolveTaskSessionId(sessionId);
       foregroundInvocations.delete(fgId);
-      onForegroundEvent?.(
+      dispatchForegroundEvent(
+        onForegroundEvent,
         "foreground_ended",
-        JSON.stringify({
+        {
           type: "foreground_ended",
           fgId,
+          sessionId: liveSessionId,
           reason: reason ?? "completed",
-        })
+        }
       );
 
       const parts: string[] = [];
@@ -634,7 +756,7 @@ function runBackground(
 
   const task: BackgroundTask = {
     id,
-    sessionId,
+    sessionId: resolveTaskSessionId(sessionId),
     command,
     cwd,
     startedAt: Date.now(),
@@ -724,7 +846,7 @@ function runBackground(
   };
 }
 
-function readBackgroundOutput(id: string): CallToolResult {
+export function readBackgroundOutput(id: string): CallToolResult {
   const t = tasks.get(id);
   if (!t) {
     return {
@@ -783,7 +905,7 @@ function readBackgroundOutput(id: string): CallToolResult {
   };
 }
 
-function killBackground(id: string): CallToolResult {
+export function killBackground(id: string): CallToolResult {
   const t = tasks.get(id);
   if (!t) {
     return {

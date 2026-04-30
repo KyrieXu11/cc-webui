@@ -5,6 +5,11 @@ const TOOL_ALIAS: Record<string, string> = {
   "mcp__bash__run": "Bash",
   "mcp__bash__output": "BashOutput",
   "mcp__bash__kill": "KillBash",
+  "mcp__bash__list": "BashList",
+  "bash.run": "Bash",
+  "bash.output": "BashOutput",
+  "bash.kill": "KillBash",
+  "bash.list": "BashList",
 };
 
 function normalizeToolName(name: string): string {
@@ -366,12 +371,14 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
         input: { changes: item.changes ?? [] },
         output: stringifyToolResult(item.changes ?? []),
       });
-    case "mcp_tool_call":
+    case "mcp_tool_call": {
+      const rawTool = `${item.server ?? "mcp"}.${item.tool ?? "tool"}`;
+      const toolName = normalizeToolName(rawTool);
       return upsertStepEvent(events, {
         id: `s-codex-${item.id}`,
         type: "step",
-        tool: `${item.server ?? "mcp"}.${item.tool ?? "tool"}`,
-        arg: summarize(`${item.server ?? "mcp"}.${item.tool ?? "tool"}`, item.arguments),
+        tool: toolName,
+        arg: summarize(toolName, item.arguments),
         status: codexStatus(item.status),
         input:
           item.arguments && typeof item.arguments === "object"
@@ -379,6 +386,7 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
             : { arguments: item.arguments },
         output: item.error?.message ?? stringifyToolResult(item.result),
       });
+    }
     case "web_search":
       return upsertStepEvent(events, {
         id: `s-codex-${item.id}`,
@@ -565,6 +573,8 @@ export function summarize(tool: string, input: any): string | undefined {
     case "BashOutput":
     case "KillBash":
       return input.bash_id;
+    case "BashList":
+      return "background tasks";
     case "Grep":
       return input.pattern ? `/${input.pattern}/` : undefined;
     case "Glob":

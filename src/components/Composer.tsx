@@ -13,7 +13,6 @@ interface Props {
   onCancel?: () => void;
   disabled?: boolean;
   provider: AgentProvider;
-  onProviderChange: (v: AgentProvider) => void;
   model: string;
   onModelChange: (v: string) => void;
   mode: PermissionMode;
@@ -32,7 +31,6 @@ export default function Composer({
   onCancel,
   disabled,
   provider,
-  onProviderChange,
   model,
   onModelChange,
   mode,
@@ -366,10 +364,7 @@ export default function Composer({
           <ModelSelector
             value={model}
             provider={provider}
-            onChange={(p, m) => {
-              if (p !== provider) onProviderChange(p);
-              onModelChange(m);
-            }}
+            onChange={onModelChange}
           />
           <span className="text-subtle/50 text-[11px]">·</span>
           <ModeSelector value={mode} onChange={onModeChange} />

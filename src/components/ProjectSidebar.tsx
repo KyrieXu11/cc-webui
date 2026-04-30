@@ -170,7 +170,6 @@ export default function ProjectSidebar({
                   <span className="text-[12.5px] truncate flex-1">
                     {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
                   </span>
-                  <ProviderBadge provider={s.provider} />
                   <button
                     onClick={(e) => remove(s, e)}
                     aria-label="删除"
@@ -204,10 +203,3 @@ export default function ProjectSidebar({
   );
 }
 
-function ProviderBadge({ provider }: { provider: AgentProvider }) {
-  return (
-    <span className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.08em] text-subtle">
-      {provider}
-    </span>
-  );
-}

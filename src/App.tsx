@@ -905,6 +905,7 @@ export default function App() {
               sessionId={sessionId}
               projectPath={projectCwd}
               home={home}
+              provider={settings.agentProvider}
               onHome={goHome}
               onNewChat={handleNewChat}
               onToggleFiles={() => setFilesOpen((o) => !o)}
@@ -956,7 +957,6 @@ export default function App() {
                   onCancel={handleCancel}
                   disabled={busy}
                   provider={settings.agentProvider}
-                  onProviderChange={updateProvider}
                   model={settings.model}
                   onModelChange={updateModel}
                   mode={settings.permissionMode}
@@ -968,13 +968,11 @@ export default function App() {
                   slashCommands={mergedSlashCommands}
                   onPickSlash={handlePickSlash}
                   rightSlot={
-                    settings.agentProvider === "claude" ? (
-                      <TasksButton
-                        sessionId={sessionId}
-                        onOpen={() => setTasksOpen(true)}
-                        refreshKey={tasksRefreshKey}
-                      />
-                    ) : null
+                    <TasksButton
+                      sessionId={sessionId}
+                      onOpen={() => setTasksOpen(true)}
+                      refreshKey={tasksRefreshKey}
+                    />
                   }
                 />
               </div>

@@ -1,18 +1,19 @@
 import Popover from "./Popover";
 import {
-  PROVIDER_OPTIONS,
   modelLabel,
   modelOptionsForProvider,
+  providerLabel,
   type AgentProvider,
 } from "../lib/settings";
 
 interface Props {
   provider: AgentProvider;
   value: string;
-  onChange: (provider: AgentProvider, model: string) => void;
+  onChange: (model: string) => void;
 }
 
 export default function ModelSelector({ provider, value, onChange }: Props) {
+  const models = modelOptionsForProvider(provider);
   return (
     <Popover
       align="left"
@@ -28,49 +29,41 @@ export default function ModelSelector({ provider, value, onChange }: Props) {
     >
       {({ close }) => (
         <div className="p-1">
-          {PROVIDER_OPTIONS.map((p, pIdx) => {
-            const models = modelOptionsForProvider(p.id);
+          <div className="px-2.5 pt-1.5 pb-1 flex items-baseline gap-2">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-subtle">
+              {providerLabel(provider)}
+            </span>
+            <span className="text-[10.5px] text-subtle/70">
+              当前会话仅支持本 provider 的模型
+            </span>
+          </div>
+          {models.map((m) => {
+            const active = value === m.id;
             return (
-              <div key={p.id}>
-                {pIdx > 0 && <div className="h-px bg-line my-1" />}
-                <div className="px-2.5 pt-1.5 pb-1 flex items-baseline gap-2">
-                  <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-subtle">
-                    {p.label}
-                  </span>
-                  <span className="text-[10.5px] text-subtle/70">
-                    {p.hint}
-                  </span>
+              <button
+                key={m.id}
+                onClick={() => {
+                  onChange(m.id);
+                  close();
+                }}
+                className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md text-left hover:bg-fg/5 transition-colors"
+              >
+                <div>
+                  <div
+                    className={`font-mono text-[12.5px] ${
+                      active ? "text-fg" : "text-muted"
+                    }`}
+                  >
+                    {m.label}
+                  </div>
+                  <div className="text-[10.5px] text-subtle mt-0.5">
+                    {m.hint}
+                  </div>
                 </div>
-                {models.map((m) => {
-                  const active = provider === p.id && value === m.id;
-                  return (
-                    <button
-                      key={`${p.id}-${m.id}`}
-                      onClick={() => {
-                        onChange(p.id, m.id);
-                        close();
-                      }}
-                      className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md text-left hover:bg-fg/5 transition-colors"
-                    >
-                      <div>
-                        <div
-                          className={`font-mono text-[12.5px] ${
-                            active ? "text-fg" : "text-muted"
-                          }`}
-                        >
-                          {m.label}
-                        </div>
-                        <div className="text-[10.5px] text-subtle mt-0.5">
-                          {m.hint}
-                        </div>
-                      </div>
-                      {active && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                {active && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue" />
+                )}
+              </button>
             );
           })}
         </div>
