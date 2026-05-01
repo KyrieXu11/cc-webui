@@ -409,20 +409,20 @@ codexChat.post("/chat", async (c) => {
         `[codex ${reqId}] ${entry.cancelRequested ? "cancelled" : "done"} events=${eventCount} in ${elapsed()}`
       );
       entry.status = "done";
-      fanout("done", "");
     } catch (err) {
       if (entry.cancelRequested) {
         entry.status = "done";
-        fanout("done", "");
-        return;
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        turnEvents.push({ type: "error", message });
+        console.error(`[codex ${reqId}] ERROR at ${elapsed()}:`, err);
+        entry.status = "error";
+        entry.errorMsg = message;
       }
-      const message = err instanceof Error ? err.message : String(err);
-      turnEvents.push({ type: "error", message });
-      console.error(`[codex ${reqId}] ERROR at ${elapsed()}:`, err);
-      entry.status = "error";
-      entry.errorMsg = message;
-      fanout("error", JSON.stringify({ message }));
     } finally {
+      // Persist BEFORE emitting the terminal event so any client that refetches
+      // the session list on `done` (e.g. ProjectSidebar's refreshKey) sees the
+      // newly-saved session. Also keeps `error` ordering consistent.
       if (entry.threadId && turnEvents.length > 0) {
         await appendCodexTurn({
           sessionId: entry.threadId,
@@ -433,6 +433,14 @@ codexChat.post("/chat", async (c) => {
         }).catch((err) => {
           console.error(`[codex ${reqId}] failed to persist session:`, err);
         });
+      }
+      if (entry.status === "error") {
+        fanout(
+          "error",
+          JSON.stringify({ message: entry.errorMsg ?? "unknown error" })
+        );
+      } else {
+        fanout("done", "");
       }
       if (cleanupInput) {
         await cleanupInput().catch(() => {});

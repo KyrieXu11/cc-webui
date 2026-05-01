@@ -162,6 +162,7 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
+  const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
   const [activeForegrounds, setActiveForegrounds] = useState<
     Array<{ fgId: string; command: string }>
   >([]);
@@ -390,6 +391,11 @@ export default function App() {
       setAttachedStreaming(false);
       setRetryInfo(null);
       if (clientTurnId) clearActiveTurnState(clientTurnId);
+      if (reason === "done") {
+        // Same reason as in handleSend: the turn we were attached to just
+        // ended; refresh the sidebar so the new session shows up.
+        setSessionsRefreshKey((n) => n + 1);
+      }
       if (reason === "error") {
         setAllEvents((prev) => [
           ...prev,
@@ -710,6 +716,9 @@ export default function App() {
       setIsStreaming(false);
       setRetryInfo(null);
       clearActiveTurnState(clientTurnId);
+      // A turn just finished — sidebar may be stale (the just-created session
+      // wasn't on disk yet when ProjectSidebar fetched on session-id flip).
+      setSessionsRefreshKey((n) => n + 1);
     }
   };
 
@@ -890,6 +899,7 @@ export default function App() {
             home={home}
             currentProvider={settings.agentProvider}
             currentSessionId={sessionId}
+            refreshKey={sessionsRefreshKey}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
           />

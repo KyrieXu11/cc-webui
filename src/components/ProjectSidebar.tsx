@@ -15,6 +15,8 @@ interface Props {
   home: string;
   currentProvider: AgentProvider;
   currentSessionId: string | null;
+  /** Bump to force a re-fetch of the session list (e.g., after a turn ends). */
+  refreshKey?: number;
   onNewChat: () => void;
   onOpenSession: (s: SessionSummary) => void;
 }
@@ -29,6 +31,7 @@ export default function ProjectSidebar({
   home,
   currentProvider,
   currentSessionId,
+  refreshKey,
   onNewChat,
   onOpenSession,
 }: Props) {
@@ -71,7 +74,7 @@ export default function ProjectSidebar({
     return () => {
       cancelled = true;
     };
-  }, [cwd, currentProvider, currentSessionId]);
+  }, [cwd, currentProvider, currentSessionId, refreshKey]);
 
   useEffect(() => {
     if (sessions.length <= limit) return;
