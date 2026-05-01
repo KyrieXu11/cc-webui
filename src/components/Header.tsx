@@ -1,11 +1,13 @@
 import { tildify } from "../lib/fs";
 import HeaderSearch from "./HeaderSearch";
 import type { SessionSummary } from "../lib/sessions";
+import { providerLabel, type AgentProvider } from "../lib/settings";
 
 interface Props {
   sessionId?: string | null;
   projectPath: string;
   home: string;
+  provider: AgentProvider;
   onHome?: () => void;
   onNewChat?: () => void;
   onToggleFiles?: () => void;
@@ -14,10 +16,16 @@ interface Props {
   onPickSession?: (s: SessionSummary) => void;
 }
 
+const PROVIDER_ACCENT: Record<AgentProvider, string> = {
+  claude: "#ef9d5a",
+  codex: "#3ecf8e",
+};
+
 export default function Header({
   sessionId,
   projectPath,
   home,
+  provider,
   onHome,
   onNewChat,
   onToggleFiles,
@@ -25,6 +33,7 @@ export default function Header({
   onPickProject,
   onPickSession,
 }: Props) {
+  const accent = PROVIDER_ACCENT[provider];
   return (
     <header className="flex items-center gap-4 h-14 px-5 border-b border-line shrink-0">
       <div className="flex items-center gap-2 shrink-0 min-w-0">
@@ -60,7 +69,28 @@ export default function Header({
           />
         )}
       </div>
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
+        <div
+          title={`当前 Agent: ${providerLabel(provider)}`}
+          className="hidden md:inline-flex items-center gap-1.5 h-7 pl-1.5 pr-2.5 rounded-full border border-line-strong bg-canvas/60"
+        >
+          <span
+            aria-hidden
+            className="w-1.5 h-1.5 rounded-full"
+            style={{
+              background: accent,
+              outline: `3px solid ${accent}22`,
+              outlineOffset: 0,
+            }}
+          />
+          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-subtle">
+            via
+          </span>
+          <span className="text-[11.5px] text-fg font-medium tracking-tight">
+            {providerLabel(provider)}
+          </span>
+        </div>
+        <span className="hidden md:inline w-px h-5 bg-line" />
         <button
           aria-label="新对话"
           onClick={onNewChat}

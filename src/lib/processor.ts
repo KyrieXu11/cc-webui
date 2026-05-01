@@ -1,10 +1,15 @@
-import type { ChatEvent, ImageAttachment } from "./types";
-import type { SessionMessage } from "./sessions";
+import type { ChatEvent, ImageAttachment, StepStatus } from "./types";
+import type { CodexSessionTurn, SessionHistoryItem, SessionMessage } from "./sessions";
 
 const TOOL_ALIAS: Record<string, string> = {
   "mcp__bash__run": "Bash",
   "mcp__bash__output": "BashOutput",
   "mcp__bash__kill": "KillBash",
+  "mcp__bash__list": "BashList",
+  "bash.run": "Bash",
+  "bash.output": "BashOutput",
+  "bash.kill": "KillBash",
+  "bash.list": "BashList",
 };
 
 function normalizeToolName(name: string): string {
@@ -54,6 +59,31 @@ export function applySDKMessage(
   onSession: OnSession
 ): ChatEvent[] {
   if (!msg || typeof msg !== "object") return events;
+
+  if (msg.type === "thread.started" && msg.thread_id) {
+    onSession(msg.thread_id);
+    return events;
+  }
+
+  if (msg.type === "turn.failed" && msg.error?.message) {
+    return [
+      ...events,
+      {
+        id: `e-codex-${Date.now()}`,
+        type: "assistant",
+        text: `[错误] ${msg.error.message}`,
+      },
+    ];
+  }
+
+  if (
+    (msg.type === "item.started" ||
+      msg.type === "item.updated" ||
+      msg.type === "item.completed") &&
+    msg.item
+  ) {
+    return applyCodexItem(events, msg.item);
+  }
 
   if (msg.type === "system" && msg.subtype === "init") {
     if (msg.session_id) onSession(msg.session_id);
@@ -307,14 +337,142 @@ export function applySDKMessage(
   return events;
 }
 
-export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
+function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
+  switch (item.type) {
+    case "agent_message":
+      return upsertTextEvent(events, {
+        id: `a-codex-${item.id}`,
+        type: "assistant",
+        text: item.text ?? "",
+      });
+    case "reasoning":
+      return upsertTextEvent(events, {
+        id: `t-codex-${item.id}`,
+        type: "thinking",
+        text: item.text ?? "",
+      });
+    case "command_execution":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "CodexShell",
+        arg: truncate(item.command, 96),
+        status: codexStatus(item.status),
+        input: { command: item.command },
+        output: item.aggregated_output ?? "",
+      });
+    case "file_change":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "ApplyPatch",
+        arg: `${(item.changes ?? []).length} files`,
+        status: item.status === "failed" ? "error" : "ok",
+        input: { changes: item.changes ?? [] },
+        output: stringifyToolResult(item.changes ?? []),
+      });
+    case "mcp_tool_call": {
+      const rawTool = `${item.server ?? "mcp"}.${item.tool ?? "tool"}`;
+      const toolName = normalizeToolName(rawTool);
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: toolName,
+        arg: summarize(toolName, item.arguments),
+        status: codexStatus(item.status),
+        input:
+          item.arguments && typeof item.arguments === "object"
+            ? item.arguments
+            : { arguments: item.arguments },
+        output: item.error?.message ?? stringifyToolResult(item.result),
+      });
+    }
+    case "web_search":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "WebSearch",
+        arg: item.query,
+        status: "ok",
+        input: { query: item.query },
+      });
+    case "todo_list":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`,
+        type: "step",
+        tool: "TodoWrite",
+        arg: `${(item.items ?? []).length} items`,
+        status: "ok",
+        input: { todos: item.items ?? [] },
+      });
+    case "error":
+      return [
+        ...events,
+        {
+          id: `e-codex-${item.id ?? Date.now()}`,
+          type: "assistant",
+          text: `[错误] ${item.message ?? "Codex error"}`,
+        },
+      ];
+    default:
+      return events;
+  }
+}
+
+function codexStatus(status: string | undefined): StepStatus {
+  if (status === "failed") return "error";
+  if (status === "completed") return "ok";
+  return "pending";
+}
+
+function upsertTextEvent(
+  events: ChatEvent[],
+  next: Extract<ChatEvent, { type: "assistant" | "thinking" }>
+): ChatEvent[] {
+  const idx = events.findIndex((e) => e.id === next.id);
+  if (idx < 0) return next.text ? [...events, next] : events;
+  return [...events.slice(0, idx), next, ...events.slice(idx + 1)];
+}
+
+function upsertStepEvent(
+  events: ChatEvent[],
+  next: Extract<ChatEvent, { type: "step" }>
+): ChatEvent[] {
+  const idx = events.findIndex((e) => e.id === next.id);
+  if (idx < 0) return [...events, next];
+  const existing = events[idx];
+  if (existing.type !== "step") return events;
+  return [
+    ...events.slice(0, idx),
+    { ...existing, ...next },
+    ...events.slice(idx + 1),
+  ];
+}
+
+export function sessionMessagesToEvents(msgs: SessionHistoryItem[]): ChatEvent[] {
   const events: ChatEvent[] = [];
   for (const m of msgs) {
-    if (m.type === "user") {
-      const msg = m.message as any;
+    if ((m as CodexSessionTurn).provider === "codex") {
+      const turn = m as CodexSessionTurn;
+      if (turn.prompt.trim()) {
+        events.push({
+          id: `u-codex-${turn.startedAt}`,
+          type: "user",
+          text: turn.prompt,
+        });
+      }
+      for (const ev of turn.events) {
+        const next = applySDKMessage(events, ev, () => {});
+        events.splice(0, events.length, ...next);
+      }
+      continue;
+    }
+    const claudeMsg = m as SessionMessage;
+    if (claudeMsg.type === "user") {
+      const msg = claudeMsg.message as any;
       const c = msg?.content;
       if (typeof c === "string" && c.trim()) {
-        events.push({ id: `u-${m.uuid}`, type: "user", text: c });
+        events.push({ id: `u-${claudeMsg.uuid}`, type: "user", text: c });
       } else if (Array.isArray(c)) {
         const images: ImageAttachment[] = [];
         for (const b of c) {
@@ -348,7 +506,7 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
             }
           } else if (b?.type === "text" && b.text) {
             events.push({
-              id: `u-${m.uuid}-${events.length}`,
+              id: `u-${claudeMsg.uuid}-${events.length}`,
               type: "user",
               text: b.text,
               images: attachIfFirst(),
@@ -357,18 +515,18 @@ export function sessionMessagesToEvents(msgs: SessionMessage[]): ChatEvent[] {
         }
         if (images.length > 0 && !attachedImages) {
           events.push({
-            id: `u-${m.uuid}-img`,
+            id: `u-${claudeMsg.uuid}-img`,
             type: "user",
             text: "",
             images,
           });
         }
       }
-    } else if (m.type === "assistant") {
-      const msg = m.message as any;
+    } else if (claudeMsg.type === "assistant") {
+      const msg = claudeMsg.message as any;
       const content = msg?.content;
       if (Array.isArray(content)) {
-        const messageId = msg?.id ?? m.uuid;
+        const messageId = msg?.id ?? claudeMsg.uuid;
         content.forEach((b, i) => {
           if (b?.type === "text" && b.text) {
             events.push({
@@ -415,6 +573,8 @@ export function summarize(tool: string, input: any): string | undefined {
     case "BashOutput":
     case "KillBash":
       return input.bash_id;
+    case "BashList":
+      return "background tasks";
     case "Grep":
       return input.pattern ? `/${input.pattern}/` : undefined;
     case "Glob":

@@ -26,6 +26,10 @@ import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
   loadSettings,
   saveSettings,
+  defaultModelForProvider,
+  modelOptionsForProvider,
+  supportsXhighEffort,
+  type AgentProvider,
   type PermissionMode,
   type Settings,
 } from "./lib/settings";
@@ -41,6 +45,7 @@ const INFLIGHT_ATTACH_POLL_MS = 3000;
 
 type ActiveTurn = {
   clientTurnId: string;
+  agentProvider: AgentProvider;
   cwd: string;
   sessionId: string | null;
   prompt: string;
@@ -60,6 +65,7 @@ function loadActiveTurn(): ActiveTurn | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ActiveTurn;
     if (!parsed?.clientTurnId || !parsed.cwd) return null;
+    parsed.agentProvider = parsed.agentProvider ?? "claude";
     if (Date.now() - (parsed.startedAt || 0) > 60 * 60 * 1000) {
       localStorage.removeItem(ACTIVE_TURN_KEY);
       return null;
@@ -156,6 +162,7 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
+  const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
   const [activeForegrounds, setActiveForegrounds] = useState<
     Array<{ fgId: string; command: string }>
   >([]);
@@ -218,17 +225,28 @@ export default function App() {
         ? (JSON.parse(raw) as {
             cwd?: string;
             sessionId?: string | null;
+            agentProvider?: AgentProvider;
           })
         : null;
       const cwd = saved?.cwd || active?.cwd;
       if (!cwd) return;
+      const restoreProvider = saved?.agentProvider || active?.agentProvider || "claude";
+      setSettings((cur) =>
+        cur.agentProvider === restoreProvider
+          ? cur
+          : {
+              ...cur,
+              agentProvider: restoreProvider,
+              model: defaultModelForProvider(restoreProvider),
+            }
+      );
       setProjectCwd(cwd);
       setSidebarOpen(true);
       const restoreSessionId = saved?.sessionId || active?.sessionId || null;
       if (restoreSessionId) {
         setSessionId(restoreSessionId);
         setLoadingSession(true);
-        getSessionMessages(restoreSessionId, cwd)
+        getSessionMessages(restoreSessionId, cwd, 5000, restoreProvider)
           .then((msgs) => {
             forceScrollBottom.current = true;
             setAllEvents(
@@ -256,13 +274,17 @@ export default function App() {
       } else {
         localStorage.setItem(
           "cc-webui:lastProject",
-          JSON.stringify({ cwd: projectCwd, sessionId })
+          JSON.stringify({
+            cwd: projectCwd,
+            sessionId,
+            agentProvider: settings.agentProvider,
+          })
         );
       }
     } catch {
       /* ignore */
     }
-  }, [projectCwd, sessionId]);
+  }, [projectCwd, sessionId, settings.agentProvider]);
 
   useEffect(() => {
     if (!projectCwd) return;
@@ -315,9 +337,9 @@ export default function App() {
   };
 
   const attachKey = activeTurn?.clientTurnId
-    ? `turn:${activeTurn.clientTurnId}`
+    ? `${activeTurn.agentProvider}:turn:${activeTurn.clientTurnId}`
     : sessionId
-      ? `session:${sessionId}`
+      ? `${settings.agentProvider}:session:${sessionId}`
       : "";
 
   // Wakeup-triggered turns start on the server without an initiating browser
@@ -329,7 +351,7 @@ export default function App() {
     let alive = true;
     const tick = () => {
       if (isStreaming || attachedStreaming || loadingSession) return;
-      getInflightSessions()
+      getInflightSessions(settings.agentProvider)
         .then((set) => {
           if (!alive) return;
           if (set.has(sessionId)) {
@@ -343,7 +365,14 @@ export default function App() {
       alive = false;
       clearInterval(timer);
     };
-  }, [sessionId, projectCwd, isStreaming, attachedStreaming, loadingSession]);
+  }, [
+    sessionId,
+    projectCwd,
+    settings.agentProvider,
+    isStreaming,
+    attachedStreaming,
+    loadingSession,
+  ]);
 
   // Auto-attach to any in-flight SDK turn. The clientTurnId path covers a
   // refresh during the first seconds of a brand-new chat, before the SDK has
@@ -354,6 +383,7 @@ export default function App() {
     if (loadingSession) return;
     const clientTurnId = activeTurn?.clientTurnId ?? null;
     const attachSessionId = activeTurn?.sessionId ?? sessionId;
+    const attachProvider = activeTurn?.agentProvider ?? settings.agentProvider;
     let closed = false;
     setAttachedStreaming(true);
     const finishAttach = (reason: "done" | "error" | "no-inflight") => {
@@ -361,6 +391,11 @@ export default function App() {
       setAttachedStreaming(false);
       setRetryInfo(null);
       if (clientTurnId) clearActiveTurnState(clientTurnId);
+      if (reason === "done") {
+        // Same reason as in handleSend: the turn we were attached to just
+        // ended; refresh the sidebar so the new session shows up.
+        setSessionsRefreshKey((n) => n + 1);
+      }
       if (reason === "error") {
         setAllEvents((prev) => [
           ...prev,
@@ -373,7 +408,7 @@ export default function App() {
       }
     };
     const unsub = connectAttach(
-      { sessionId: attachSessionId, clientTurnId },
+      { sessionId: attachSessionId, clientTurnId, agentProvider: attachProvider },
       (msg) => {
         if (msg?.type === "foreground_started" && msg.fgId) {
           setActiveForegrounds((prev) =>
@@ -416,7 +451,14 @@ export default function App() {
       setActiveForegrounds([]);
       unsub();
     };
-  }, [attachKey, attachRetryNonce, isStreaming, loadingSession, projectCwd]);
+  }, [
+    attachKey,
+    attachRetryNonce,
+    isStreaming,
+    loadingSession,
+    projectCwd,
+    settings.agentProvider,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -514,6 +556,13 @@ export default function App() {
     clearActiveTurnState();
     setProjectCwd(s.cwd);
     setSessionId(s.sessionId);
+    setSettings((cur) => {
+      const modelOptions = modelOptionsForProvider(s.provider);
+      const model = modelOptions.some((m) => m.id === cur.model)
+        ? cur.model
+        : defaultModelForProvider(s.provider);
+      return { ...cur, agentProvider: s.provider, model };
+    });
     setSidebarOpen(true);
     setDialogOpen(false);
     setAllEvents([]);
@@ -521,7 +570,7 @@ export default function App() {
     setLoadingSession(true);
     addRecent(s.cwd).catch(() => {});
     try {
-      const msgs = await getSessionMessages(s.sessionId, s.cwd);
+      const msgs = await getSessionMessages(s.sessionId, s.cwd, 5000, s.provider);
       forceScrollBottom.current = true;
       setAllEvents(sessionMessagesToEvents(msgs));
     } catch (err) {
@@ -544,11 +593,33 @@ export default function App() {
   const updateModel = (model: string) =>
     setSettings((s) => {
       const next = { ...s, model };
-      if (model !== "opus" && s.effort === "xhigh") {
+      if (!supportsXhighEffort(model) && s.effort === "xhigh") {
         next.effort = "high";
       }
       return next;
     });
+
+  const updateProvider = (agentProvider: AgentProvider) => {
+    clearActiveTurnState();
+    setAllEvents([]);
+    setVisibleCount(INITIAL_VISIBLE);
+    setSessionId(null);
+    setSettings((s) => {
+      const modelOptions = modelOptionsForProvider(agentProvider);
+      const model = modelOptions.some((m) => m.id === s.model)
+        ? s.model
+        : defaultModelForProvider(agentProvider);
+      return {
+        ...s,
+        agentProvider,
+        model,
+        effort:
+          s.effort === "xhigh" && !supportsXhighEffort(model)
+            ? "high"
+            : s.effort,
+      };
+    });
+  };
 
   const updateMode = (permissionMode: PermissionMode) =>
     setSettings((s) => ({ ...s, permissionMode }));
@@ -560,6 +631,7 @@ export default function App() {
     const clientTurnId = createClientTurnId();
     setActiveTurnState({
       clientTurnId,
+      agentProvider: settings.agentProvider,
       cwd: projectCwd,
       sessionId,
       prompt: text,
@@ -581,6 +653,7 @@ export default function App() {
         sessionId,
         clientTurnId,
         cwd: projectCwd,
+        agentProvider: settings.agentProvider,
         model: settings.model,
         permissionMode: settings.permissionMode,
         effort: settings.effort,
@@ -643,6 +716,9 @@ export default function App() {
       setIsStreaming(false);
       setRetryInfo(null);
       clearActiveTurnState(clientTurnId);
+      // A turn just finished — sidebar may be stale (the just-created session
+      // wasn't on disk yet when ProjectSidebar fetched on session-id flip).
+      setSessionsRefreshKey((n) => n + 1);
     }
   };
 
@@ -660,7 +736,11 @@ export default function App() {
     const turnId = activeTurn?.clientTurnId ?? null;
     if (!sessionId && !turnId) return;
     try {
-      await cancelChat({ sessionId, clientTurnId: turnId });
+      await cancelChat({
+        sessionId,
+        clientTurnId: turnId,
+        agentProvider: activeTurn?.agentProvider ?? settings.agentProvider,
+      });
     } catch (err) {
       console.error("cancel failed:", err);
     }
@@ -817,7 +897,9 @@ export default function App() {
           <ProjectSidebar
             cwd={projectCwd}
             home={home}
+            currentProvider={settings.agentProvider}
             currentSessionId={sessionId}
+            refreshKey={sessionsRefreshKey}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
           />
@@ -833,6 +915,7 @@ export default function App() {
               sessionId={sessionId}
               projectPath={projectCwd}
               home={home}
+              provider={settings.agentProvider}
               onHome={goHome}
               onNewChat={handleNewChat}
               onToggleFiles={() => setFilesOpen((o) => !o)}
@@ -883,6 +966,7 @@ export default function App() {
                   onSend={handleSend}
                   onCancel={handleCancel}
                   disabled={busy}
+                  provider={settings.agentProvider}
                   model={settings.model}
                   onModelChange={updateModel}
                   mode={settings.permissionMode}
@@ -906,6 +990,8 @@ export default function App() {
           </>
         ) : (
           <HomeView
+            provider={settings.agentProvider}
+            onProviderChange={updateProvider}
             onOpenSession={openSession}
             onOpenProject={openProject}
             onClickOpen={() => setDialogOpen(true)}

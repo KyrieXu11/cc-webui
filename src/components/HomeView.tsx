@@ -5,8 +5,15 @@ import {
   deleteSession as deleteSessionApi,
   type SessionSummary,
 } from "../lib/sessions";
+import {
+  PROVIDER_OPTIONS,
+  providerLabel,
+  type AgentProvider,
+} from "../lib/settings";
 
 interface Props {
+  provider: AgentProvider;
+  onProviderChange: (provider: AgentProvider) => void;
   onOpenSession: (s: SessionSummary) => void;
   onOpenProject: (cwd: string) => void;
   onClickOpen: () => void;
@@ -19,6 +26,8 @@ type ProjectGroup = {
 };
 
 export default function HomeView({
+  provider,
+  onProviderChange,
   onOpenSession,
   onOpenProject,
   onClickOpen,
@@ -30,10 +39,23 @@ export default function HomeView({
 
   useEffect(() => {
     getHome().then(setHome).catch(() => {});
-    listSessions(60)
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listSessions(60, undefined, provider)
       .then(setSessions)
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
+
+  useEffect(() => {
     if (typeof location !== "undefined") {
       const p = location.port || (location.protocol === "https:" ? "443" : "80");
       setAddress(`${location.hostname}:${p}`);
@@ -59,8 +81,10 @@ export default function HomeView({
 
   const onRemove = async (s: SessionSummary, e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteSessionApi(s.sessionId, s.cwd);
-    setSessions((xs) => xs.filter((x) => x.sessionId !== s.sessionId));
+    await deleteSessionApi(s.sessionId, s.cwd, s.provider);
+    setSessions((xs) =>
+      xs.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider)
+    );
   };
 
   return (
@@ -76,13 +100,16 @@ export default function HomeView({
           <h2 className="text-fg text-[14.5px] font-semibold tracking-tight">
             最近项目
           </h2>
-          <button
-            onClick={onClickOpen}
-            className="h-8 px-3.5 rounded-md bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
-          >
-            <FolderIcon />
-            打开项目
-          </button>
+          <div className="flex items-center gap-2">
+            <ProviderPicker value={provider} onChange={onProviderChange} />
+            <button
+              onClick={onClickOpen}
+              className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+            >
+              <FolderIcon />
+              打开项目
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -91,7 +118,7 @@ export default function HomeView({
           </div>
         ) : groups.length === 0 ? (
           <div className="text-muted text-[13px] py-6 border-t border-line">
-            还没有项目。点 "打开项目" 选一个文件夹开始。
+            还没有 {providerLabel(provider)} 对话。点 "打开项目" 选一个文件夹开始。
           </div>
         ) : (
           <div className="border-t border-line">
@@ -108,6 +135,67 @@ export default function HomeView({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const PROVIDER_ACCENT: Record<AgentProvider, string> = {
+  claude: "#ef9d5a",
+  codex: "#3ecf8e",
+};
+
+function ProviderPicker({
+  value,
+  onChange,
+}: {
+  value: AgentProvider;
+  onChange: (provider: AgentProvider) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Agent provider"
+      className="relative inline-flex items-stretch h-9 p-0.5 rounded-lg bg-canvas border border-line-strong shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
+    >
+      {PROVIDER_OPTIONS.map((p) => {
+        const active = p.id === value;
+        const accent = PROVIDER_ACCENT[p.id];
+        return (
+          <button
+            key={p.id}
+            role="tab"
+            aria-selected={active}
+            onClick={() => {
+              if (!active) onChange(p.id);
+            }}
+            title={p.hint}
+            className={`group relative flex items-center gap-2 px-3 rounded-md transition-all duration-200 ${
+              active
+                ? "bg-surface text-fg shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_18px_-12px_rgba(0,0,0,0.6)]"
+                : "text-muted hover:text-fg"
+            }`}
+          >
+            <span
+              aria-hidden
+              className="w-1.5 h-1.5 rounded-full transition-all duration-200"
+              style={{
+                background: active ? accent : "transparent",
+                outline: active
+                  ? `3px solid ${accent}22`
+                  : `1px solid var(--color-line-strong)`,
+                outlineOffset: 0,
+              }}
+            />
+            <span
+              className={`text-[12.5px] tracking-tight ${
+                active ? "font-semibold" : "font-medium"
+              }`}
+            >
+              {p.label}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -158,7 +246,7 @@ function ProjectBlock({
       <div className="flex flex-col">
         {group.sessions.slice(0, 5).map((s) => (
           <button
-            key={s.sessionId}
+            key={`${s.provider}:${s.sessionId}`}
             onClick={() => onOpenSession(s)}
             className="group/conv w-full flex items-center justify-between py-1.5 pl-4 pr-2 -mx-2 rounded text-left hover:bg-fg/[0.025] transition-colors min-w-0"
           >
@@ -238,3 +326,4 @@ const FolderIcon = () => (
     />
   </svg>
 );
+

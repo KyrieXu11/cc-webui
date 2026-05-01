@@ -1,4 +1,4 @@
-import type { EffortLevel, PermissionMode } from "./settings";
+import type { AgentProvider, EffortLevel, PermissionMode } from "./settings";
 import type { ImageAttachment } from "./types";
 
 export type { ImageAttachment };
@@ -8,6 +8,7 @@ export interface StreamChatParams {
   sessionId: string | null;
   clientTurnId?: string;
   cwd?: string;
+  agentProvider?: AgentProvider;
   model?: string;
   permissionMode?: PermissionMode;
   effort?: EffortLevel;
@@ -18,7 +19,8 @@ export interface StreamChatParams {
 export async function* streamChat(
   params: StreamChatParams
 ): AsyncGenerator<any> {
-  const res = await fetch("/api/chat", {
+  const base = params.agentProvider === "codex" ? "/api/codex/chat" : "/api/chat";
+  const res = await fetch(base, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -96,14 +98,19 @@ export async function* streamChat(
 // POST /chat emits. Client should feed each msg into applySDKMessage.
 // Returns an unsubscribe fn that closes the EventSource.
 export function connectAttach(
-  params: { sessionId?: string | null; clientTurnId?: string | null },
+  params: {
+    sessionId?: string | null;
+    clientTurnId?: string | null;
+    agentProvider?: AgentProvider;
+  },
   onMsg: (m: any) => void,
   onDone?: (reason: "done" | "error" | "no-inflight") => void
 ): () => void {
   const qs = new URLSearchParams();
   if (params.sessionId) qs.set("sessionId", params.sessionId);
   if (params.clientTurnId) qs.set("clientTurnId", params.clientTurnId);
-  const es = new EventSource(`/api/chat/attach?${qs}`);
+  const base = params.agentProvider === "codex" ? "/api/codex/chat" : "/api/chat";
+  const es = new EventSource(`${base}/attach?${qs}`);
   const forward = (e: Event) => {
     const data = (e as MessageEvent).data;
     if (!data) return;
@@ -122,6 +129,7 @@ export function connectAttach(
     "user",
     "stream_event",
     "permission_request",
+    "codex_event",
     "foreground_started",
     "foreground_ended",
     "wakeup_pending",
@@ -146,8 +154,11 @@ export function connectAttach(
 
 // Poll the server for the set of sessionIds currently generating. Used by
 // the sidebar to render an "in-flight" indicator next to each session.
-export async function getInflightSessions(): Promise<Set<string>> {
-  const res = await fetch("/api/chat/inflight");
+export async function getInflightSessions(
+  agentProvider: AgentProvider = "claude"
+): Promise<Set<string>> {
+  const base = agentProvider === "codex" ? "/api/codex/chat" : "/api/chat";
+  const res = await fetch(`${base}/inflight`);
   if (!res.ok) return new Set();
   const data = (await res.json().catch(() => null)) as
     | { sessionIds?: string[] }
@@ -161,8 +172,10 @@ export async function getInflightSessions(): Promise<Set<string>> {
 export async function cancelChat(params: {
   sessionId?: string | null;
   clientTurnId?: string | null;
+  agentProvider?: AgentProvider;
 }): Promise<{ ok: boolean; reason?: string }> {
-  const res = await fetch("/api/chat/cancel", {
+  const base = params.agentProvider === "codex" ? "/api/codex/chat" : "/api/chat";
+  const res = await fetch(`${base}/cancel`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

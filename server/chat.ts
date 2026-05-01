@@ -19,12 +19,13 @@ import {
 const MCP_BASH_RUN = "mcp__bash__run";
 const MCP_BASH_OUTPUT = "mcp__bash__output";
 const MCP_BASH_KILL = "mcp__bash__kill";
+const MCP_BASH_LIST = "mcp__bash__list";
 const MCP_SCHEDULE_WAKEUP = "mcp__schedule__wakeup";
 const MCP_SCHEDULE_CANCEL_WAKEUP = "mcp__schedule__cancel_wakeup";
 const SYSTEM_PROMPT_APPEND =
   "SHELL TOOLS: The built-in Bash/BashOutput/KillBash tools are DISABLED. " +
   `Use ${MCP_BASH_RUN} (same schema: command, timeout, description, plus run_in_background). ` +
-  `For background tasks, poll with ${MCP_BASH_OUTPUT} (bash_id) and terminate with ${MCP_BASH_KILL} (bash_id). ` +
+  `For background tasks, list with ${MCP_BASH_LIST}, poll with ${MCP_BASH_OUTPUT} (bash_id), and terminate with ${MCP_BASH_KILL} (bash_id). ` +
   "Do not try to invoke the built-in Bash — it will be rejected.\n" +
   "WAKEUP / SELF-RESUMING: The built-in ScheduleWakeup tool is NOT available in this runtime. " +
   `Use ${MCP_SCHEDULE_WAKEUP} (delaySeconds 60..3600, prompt, optional reason) before ending your turn ` +
@@ -485,6 +486,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
             if (
               toolName === MCP_BASH_OUTPUT ||
               toolName === MCP_BASH_KILL ||
+              toolName === MCP_BASH_LIST ||
               toolName === MCP_SCHEDULE_WAKEUP ||
               toolName === MCP_SCHEDULE_CANCEL_WAKEUP
             ) {

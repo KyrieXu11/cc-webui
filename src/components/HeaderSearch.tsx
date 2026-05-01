@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getRecents, tildify, timeAgo, type RecentProject } from "../lib/fs";
 import { listSessions, type SessionSummary } from "../lib/sessions";
+import type { AgentProvider } from "../lib/settings";
 
 interface Props {
   home: string;
@@ -183,7 +184,7 @@ export default function HeaderSearch({
                   const absoluteIdx = projectHits.length + i;
                   return (
                     <button
-                      key={h.session.sessionId}
+                      key={`${h.session.provider}:${h.session.sessionId}`}
                       onClick={() => pick(h)}
                       onMouseEnter={() => setIdx(absoluteIdx)}
                       className={`w-full text-left px-3 py-1.5 flex items-start gap-3 transition-colors ${
@@ -199,6 +200,7 @@ export default function HeaderSearch({
                             absoluteIdx === idx ? "text-fg" : "text-muted"
                           }`}
                         >
+                          <ProviderBadge provider={h.session.provider} />
                           <Highlighted text={h.title} query={query} />
                         </div>
                         {h.session.cwd && (
@@ -229,6 +231,14 @@ export default function HeaderSearch({
         </div>
       )}
     </div>
+  );
+}
+
+function ProviderBadge({ provider }: { provider: AgentProvider }) {
+  return (
+    <span className="mr-1.5 rounded-sm border border-line px-1 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-subtle">
+      {provider}
+    </span>
   );
 }
 

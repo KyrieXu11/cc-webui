@@ -3,7 +3,7 @@ import ModelSelector from "./ModelSelector";
 import ModeSelector from "./ModeSelector";
 import EffortSelector from "./EffortSelector";
 import SlashCommandMenu from "./SlashCommandMenu";
-import type { EffortLevel, PermissionMode } from "../lib/settings";
+import type { AgentProvider, EffortLevel, PermissionMode } from "../lib/settings";
 import { uploadFiles, formatSize, type UploadedFile } from "../lib/upload";
 
 type ImagePart = { name?: string; mediaType: string; data: string };
@@ -12,6 +12,7 @@ interface Props {
   onSend?: (text: string, images?: ImagePart[]) => void;
   onCancel?: () => void;
   disabled?: boolean;
+  provider: AgentProvider;
   model: string;
   onModelChange: (v: string) => void;
   mode: PermissionMode;
@@ -29,6 +30,7 @@ export default function Composer({
   onSend,
   onCancel,
   disabled,
+  provider,
   model,
   onModelChange,
   mode,
@@ -359,7 +361,11 @@ export default function Composer({
       </div>
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <ModelSelector value={model} onChange={onModelChange} />
+          <ModelSelector
+            value={model}
+            provider={provider}
+            onChange={onModelChange}
+          />
           <span className="text-subtle/50 text-[11px]">·</span>
           <ModeSelector value={mode} onChange={onModeChange} />
           <span className="text-subtle/50 text-[11px]">·</span>
