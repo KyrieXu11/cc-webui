@@ -18,39 +18,40 @@ export function buildPrompt(args: BuildPromptArgs): string {
   let hasHistory = false;
 
   for (const e of transcript) {
-    // Skip non-conversational rows: thinking is private, tool plumbing
-    // breaks tool_use_id pairing if replayed, permission/summary/error
-    // are bookkeeping.
+    const ev = e.event;
+    if (!ev) continue;
+
+    // Skip non-conversational rows. Tool plumbing must NOT be replayed
+    // because Claude SDK strictly validates tool_use_id pairing across
+    // a single call and we can't reconstruct that from canonical text.
     if (
-      e.type === "thinking" ||
-      e.type === "tool_call" ||
-      e.type === "tool_result" ||
-      e.type === "permission" ||
-      e.type === "summary" ||
-      e.type === "error"
+      ev.type === "thinking" ||
+      ev.type === "step" ||
+      ev.type === "permission" ||
+      ev.type === "summary"
     ) {
       continue;
     }
 
-    if (e.type === "user" && e.agent === "user" && e.text) {
-      lines.push(`USER: ${e.text}`);
+    if (ev.type === "user" && e.agent === "user" && ev.text) {
+      lines.push(`USER: ${ev.text}`);
       hasHistory = true;
       continue;
     }
 
-    if (e.type === "assistant" && e.agent === target && e.text) {
-      lines.push(`你的上一条回复: ${e.text}`);
+    if (ev.type === "assistant" && e.agent === target && ev.text) {
+      lines.push(`你的上一条回复: ${ev.text}`);
       hasHistory = true;
       continue;
     }
 
     if (
-      e.type === "assistant" &&
+      ev.type === "assistant" &&
       e.agent !== "user" &&
       e.agent !== target &&
-      e.text
+      ev.text
     ) {
-      lines.push(`[来自 ${peerLabel(e.agent)} 的回复]\n${e.text}`);
+      lines.push(`[来自 ${peerLabel(e.agent)} 的回复]\n${ev.text}`);
       hasHistory = true;
       continue;
     }

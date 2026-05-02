@@ -3,11 +3,13 @@ import { runClaude } from "./claude-runner.ts";
 import { runCodex } from "./codex-runner.ts";
 import { buildPrompt } from "./input-builder.ts";
 import { readConfig } from "./config.ts";
+import type { ChatEvent } from "../../src/lib/types.ts";
 import {
   appendEntry,
   readAll,
   upsertIndexRow,
   newEntryId,
+  makeEntry,
   type AgentId,
   type GroupTurnEntry,
   type ImageAttachment,
@@ -107,16 +109,18 @@ export async function startTurn(
 
   // Persist the user turn first so a refresh during runner setup still
   // shows the user message.
-  const userEntry: GroupTurnEntry = {
-    id: newEntryId(),
-    ts: Date.now(),
-    type: "user",
+  const userEntry = makeEntry({
     agent: "user",
-    text: input.text,
-    images: input.images && input.images.length > 0 ? input.images : undefined,
+    event: {
+      id: newEntryId(),
+      type: "user",
+      text: input.text,
+      images:
+        input.images && input.images.length > 0 ? input.images : undefined,
+    },
+    turnId,
     recipients: expanded,
-    meta: { turnId },
-  };
+  });
   await appendEntry(gid, userEntry);
 
   fanout(
@@ -237,13 +241,16 @@ async function runPipeline(args: {
       agentId,
       signal: turn.abort.signal,
       emitPermission: (payload) => {
+        // Fan out as agent_event so the client's applySDKMessage folds it
+        // into the live ChatEvent[] (same code path as single chat).
         fanout(
           turn,
-          "permission_request",
+          "agent_event",
           JSON.stringify({
-            ...(payload as object),
-            agent: agentId,
+            type: "agent_event",
             turnId: turn.turnId,
+            agent: agentId,
+            payload,
           }),
         );
       },
@@ -256,8 +263,7 @@ async function runPipeline(args: {
 
     let stepOk = true;
     let stepError: string | undefined;
-    let finalText = "";
-    let finalThinking = "";
+    let stepEvents: ChatEvent[] = [];
 
     for await (const ev of runner) {
       if (ev.kind === "raw") {
@@ -275,41 +281,48 @@ async function runPipeline(args: {
       } else if (ev.kind === "ended") {
         stepOk = ev.ok;
         stepError = ev.error;
-        finalText = ev.finalText;
-        finalThinking = ev.finalThinking;
+        stepEvents = ev.events;
       }
     }
 
-    // Persist this agent's terminal contributions to canonical jsonl.
-    if (finalThinking) {
-      await appendEntry(turn.gid, {
-        id: newEntryId(),
-        ts: Date.now(),
-        type: "thinking",
-        agent: agentId,
-        text: finalThinking,
-        meta: { turnId: turn.turnId, pipelineStep: step },
-      });
-    }
-    if (finalText) {
-      await appendEntry(turn.gid, {
-        id: newEntryId(),
-        ts: Date.now(),
-        type: "assistant",
-        agent: agentId,
-        text: finalText,
-        meta: { turnId: turn.turnId, pipelineStep: step },
-      });
+    // Persist every ChatEvent the runner produced (assistant, thinking,
+    // step, permission, summary) — that's what gives a refresh after
+    // turn_end the same view as the live stream, including tool-call
+    // timelines and edit diffs.
+    for (const chatEvent of stepEvents) {
+      // Skip empty assistant/thinking text — applySDKMessage may emit
+      // shells before content arrives if the stream was aborted.
+      if (
+        (chatEvent.type === "assistant" || chatEvent.type === "thinking") &&
+        !chatEvent.text?.trim()
+      ) {
+        continue;
+      }
+      await appendEntry(
+        turn.gid,
+        makeEntry({
+          agent: agentId,
+          event: chatEvent,
+          turnId: turn.turnId,
+          pipelineStep: step,
+        }),
+      );
     }
     if (!stepOk) {
-      await appendEntry(turn.gid, {
-        id: newEntryId(),
-        ts: Date.now(),
-        type: "error",
-        agent: agentId,
-        text: stepError ?? "unknown error",
-        meta: { turnId: turn.turnId, pipelineStep: step, error: stepError },
-      });
+      await appendEntry(
+        turn.gid,
+        makeEntry({
+          agent: agentId,
+          event: {
+            id: newEntryId(),
+            type: "assistant",
+            text: `[错误] ${stepError ?? "unknown error"}`,
+          },
+          turnId: turn.turnId,
+          pipelineStep: step,
+          error: stepError,
+        }),
+      );
     }
 
     fanout(
@@ -333,6 +346,11 @@ async function runPipeline(args: {
   // Update sidebar / search index
   const final = await readAll(turn.gid);
   const last = final[final.length - 1];
+  const lastEv: any = last?.event;
+  const lastSnippet =
+    typeof lastEv?.text === "string" && lastEv.text
+      ? lastEv.text.slice(0, 120)
+      : "";
   await upsertIndexRow({
     id: config.id,
     title: config.title,
@@ -341,7 +359,7 @@ async function runPipeline(args: {
     participantSummary: config.participants
       .map((p) => (p.id === "claude" ? "Claude" : "Codex"))
       .join(" · "),
-    lastSnippet: (last?.text ?? "").slice(0, 120),
+    lastSnippet,
     inFlight: false,
   });
 

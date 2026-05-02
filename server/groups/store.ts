@@ -2,8 +2,12 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import type { ChatEvent } from "../../src/lib/types.ts";
 
 export type AgentId = "claude" | "codex";
+
+// Re-export ChatEvent so callers don't have to know it lives in src/lib.
+export type { ChatEvent } from "../../src/lib/types.ts";
 
 export type ImageAttachment = {
   name?: string;
@@ -11,31 +15,17 @@ export type ImageAttachment = {
   data: string;
 };
 
+// Each canonical entry wraps a ChatEvent (the same shape the frontend's
+// MessageList consumes) plus group-specific metadata: which agent
+// produced it, when, and which pipeline step / turnId it belongs to.
 export type GroupTurnEntry = {
-  id: string;
-  ts: number;
-  type:
-    | "user"
-    | "assistant"
-    | "thinking"
-    | "tool_call"
-    | "tool_result"
-    | "permission"
-    | "summary"
-    | "error";
   agent: "user" | AgentId;
-  recipients?: AgentId[];
-  text?: string;
-  tool?: {
-    name: string;
-    input?: Record<string, unknown>;
-    output?: string;
-    status: "ok" | "pending" | "error";
-  };
-  images?: ImageAttachment[];
+  ts: number;
+  event: ChatEvent;
   meta?: {
     turnId?: string;
     pipelineStep?: number;
+    recipients?: AgentId[];
     error?: string;
   };
 };
@@ -113,7 +103,12 @@ export async function readAll(gid: string): Promise<GroupTurnEntry[]> {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      out.push(JSON.parse(trimmed) as GroupTurnEntry);
+      const parsed = JSON.parse(trimmed) as GroupTurnEntry;
+      // Skip rows without a recognizable event payload — guards against
+      // schema drift from earlier dev iterations.
+      if (parsed && parsed.event && parsed.event.type) {
+        out.push(parsed);
+      }
     } catch {
       // skip corrupted line
     }
@@ -153,4 +148,27 @@ export async function removeIndexRow(gid: string): Promise<void> {
   const idx = await readIndex();
   idx.groups = idx.groups.filter((g) => g.id !== gid);
   await writeIndex(idx);
+}
+
+// Helper: assemble a GroupTurnEntry from a ChatEvent. Centralizes the
+// timestamp + meta defaults so callers don't keep them in sync by hand.
+export function makeEntry(args: {
+  agent: "user" | AgentId;
+  event: ChatEvent;
+  turnId?: string;
+  pipelineStep?: number;
+  recipients?: AgentId[];
+  error?: string;
+}): GroupTurnEntry {
+  const meta: GroupTurnEntry["meta"] = {};
+  if (args.turnId) meta.turnId = args.turnId;
+  if (args.pipelineStep !== undefined) meta.pipelineStep = args.pipelineStep;
+  if (args.recipients) meta.recipients = args.recipients;
+  if (args.error) meta.error = args.error;
+  return {
+    agent: args.agent,
+    ts: Date.now(),
+    event: args.event,
+    meta: Object.keys(meta).length > 0 ? meta : undefined,
+  };
 }

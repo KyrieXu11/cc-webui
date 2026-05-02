@@ -12,6 +12,8 @@ import { systemPromptFor } from "./input-builder.ts";
 import type { GroupConfig, Participant } from "./config.ts";
 import type { ImageAttachment } from "./store.ts";
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
+import { applySDKMessage } from "../../src/lib/processor.ts";
+import type { ChatEvent } from "../../src/lib/types.ts";
 
 const MCP_BASH_RUN = "mcp__bash__run";
 const MCP_BASH_OUTPUT = "mcp__bash__output";
@@ -48,8 +50,7 @@ export async function* runClaude(args: {
   const groupSystemPrompt = systemPromptFor({ config, target: ctx.agentId });
   const systemPromptAppend = `${SYSTEM_PROMPT_APPEND_BASH}\n\n${groupSystemPrompt}`;
 
-  let finalText = "";
-  let finalThinking = "";
+  let events: ChatEvent[] = [];
 
   try {
     const response = query({
@@ -89,7 +90,7 @@ export async function* runClaude(args: {
           const id = randomUUID();
           const displayTool =
             toolName === MCP_BASH_RUN ? "Bash" : toolName;
-          ctx.emitPermission({
+          const permPayload = {
             type: "permission_request",
             id,
             tool: displayTool,
@@ -100,8 +101,22 @@ export async function* runClaude(args: {
             hasSessionPermissionSuggestions:
               permissionSuggestions.length > 0,
             toolUseId: permOpts.toolUseID,
-          });
+          };
+          // Fold into server-side events accumulator (so canonical jsonl
+          // captures the card) AND emit through the raw SSE channel so
+          // the client renders it via the same code path single chat
+          // uses.
+          events = applySDKMessage(events, permPayload, () => {});
+          ctx.emitPermission(permPayload);
           const decision = await awaitPermission(id, permOpts.signal);
+          // Mark the in-memory permission entry as resolved so a refresh
+          // after turn_end shows the card in its post-decision state.
+          const resolvedBehavior = decision.behavior;
+          events = events.map((e) =>
+            e.type === "permission" && e.permissionId === id
+              ? { ...e, resolved: resolvedBehavior }
+              : e,
+          );
           if (decision.behavior === "allow") {
             return { behavior: "allow", updatedInput: input };
           }
@@ -134,43 +149,20 @@ export async function* runClaude(args: {
 
     for await (const msg of response) {
       yield { kind: "raw", payload: msg };
-
-      const m = msg as any;
-      if (m.type === "assistant" && m.message?.content) {
-        // Terminal assistant message — accumulate both text and thinking
-        // blocks. (Multiple assistant messages may appear during a turn
-        // for tool-use round trips; we keep the last one's blocks.)
-        const blocks = m.message.content;
-        if (Array.isArray(blocks)) {
-          let text = "";
-          let thinking = "";
-          for (const b of blocks) {
-            if (b?.type === "text" && typeof b.text === "string") text += b.text;
-            if (b?.type === "thinking" && typeof b.thinking === "string") {
-              thinking += b.thinking;
-            }
-          }
-          if (text) finalText = text;
-          if (thinking) finalThinking = thinking;
-        }
-      }
-      if (m.type === "result") {
-        // The result message carries the canonical final string. Trust it
-        // over the assistant-message accumulation.
-        if (typeof m.result === "string" && m.result) finalText = m.result;
-        break;
-      }
+      // Fold via the same mapper the frontend uses, so persisted entries
+      // and live UI render identically.
+      events = applySDKMessage(events, msg, () => {});
+      if ((msg as any).type === "result") break;
     }
 
-    yield { kind: "ended", ok: true, finalText, finalThinking };
+    yield { kind: "ended", ok: true, events };
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
     yield {
       kind: "ended",
       ok: !aborted,
       error: aborted ? "aborted" : String((err as Error)?.message ?? err),
-      finalText,
-      finalThinking,
+      events,
     };
   }
 }

@@ -34,23 +34,18 @@ export type GroupConfig = {
   pipeline: GroupAgentId[];
 };
 
+// Each canonical entry wraps a ChatEvent (the shape MessageList renders)
+// plus the agent that produced it and per-turn meta.
 export type GroupTurnEntry = {
-  id: string;
-  ts: number;
-  type:
-    | "user"
-    | "assistant"
-    | "thinking"
-    | "tool_call"
-    | "tool_result"
-    | "permission"
-    | "summary"
-    | "error";
   agent: "user" | GroupAgentId;
-  recipients?: GroupAgentId[];
-  text?: string;
-  images?: ImageAttachment[];
-  meta?: { turnId?: string; pipelineStep?: number };
+  ts: number;
+  event: ChatEvent;
+  meta?: {
+    turnId?: string;
+    pipelineStep?: number;
+    recipients?: GroupAgentId[];
+    error?: string;
+  };
 };
 
 export type GroupIndexRow = {

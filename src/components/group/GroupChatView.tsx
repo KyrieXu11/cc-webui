@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import AssistantText from "../AssistantText";
+import { useEffect, useMemo, useRef, useState } from "react";
+import MessageList from "../MessageList";
 import ParticipantsBar from "./ParticipantsBar";
 import GroupComposer from "./GroupComposer";
 import {
@@ -9,7 +9,9 @@ import {
   streamGroupTurn,
 } from "../../lib/groups";
 import { sendPermission } from "../../lib/permission";
+import { applySDKMessage } from "../../lib/processor";
 import type {
+  ChatEvent,
   GroupAgentId,
   GroupConfig,
   GroupSseEvent,
@@ -17,32 +19,25 @@ import type {
   PermissionDecision,
 } from "../../lib/types";
 
-type PendingPermission = {
-  id: string;
-  agent: GroupAgentId;
-  tool: string;
-  title?: string;
-  description?: string;
-  hasSessionPermissionSuggestions?: boolean;
-};
-
 const AGENT_STYLE: Record<
   string,
   { label: string; ring: string; chip: string }
 > = {
   claude: {
     label: "Claude",
-    ring: "border-l-2 border-l-purple-500",
+    ring: "border-l-2 border-l-purple-500 pl-3",
     chip: "text-purple-400",
   },
   codex: {
     label: "Codex",
-    ring: "border-l-2 border-l-emerald-500",
+    ring: "border-l-2 border-l-emerald-500 pl-3",
     chip: "text-emerald-400",
   },
 };
 
-type LiveBuf = { text: string; thinking: string };
+type Block =
+  | { kind: "user"; entry: GroupTurnEntry }
+  | { kind: "agent"; agent: GroupAgentId; events: ChatEvent[]; isLive: boolean };
 
 type Props = {
   gid: string;
@@ -54,9 +49,11 @@ export default function GroupChatView({ gid, onBack }: Props) {
   const [messages, setMessages] = useState<GroupTurnEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [activeAgent, setActiveAgent] = useState<GroupAgentId | null>(null);
-  const [liveByAgent, setLiveByAgent] = useState<Record<string, LiveBuf>>({});
+  const [liveByAgent, setLiveByAgent] = useState<
+    Partial<Record<GroupAgentId, ChatEvent[]>>
+  >({});
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [pendingPerms, setPendingPerms] = useState<PendingPermission[]>([]);
   const turnAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const forceBottomRef = useRef(false);
@@ -89,7 +86,7 @@ export default function GroupChatView({ gid, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gid]);
 
-  // Auto-scroll to bottom on new messages / live updates
+  // Auto-scroll to bottom
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -109,71 +106,37 @@ export default function GroupChatView({ gid, onBack }: Props) {
       setActiveAgent(null);
       // Optimistically mirror the user message until refetch confirms.
       const optimistic: GroupTurnEntry = {
-        id: `optimistic-${ev.turnId}`,
-        ts: Date.now(),
-        type: "user",
         agent: "user",
-        text: ev.userText,
-        recipients: ev.recipients,
-        meta: { turnId: ev.turnId },
+        ts: Date.now(),
+        event: {
+          id: `optimistic-${ev.turnId}`,
+          type: "user",
+          text: ev.userText,
+        },
+        meta: { turnId: ev.turnId, recipients: ev.recipients },
       };
       setMessages((prev) =>
-        prev.some((m) => m.id === optimistic.id) ? prev : [...prev, optimistic],
+        prev.some((m) => m.event.id === optimistic.event.id)
+          ? prev
+          : [...prev, optimistic],
       );
     }
     if (ev.type === "agent_begin") {
       setActiveAgent(ev.agent);
-      setLiveByAgent((s) => ({ ...s, [ev.agent]: { text: "", thinking: "" } }));
+      setLiveByAgent((s) => ({ ...s, [ev.agent]: [] }));
     }
     if (ev.type === "agent_event") {
-      const p: any = ev.payload;
-      // Claude: stream_event content_block_delta — text or thinking deltas
-      if (p?.type === "stream_event" && p.event?.type === "content_block_delta") {
-        const d = p.event.delta;
-        if (d?.type === "text_delta" && typeof d.text === "string") {
-          setLiveByAgent((s) => {
-            const cur = s[ev.agent] ?? { text: "", thinking: "" };
-            return { ...s, [ev.agent]: { ...cur, text: cur.text + d.text } };
-          });
-        }
-        if (d?.type === "thinking_delta" && typeof d.thinking === "string") {
-          setLiveByAgent((s) => {
-            const cur = s[ev.agent] ?? { text: "", thinking: "" };
-            return {
-              ...s,
-              [ev.agent]: { ...cur, thinking: cur.thinking + d.thinking },
-            };
-          });
-        }
-      }
-      // Codex: item.completed agent_message → full text replaces buffer
-      if (
-        p?.type === "item.completed" &&
-        p.item?.type === "agent_message" &&
-        typeof p.item.text === "string"
-      ) {
-        setLiveByAgent((s) => {
-          const cur = s[ev.agent] ?? { text: "", thinking: "" };
-          return { ...s, [ev.agent]: { ...cur, text: p.item.text } };
-        });
-      }
-      if (
-        p?.type === "item.completed" &&
-        p.item?.type === "reasoning" &&
-        typeof p.item.text === "string"
-      ) {
-        setLiveByAgent((s) => {
-          const cur = s[ev.agent] ?? { text: "", thinking: "" };
-          const sep = cur.thinking ? "\n\n" : "";
-          return {
-            ...s,
-            [ev.agent]: { ...cur, thinking: cur.thinking + sep + p.item.text },
-          };
-        });
-      }
+      setLiveByAgent((s) => {
+        const cur = s[ev.agent] ?? [];
+        const next = applySDKMessage(cur, ev.payload, () => {});
+        // Only update if changed to avoid useless re-renders.
+        if (next === cur) return s;
+        return { ...s, [ev.agent]: next };
+      });
     }
     if (ev.type === "agent_end") {
-      // Refetch to pull in canonicalized assistant entry, drop the live buf.
+      // Refetch to pull in canonicalized entries; clear the live buffer
+      // so the persisted block takes over rendering.
       fetchGroup(gid)
         .then((r) => {
           setMessages(r.messages);
@@ -188,7 +151,6 @@ export default function GroupChatView({ gid, onBack }: Props) {
     if (ev.type === "turn_end") {
       setRunning(false);
       setActiveAgent(null);
-      setPendingPerms([]);
       fetchGroup(gid)
         .then((r) => {
           setMessages(r.messages);
@@ -196,36 +158,37 @@ export default function GroupChatView({ gid, onBack }: Props) {
         })
         .catch(() => {});
     }
-    if (ev.type === "permission_request") {
-      setPendingPerms((prev) =>
-        prev.some((p) => p.id === ev.id)
-          ? prev
-          : [
-              ...prev,
-              {
-                id: ev.id,
-                agent: ev.agent,
-                tool: ev.tool,
-                title: ev.title,
-                description: ev.description,
-                hasSessionPermissionSuggestions:
-                  ev.hasSessionPermissionSuggestions,
-              },
-            ],
-      );
-    }
   }
 
   const resolvePerm = async (
     pid: string,
-    behavior: PermissionDecision,
+    decision: PermissionDecision,
   ) => {
     try {
-      await sendPermission(pid, behavior);
+      await sendPermission(pid, decision);
+      // Mark in-flight live event as resolved so the card flips its state.
+      setLiveByAgent((s) => {
+        const next: typeof s = {};
+        for (const [agent, events] of Object.entries(s)) {
+          if (!events) continue;
+          next[agent as GroupAgentId] = events.map((e) =>
+            e.type === "permission" && e.permissionId === pid
+              ? { ...e, resolved: decision }
+              : e,
+          );
+        }
+        return next;
+      });
+      // Same for persisted (cards may already have been written).
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.event.type === "permission" && m.event.permissionId === pid
+            ? { ...m, event: { ...m.event, resolved: decision } }
+            : m,
+        ),
+      );
     } catch (e) {
       console.error("permission resolve failed:", e);
-    } finally {
-      setPendingPerms((prev) => prev.filter((p) => p.id !== pid));
     }
   };
 
@@ -267,11 +230,27 @@ export default function GroupChatView({ gid, onBack }: Props) {
     stopGroupTurn(gid).catch(() => {});
   };
 
+  const toggleStep = (id: string) =>
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const blocks = useMemo<Block[]>(
+    () => buildBlocks(messages, liveByAgent, activeAgent),
+    [messages, liveByAgent, activeAgent],
+  );
+
   if (error && !config) {
     return (
       <div className="p-6 text-red-400">
         <div className="mb-3">加载群聊失败：{error}</div>
-        <button onClick={onBack} className="px-3 py-1 bg-surface border border-soft rounded">
+        <button
+          onClick={onBack}
+          className="px-3 py-1 bg-surface border border-soft rounded"
+        >
           返回
         </button>
       </div>
@@ -301,167 +280,134 @@ export default function GroupChatView({ gid, onBack }: Props) {
       </div>
       <ParticipantsBar config={config} activeAgent={activeAgent} />
       <main ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="max-w-[820px] mx-auto px-6 py-4 space-y-3">
-          {messages.length === 0 && !running && (
+        <div className="max-w-[820px] mx-auto px-6 py-4">
+          {blocks.length === 0 && !running && (
             <div className="text-subtle text-[13px] py-6">
               群聊为空，输入 @all / @claude / @codex 开始对话。
             </div>
           )}
-          {messages.map((m) => (
-            <PersistedBubble key={m.id} entry={m} />
-          ))}
-          {Object.entries(liveByAgent).map(([agent, buf]) => (
-            <LiveBubble key={`live-${agent}`} agent={agent} buf={buf} />
-          ))}
-          {pendingPerms.map((p) => (
-            <PermissionInline key={p.id} pending={p} onResolve={resolvePerm} />
-          ))}
+          <div className="flex flex-col gap-4">
+            {blocks.map((b, i) =>
+              b.kind === "user" ? (
+                <UserBubbleEntry key={`u-${b.entry.event.id}-${i}`} entry={b.entry} />
+              ) : (
+                <AgentBlock
+                  key={`a-${b.agent}-${i}`}
+                  agent={b.agent}
+                  events={b.events}
+                  expandedSteps={expandedSteps}
+                  onToggleStep={toggleStep}
+                  onAnswerPermission={resolvePerm}
+                  isLive={b.isLive}
+                />
+              ),
+            )}
+          </div>
           {error && (
-            <div className="text-red-400 text-[13px] border border-red-500/30 bg-red-500/5 rounded px-3 py-2">
+            <div className="mt-4 text-red-400 text-[13px] border border-red-500/30 bg-red-500/5 rounded px-3 py-2">
               {error}
             </div>
           )}
         </div>
       </main>
       <div className="max-w-[820px] mx-auto w-full">
-        <GroupComposer running={running} onSend={handleSend} onStop={handleStop} />
+        <GroupComposer
+          running={running}
+          onSend={handleSend}
+          onStop={handleStop}
+        />
       </div>
     </div>
   );
 }
 
-function PersistedBubble({ entry }: { entry: GroupTurnEntry }) {
-  if (entry.type === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="bg-blue/15 border border-blue/30 px-3 py-2 rounded-lg max-w-[85%] whitespace-pre-wrap text-[14.5px]">
-          {entry.recipients && entry.recipients[0] && (
-            <div className="text-[11px] text-blue/80 font-mono mb-1">
-              @{entry.recipients[0]}
-            </div>
-          )}
-          {entry.text}
-        </div>
-      </div>
-    );
+// Walk persisted messages chronologically, grouping consecutive same-agent
+// entries into one block so MessageList can render them as a unit (steps
+// share a timeline, etc.). Then append a live block for the active agent
+// while a turn is mid-flight.
+function buildBlocks(
+  messages: GroupTurnEntry[],
+  liveByAgent: Partial<Record<GroupAgentId, ChatEvent[]>>,
+  activeAgent: GroupAgentId | null,
+): Block[] {
+  const out: Block[] = [];
+  for (const m of messages) {
+    if (m.agent === "user") {
+      out.push({ kind: "user", entry: m });
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last && last.kind === "agent" && last.agent === m.agent) {
+      last.events.push(m.event);
+    } else {
+      out.push({
+        kind: "agent",
+        agent: m.agent,
+        events: [m.event],
+        isLive: false,
+      });
+    }
   }
-  if (entry.type === "thinking") {
-    const style = AGENT_STYLE[entry.agent as string];
-    return (
-      <details className={`text-[12px] text-subtle pl-3 ${style?.ring ?? ""}`}>
-        <summary className="cursor-pointer">
-          <span className={style?.chip}>{style?.label ?? entry.agent}</span> · 思考过程
-        </summary>
-        <div className="mt-1 whitespace-pre-wrap font-mono">{entry.text}</div>
-      </details>
-    );
+  // Append live blocks AFTER persisted entries. If the active agent already
+  // has a persisted block right before this point, we don't merge — the live
+  // events already include everything from the start of the turn.
+  if (activeAgent && liveByAgent[activeAgent]?.length) {
+    out.push({
+      kind: "agent",
+      agent: activeAgent,
+      events: liveByAgent[activeAgent]!,
+      isLive: true,
+    });
   }
-  if (entry.type === "error") {
-    const style = AGENT_STYLE[entry.agent as string];
-    return (
-      <div className={`pl-3 ${style?.ring ?? ""} border-l-red-500`}>
-        <div className={`text-[11px] ${style?.chip ?? ""}`}>
-          {style?.label ?? entry.agent} · 错误
-        </div>
-        <div className="text-red-400 text-[13px]">{entry.text}</div>
-      </div>
-    );
-  }
-  if (entry.type === "assistant" && entry.text) {
-    const style = AGENT_STYLE[entry.agent as string];
-    return (
-      <div className={`pl-3 ${style?.ring ?? ""}`}>
-        <div className={`text-[11px] mb-1 ${style?.chip ?? ""}`}>
-          {style?.label ?? entry.agent}
-          {entry.meta?.pipelineStep != null && (
-            <span className="ml-2 text-subtle">
-              step {entry.meta.pipelineStep + 1}
-            </span>
-          )}
-        </div>
-        <AssistantText text={entry.text} />
-      </div>
-    );
-  }
-  return null;
+  return out;
 }
 
-function PermissionInline({
-  pending,
-  onResolve,
-}: {
-  pending: PendingPermission;
-  onResolve: (id: string, behavior: PermissionDecision) => void;
-}) {
-  const style = AGENT_STYLE[pending.agent];
+function UserBubbleEntry({ entry }: { entry: GroupTurnEntry }) {
+  if (entry.event.type !== "user") return null;
+  const text = entry.event.text;
+  const recipients = entry.meta?.recipients;
   return (
-    <div className="border border-amber-500/40 bg-amber-500/5 rounded p-3 text-[13px]">
-      <div className="flex items-center gap-2 mb-2">
-        <span className={`text-[11px] ${style?.chip ?? ""}`}>
-          [{style?.label ?? pending.agent}]
-        </span>
-        <span className="font-mono text-amber-400">权限请求</span>
-        <span className="text-fg">· {pending.tool}</span>
-      </div>
-      {pending.title && (
-        <div className="text-fg mb-1">{pending.title}</div>
-      )}
-      {pending.description && (
-        <div className="text-subtle text-[12px] mb-2">{pending.description}</div>
-      )}
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => onResolve(pending.id, "allow")}
-          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[12px]"
-        >
-          允许本次
-        </button>
-        {pending.hasSessionPermissionSuggestions && (
-          <button
-            onClick={() => onResolve(pending.id, "allow_session")}
-            className="px-2.5 py-1 bg-emerald-700/70 hover:bg-emerald-700 text-white rounded text-[12px]"
-          >
-            本次会话都允许（同输入）
-          </button>
+    <div className="flex justify-end">
+      <div className="bg-blue/15 border border-blue/30 px-3 py-2 rounded-lg max-w-[85%] whitespace-pre-wrap text-[14.5px]">
+        {recipients && recipients[0] && (
+          <div className="text-[11px] text-blue/80 font-mono mb-1">
+            @{recipients[0]}
+          </div>
         )}
-        <button
-          onClick={() => onResolve(pending.id, "allow_tool_session")}
-          className="px-2.5 py-1 bg-emerald-700/70 hover:bg-emerald-700 text-white rounded text-[12px]"
-        >
-          本次会话允许此工具
-        </button>
-        <button
-          onClick={() => onResolve(pending.id, "deny")}
-          className="px-2.5 py-1 bg-red-600/70 hover:bg-red-700 text-white rounded text-[12px]"
-        >
-          拒绝
-        </button>
+        {text}
       </div>
     </div>
   );
 }
 
-function LiveBubble({ agent, buf }: { agent: string; buf: LiveBuf }) {
+function AgentBlock({
+  agent,
+  events,
+  expandedSteps,
+  onToggleStep,
+  onAnswerPermission,
+  isLive,
+}: {
+  agent: GroupAgentId;
+  events: ChatEvent[];
+  expandedSteps: Set<string>;
+  onToggleStep: (id: string) => void;
+  onAnswerPermission: (id: string, decision: PermissionDecision) => void;
+  isLive: boolean;
+}) {
   const style = AGENT_STYLE[agent];
-  if (!buf.text && !buf.thinking) {
-    return (
-      <div className={`pl-3 ${style?.ring ?? ""} text-[12px] text-subtle italic`}>
-        <span className={style?.chip}>{style?.label ?? agent}</span> 正在准备…
-      </div>
-    );
-  }
   return (
-    <div className={`pl-3 ${style?.ring ?? ""}`}>
+    <div className={style?.ring ?? ""}>
       <div className={`text-[11px] mb-1 ${style?.chip ?? ""}`}>
-        {style?.label ?? agent} <span className="text-subtle">· 生成中…</span>
+        {style?.label ?? agent}
+        {isLive && <span className="ml-2 text-subtle">· 生成中…</span>}
       </div>
-      {buf.thinking && (
-        <details className="text-[12px] text-subtle mb-1">
-          <summary className="cursor-pointer">思考中…</summary>
-          <div className="mt-1 whitespace-pre-wrap font-mono">{buf.thinking}</div>
-        </details>
-      )}
-      {buf.text && <AssistantText text={buf.text} />}
+      <MessageList
+        events={events}
+        expandedSteps={expandedSteps}
+        onToggleStep={onToggleStep}
+        onAnswerPermission={onAnswerPermission}
+      />
     </div>
   );
 }

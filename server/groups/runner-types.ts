@@ -1,11 +1,15 @@
 import type { AgentId } from "./store.ts";
+import type { ChatEvent } from "../../src/lib/types.ts";
 
-// All runner output flows as raw SDK events that the orchestrator forwards
-// to the client SSE channel verbatim. The frontend's existing
-// processor.ts already knows how to fold both Claude SDK messages and
-// Codex thread events into chat UI state, so we don't re-implement that
-// mapping here. The orchestrator separately accumulates the final
-// assistant + thinking text for canonical jsonl persistence.
+// All runner output flows as raw SDK events that the orchestrator
+// forwards to the client SSE channel verbatim — the frontend's
+// applySDKMessage knows how to fold both Claude and Codex events into
+// the same ChatEvent shape live during a turn. The runner ALSO folds
+// those same raw events server-side via the same function, exposing the
+// final ChatEvent[] when the turn ends so the orchestrator can persist
+// every step / assistant / thinking / permission to canonical jsonl.
+// That makes a refresh after the turn ends produce the same view as
+// streaming live, including tool-call timelines and edit diffs.
 
 export type RunnerEvent =
   | { kind: "raw"; payload: unknown }
@@ -13,8 +17,7 @@ export type RunnerEvent =
       kind: "ended";
       ok: boolean;
       error?: string;
-      finalText: string;
-      finalThinking: string;
+      events: ChatEvent[];
     };
 
 export type RunnerCtx = {
