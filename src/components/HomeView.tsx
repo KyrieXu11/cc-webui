@@ -10,6 +10,8 @@ import {
   providerLabel,
   type AgentProvider,
 } from "../lib/settings";
+import { listGroups, deleteGroup } from "../lib/groups";
+import type { GroupIndexRow } from "../lib/types";
 
 interface Props {
   provider: AgentProvider;
@@ -17,6 +19,9 @@ interface Props {
   onOpenSession: (s: SessionSummary) => void;
   onOpenProject: (cwd: string) => void;
   onClickOpen: () => void;
+  onOpenGroup: (gid: string) => void;
+  onCreateGroup: () => void;
+  groupsRefreshKey?: number;
 }
 
 type ProjectGroup = {
@@ -31,8 +36,12 @@ export default function HomeView({
   onOpenSession,
   onOpenProject,
   onClickOpen,
+  onOpenGroup,
+  onCreateGroup,
+  groupsRefreshKey,
 }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [chatGroups, setChatGroups] = useState<GroupIndexRow[]>([]);
   const [home, setHome] = useState("");
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(true);
@@ -61,6 +70,25 @@ export default function HomeView({
       setAddress(`${location.hostname}:${p}`);
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listGroups()
+      .then((rows) => {
+        if (!cancelled) setChatGroups(rows);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [groupsRefreshKey]);
+
+  const removeGroup = async (gid: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("删除该群聊？历史会话不可恢复。")) return;
+    await deleteGroup(gid);
+    setChatGroups((gs) => gs.filter((g) => g.id !== gid));
+  };
 
   const groups = useMemo<ProjectGroup[]>(() => {
     const byCwd = new Map<string, SessionSummary[]>();
@@ -96,12 +124,87 @@ export default function HomeView({
           <span className="font-mono">{address}</span>
         </div>
 
+        {chatGroups.length > 0 && (
+          <div className="mb-10">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-fg text-[14.5px] font-semibold tracking-tight">
+                群聊
+              </h2>
+              <button
+                onClick={onCreateGroup}
+                className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+              >
+                <PlusIcon />
+                新建群聊
+              </button>
+            </div>
+            <div className="border-t border-line">
+              {chatGroups
+                .slice()
+                .sort((a, b) => b.lastTs - a.lastTs)
+                .map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => onOpenGroup(g.id)}
+                    className="group/g w-full text-left py-3 border-b border-line last:border-b-0 hover:bg-fg/[0.02] flex items-center gap-3"
+                  >
+                    <div className="flex items-center gap-2 shrink-0">
+                      {g.inFlight && (
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-amber pulse-dot"
+                          title="正在生成"
+                        />
+                      )}
+                      <span className="text-[11px] font-mono text-subtle">
+                        {g.participantSummary}
+                      </span>
+                    </div>
+                    <span className="text-[13px] text-fg truncate flex-1">
+                      {g.title}
+                      {g.lastSnippet && (
+                        <span className="ml-2 text-subtle text-[12px]">
+                          — {g.lastSnippet}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[11.5px] text-subtle shrink-0">
+                      {timeAgo(g.lastTs)}
+                    </span>
+                    <button
+                      onClick={(e) => removeGroup(g.id, e)}
+                      aria-label="删除群聊"
+                      className="opacity-0 group-hover/g:opacity-100 text-subtle hover:text-fg transition-opacity p-1"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                        <path
+                          d="M3 3L9 9M9 3L3 9"
+                          stroke="currentColor"
+                          strokeWidth="1.3"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-fg text-[14.5px] font-semibold tracking-tight">
             最近项目
           </h2>
           <div className="flex items-center gap-2">
             <ProviderPicker value={provider} onChange={onProviderChange} />
+            {chatGroups.length === 0 && (
+              <button
+                onClick={onCreateGroup}
+                className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+              >
+                <PlusIcon />
+                新建群聊
+              </button>
+            )}
             <button
               onClick={onClickOpen}
               className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
@@ -323,6 +426,17 @@ const FolderIcon = () => (
       strokeWidth="1.3"
       strokeLinecap="round"
       strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const PlusIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path
+      d="M7 2V12M2 7H12"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
     />
   </svg>
 );
