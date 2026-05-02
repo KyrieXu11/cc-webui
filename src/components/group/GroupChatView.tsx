@@ -8,12 +8,23 @@ import {
   stopGroupTurn,
   streamGroupTurn,
 } from "../../lib/groups";
+import { sendPermission } from "../../lib/permission";
 import type {
   GroupAgentId,
   GroupConfig,
   GroupSseEvent,
   GroupTurnEntry,
+  PermissionDecision,
 } from "../../lib/types";
+
+type PendingPermission = {
+  id: string;
+  agent: GroupAgentId;
+  tool: string;
+  title?: string;
+  description?: string;
+  hasSessionPermissionSuggestions?: boolean;
+};
 
 const AGENT_STYLE: Record<
   string,
@@ -45,6 +56,7 @@ export default function GroupChatView({ gid, onBack }: Props) {
   const [activeAgent, setActiveAgent] = useState<GroupAgentId | null>(null);
   const [liveByAgent, setLiveByAgent] = useState<Record<string, LiveBuf>>({});
   const [error, setError] = useState<string | null>(null);
+  const [pendingPerms, setPendingPerms] = useState<PendingPermission[]>([]);
   const turnAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const forceBottomRef = useRef(false);
@@ -176,6 +188,7 @@ export default function GroupChatView({ gid, onBack }: Props) {
     if (ev.type === "turn_end") {
       setRunning(false);
       setActiveAgent(null);
+      setPendingPerms([]);
       fetchGroup(gid)
         .then((r) => {
           setMessages(r.messages);
@@ -183,7 +196,38 @@ export default function GroupChatView({ gid, onBack }: Props) {
         })
         .catch(() => {});
     }
+    if (ev.type === "permission_request") {
+      setPendingPerms((prev) =>
+        prev.some((p) => p.id === ev.id)
+          ? prev
+          : [
+              ...prev,
+              {
+                id: ev.id,
+                agent: ev.agent,
+                tool: ev.tool,
+                title: ev.title,
+                description: ev.description,
+                hasSessionPermissionSuggestions:
+                  ev.hasSessionPermissionSuggestions,
+              },
+            ],
+      );
+    }
   }
+
+  const resolvePerm = async (
+    pid: string,
+    behavior: PermissionDecision,
+  ) => {
+    try {
+      await sendPermission(pid, behavior);
+    } catch (e) {
+      console.error("permission resolve failed:", e);
+    } finally {
+      setPendingPerms((prev) => prev.filter((p) => p.id !== pid));
+    }
+  };
 
   async function attachToLive() {
     const ac = new AbortController();
@@ -269,6 +313,9 @@ export default function GroupChatView({ gid, onBack }: Props) {
           {Object.entries(liveByAgent).map(([agent, buf]) => (
             <LiveBubble key={`live-${agent}`} agent={agent} buf={buf} />
           ))}
+          {pendingPerms.map((p) => (
+            <PermissionInline key={p.id} pending={p} onResolve={resolvePerm} />
+          ))}
           {error && (
             <div className="text-red-400 text-[13px] border border-red-500/30 bg-red-500/5 rounded px-3 py-2">
               {error}
@@ -337,6 +384,61 @@ function PersistedBubble({ entry }: { entry: GroupTurnEntry }) {
     );
   }
   return null;
+}
+
+function PermissionInline({
+  pending,
+  onResolve,
+}: {
+  pending: PendingPermission;
+  onResolve: (id: string, behavior: PermissionDecision) => void;
+}) {
+  const style = AGENT_STYLE[pending.agent];
+  return (
+    <div className="border border-amber-500/40 bg-amber-500/5 rounded p-3 text-[13px]">
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`text-[11px] ${style?.chip ?? ""}`}>
+          [{style?.label ?? pending.agent}]
+        </span>
+        <span className="font-mono text-amber-400">权限请求</span>
+        <span className="text-fg">· {pending.tool}</span>
+      </div>
+      {pending.title && (
+        <div className="text-fg mb-1">{pending.title}</div>
+      )}
+      {pending.description && (
+        <div className="text-subtle text-[12px] mb-2">{pending.description}</div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => onResolve(pending.id, "allow")}
+          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[12px]"
+        >
+          允许本次
+        </button>
+        {pending.hasSessionPermissionSuggestions && (
+          <button
+            onClick={() => onResolve(pending.id, "allow_session")}
+            className="px-2.5 py-1 bg-emerald-700/70 hover:bg-emerald-700 text-white rounded text-[12px]"
+          >
+            本次会话都允许（同输入）
+          </button>
+        )}
+        <button
+          onClick={() => onResolve(pending.id, "allow_tool_session")}
+          className="px-2.5 py-1 bg-emerald-700/70 hover:bg-emerald-700 text-white rounded text-[12px]"
+        >
+          本次会话允许此工具
+        </button>
+        <button
+          onClick={() => onResolve(pending.id, "deny")}
+          className="px-2.5 py-1 bg-red-600/70 hover:bg-red-700 text-white rounded text-[12px]"
+        >
+          拒绝
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function LiveBubble({ agent, buf }: { agent: string; buf: LiveBuf }) {
