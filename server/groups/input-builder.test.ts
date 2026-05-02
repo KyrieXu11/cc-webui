@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { buildPrompt, peerLabel, systemPromptFor } from "./input-builder.ts";
+import {
+  buildPrompt,
+  buildResumeCatchup,
+  peerLabel,
+  systemPromptFor,
+} from "./input-builder.ts";
 import type { GroupTurnEntry } from "./store.ts";
 import type { GroupConfig } from "./config.ts";
 
@@ -225,6 +230,91 @@ assert.equal(peerLabel("codex"), "Codex");
   const sys = systemPromptFor({ config, target: "claude" });
   assert.match(sys, /群聊/);
   assert.match(sys, /Codex/);
+}
+
+// ============================================================
+// buildResumeCatchup — diff-only prompt for resumed sessions
+// ============================================================
+
+// First-time invocation (no prior own entries) → catchup is everything
+{
+  const transcript: GroupTurnEntry[] = [
+    userEntry("hi"),
+    assistantEntry("codex", "hi back"),
+  ];
+  const out = buildResumeCatchup({ transcript, target: "claude" });
+  assert.match(out, /USER: hi/);
+  assert.match(out, /\[来自 Codex 的回复\]\nhi back/);
+}
+
+// After own reply, only NEW entries appear in catchup
+{
+  const transcript: GroupTurnEntry[] = [
+    userEntry("u1"),
+    assistantEntry("claude", "a1"),     // claude's last reply (snapshot)
+    userEntry("u2"),                     // came in after
+    assistantEntry("codex", "codex a"), // peer ran in between
+  ];
+  const out = buildResumeCatchup({ transcript, target: "claude" });
+  assert.doesNotMatch(out, /u1/, "old user msg already in claude session");
+  assert.doesNotMatch(out, /a1/, "claude's own reply stays in session");
+  assert.match(out, /USER: u2/);
+  assert.match(out, /\[来自 Codex 的回复\]\ncodex a/);
+}
+
+// Own thinking and steps also count as "own activity" — entries before
+// them are not re-sent (they were part of that turn)
+{
+  const transcript: GroupTurnEntry[] = [
+    userEntry("u1"),
+    thinkingEntry("claude", "private thoughts"),
+    stepEntry("claude", "tool output"),
+    assistantEntry("claude", "a1"),
+    userEntry("u2"),
+  ];
+  const out = buildResumeCatchup({ transcript, target: "claude" });
+  assert.doesNotMatch(out, /u1/);
+  assert.doesNotMatch(out, /private thoughts/);
+  assert.doesNotMatch(out, /tool output/);
+  assert.doesNotMatch(out, /a1/);
+  assert.match(out, /USER: u2/);
+}
+
+// Empty transcript → empty catchup
+{
+  assert.equal(buildResumeCatchup({ transcript: [], target: "claude" }), "");
+}
+
+// Peer's thinking / steps are NOT injected — only their final
+// assistant text (private working notes are private)
+{
+  const transcript: GroupTurnEntry[] = [
+    userEntry("u1"),
+    thinkingEntry("codex", "codex thinking"),
+    stepEntry("codex", "codex tool"),
+    assistantEntry("codex", "codex final"),
+  ];
+  const out = buildResumeCatchup({ transcript, target: "claude" });
+  assert.doesNotMatch(out, /codex thinking/);
+  assert.doesNotMatch(out, /codex tool/);
+  assert.match(out, /\[来自 Codex 的回复\]\ncodex final/);
+}
+
+// Symmetric: target=codex hides codex's own past, surfaces claude's
+{
+  const transcript: GroupTurnEntry[] = [
+    userEntry("u1"),
+    assistantEntry("claude", "claude reply"),
+    assistantEntry("codex", "codex reply"),  // codex's last
+    userEntry("u2"),
+    assistantEntry("claude", "another claude"),
+  ];
+  const out = buildResumeCatchup({ transcript, target: "codex" });
+  // Slice after codex's last own entry (index 2) → ["u2", "another claude"]
+  assert.doesNotMatch(out, /^.*claude reply/m);
+  assert.doesNotMatch(out, /codex reply/);
+  assert.match(out, /USER: u2/);
+  assert.match(out, /\[来自 Claude 的回复\]\nanother claude/);
 }
 
 console.log("input-builder tests passed");

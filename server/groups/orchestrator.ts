@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { runClaude } from "./claude-runner.ts";
 import { runCodex } from "./codex-runner.ts";
-import { buildPrompt } from "./input-builder.ts";
+import { buildPrompt, buildResumeCatchup } from "./input-builder.ts";
 import { readConfig } from "./config.ts";
+import {
+  getAgentSessionId,
+  setAgentSessionId,
+} from "./runtime.ts";
 import type { ChatEvent } from "../../src/lib/types.ts";
 import {
   appendEntry,
@@ -228,18 +232,18 @@ async function runPipeline(args: {
 
     // Re-read transcript so this agent sees the prior step's output.
     const transcript = await readAll(turn.gid);
-    const prompt = buildPrompt({
-      transcript,
-      target: agentId,
-      currentText: text,
-      config,
-    });
+
+    // Look up an existing session id for this agent — if present we
+    // resume so the SDK keeps prompt cache warm across turns and we
+    // only pay for the catchup diff each turn.
+    const resumeSessionId = await getAgentSessionId(turn.gid, agentId);
 
     const ctx: RunnerCtx = {
       gid: turn.gid,
       turnId: turn.turnId,
       agentId,
       signal: turn.abort.signal,
+      resumeSessionId,
       emitPermission: (payload) => {
         // Fan out as agent_event so the client's applySDKMessage folds it
         // into the live ChatEvent[] (same code path as single chat).
@@ -256,14 +260,46 @@ async function runPipeline(args: {
       },
     };
 
+    let claudePrompt: string;
+    let codexPrompt: string;
+    if (resumeSessionId) {
+      // Existing session: send only what the agent hasn't seen yet.
+      claudePrompt = buildResumeCatchup({ transcript, target: agentId });
+      codexPrompt = claudePrompt;
+    } else {
+      // First-time invocation: send the full rendered history (which
+      // includes the just-appended user message).
+      const fullPrompt = buildPrompt({
+        transcript,
+        target: agentId,
+        currentText: text,
+        config,
+      });
+      claudePrompt = fullPrompt;
+      codexPrompt = fullPrompt;
+    }
+
     const runner =
       agentId === "claude"
-        ? runClaude({ config, participant, prompt, images, ctx })
-        : runCodex({ config, participant, prompt, images, ctx });
+        ? runClaude({
+            config,
+            participant,
+            prompt: claudePrompt,
+            images,
+            ctx,
+          })
+        : runCodex({
+            config,
+            participant,
+            prompt: codexPrompt,
+            images,
+            ctx,
+          });
 
     let stepOk = true;
     let stepError: string | undefined;
     let stepEvents: ChatEvent[] = [];
+    let stepSessionId: string | undefined;
 
     for await (const ev of runner) {
       if (ev.kind === "raw") {
@@ -282,6 +318,20 @@ async function runPipeline(args: {
         stepOk = ev.ok;
         stepError = ev.error;
         stepEvents = ev.events;
+        stepSessionId = ev.sessionId;
+      }
+    }
+
+    // Persist the discovered session id so the next turn can resume
+    // (keeps Anthropic prompt cache warm across the conversation).
+    if (stepSessionId) {
+      try {
+        await setAgentSessionId(turn.gid, agentId, stepSessionId);
+      } catch (err) {
+        console.error(
+          `[group ${turn.gid}] failed to persist session id for ${agentId}:`,
+          err,
+        );
       }
     }
 

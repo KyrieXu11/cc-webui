@@ -18,6 +18,11 @@ export type RunnerEvent =
       ok: boolean;
       error?: string;
       events: ChatEvent[];
+      // SDK session id for this agent's run. On the first turn it's
+      // the freshly-issued one; on resumed turns it's whatever the SDK
+      // emits back (usually unchanged). Orchestrator persists this to
+      // runtime.json so the next turn can pass it as `resume:`.
+      sessionId?: string;
     };
 
 export type RunnerCtx = {
@@ -28,4 +33,8 @@ export type RunnerCtx = {
   // fanout for permission_request events; orchestrator wraps these with
   // {agent, turnId} when re-emitting on the group SSE channel.
   emitPermission: (payload: unknown) => void;
+  // Pre-existing SDK session id, if any. When present, the runner
+  // passes it to the SDK as `resume:` and only sends the catchup
+  // prompt (peer replies + new user message) instead of full history.
+  resumeSessionId?: string;
 };
