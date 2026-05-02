@@ -17,6 +17,8 @@ import { systemPromptFor } from "./input-builder.ts";
 import type { GroupConfig, Participant } from "./config.ts";
 import type { ImageAttachment } from "./store.ts";
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
+import { applySDKMessage } from "../../src/lib/processor.ts";
+import type { ChatEvent } from "../../src/lib/types.ts";
 
 const IMAGE_EXT_BY_MIME: Record<string, string> = {
   "image/png": ".png",
@@ -79,8 +81,7 @@ export async function* runCodex(args: {
     unregisterCodexMcpContext(mcpToken);
   };
 
-  let finalText = "";
-  let finalThinking = "";
+  let events: ChatEvent[] = [];
 
   try {
     // Build the input array: text first, then any image attachments as
@@ -115,11 +116,11 @@ export async function* runCodex(args: {
       modelReasoningEffort: mapEffort(participant.effort),
     } as any);
 
-    const { events } = await thread.runStreamed(input as any, {
+    const stream = await thread.runStreamed(input as any, {
       signal: ctx.signal,
     });
 
-    for await (const ev of events) {
+    for await (const ev of stream.events) {
       const anyEv = ev as any;
 
       // Re-key MCP context to the real thread id once Codex emits it.
@@ -128,44 +129,26 @@ export async function* runCodex(args: {
       }
 
       yield { kind: "raw", payload: ev };
-
-      // Accumulate final text + thinking from completed items. For Codex
-      // there's typically a single agent_message item per turn.
-      if (anyEv.type === "item.completed" && anyEv.item) {
-        const it = anyEv.item;
-        if (it.type === "agent_message" && typeof it.text === "string") {
-          finalText = it.text;
-        }
-        if (it.type === "reasoning" && typeof it.text === "string") {
-          finalThinking += (finalThinking ? "\n\n" : "") + it.text;
-        }
-      }
+      events = applySDKMessage(events, ev, () => {});
 
       if (anyEv.type === "turn.completed" || anyEv.type === "turn.failed") {
         if (anyEv.type === "turn.failed") {
           const errMsg = anyEv.error?.message ?? "turn failed";
-          yield {
-            kind: "ended",
-            ok: false,
-            error: errMsg,
-            finalText,
-            finalThinking,
-          };
+          yield { kind: "ended", ok: false, error: errMsg, events };
           return;
         }
         break;
       }
     }
 
-    yield { kind: "ended", ok: true, finalText, finalThinking };
+    yield { kind: "ended", ok: true, events };
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
     yield {
       kind: "ended",
       ok: !aborted,
       error: aborted ? "aborted" : String((err as Error)?.message ?? err),
-      finalText,
-      finalThinking,
+      events,
     };
   } finally {
     await cleanup();

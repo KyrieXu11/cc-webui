@@ -15,37 +15,38 @@ const {
   upsertIndexRow,
   readIndex,
   removeIndexRow,
-  groupDir,
   transcriptPath,
+  makeEntry,
 } = await import("./store.ts");
 
 await fs.mkdir(tmp, { recursive: true });
 
 try {
-  // appendEntry / readAll round trip
+  // appendEntry / readAll round trip — wraps ChatEvent
   {
     const gid = newGroupId();
     await ensureGroupDir(gid);
-    const a = {
-      id: newEntryId(),
-      ts: Date.now(),
-      type: "user" as const,
-      agent: "user" as const,
-      text: "hello",
-    };
-    const b = {
-      id: newEntryId(),
-      ts: Date.now() + 1,
-      type: "assistant" as const,
-      agent: "claude" as const,
-      text: "hi",
-    };
+    const a = makeEntry({
+      agent: "user",
+      event: { id: newEntryId(), type: "user", text: "hello" },
+      turnId: "t1",
+      recipients: ["claude"],
+    });
+    const b = makeEntry({
+      agent: "claude",
+      event: { id: newEntryId(), type: "assistant", text: "hi" },
+      turnId: "t1",
+      pipelineStep: 0,
+    });
     await appendEntry(gid, a);
     await appendEntry(gid, b);
     const all = await readAll(gid);
-    assert.equal(all.length, 2, "expected 2 entries after 2 appends");
-    assert.equal(all[0].text, "hello");
+    assert.equal(all.length, 2);
+    assert.equal(all[0].event.type, "user");
+    assert.equal((all[0].event as any).text, "hello");
+    assert.deepEqual(all[0].meta?.recipients, ["claude"]);
     assert.equal(all[1].agent, "claude");
+    assert.equal((all[1].event as any).text, "hi");
   }
 
   // readAll on missing transcript returns []
@@ -61,36 +62,65 @@ try {
     await ensureGroupDir(gid);
     await fs.writeFile(
       transcriptPath(gid),
-      `{"id":"a","ts":1,"type":"user","agent":"user","text":"hi"}\n\n  \n`,
+      `{"agent":"user","ts":1,"event":{"id":"a","type":"user","text":"hi"}}\n\n  \n`,
     );
     const all = await readAll(gid);
     assert.equal(all.length, 1);
   }
 
-  // skips corrupted line and continues
+  // skips corrupted line and continues; also skips schema-drift rows
+  // that lack an event payload.
   {
     const gid = newGroupId();
     await ensureGroupDir(gid);
     await fs.writeFile(
       transcriptPath(gid),
       [
-        `{"id":"a","ts":1,"type":"user","agent":"user","text":"hi"}`,
+        `{"agent":"user","ts":1,"event":{"id":"a","type":"user","text":"hi"}}`,
         `not json at all`,
-        `{"id":"b","ts":2,"type":"assistant","agent":"claude","text":"hi back"}`,
+        `{"agent":"claude","ts":2}`,
+        `{"agent":"claude","ts":3,"event":{"id":"b","type":"assistant","text":"hi back"}}`,
       ].join("\n") + "\n",
     );
     const all = await readAll(gid);
     assert.equal(all.length, 2);
-    assert.equal(all[1].id, "b");
+    assert.equal(all[1].event.id, "b");
   }
 
-  // index.json: read empty → []
+  // step entry with full input/output round-trip
+  {
+    const gid = newGroupId();
+    await ensureGroupDir(gid);
+    const stepEntry = makeEntry({
+      agent: "claude",
+      event: {
+        id: "s-1",
+        type: "step",
+        tool: "Read",
+        status: "ok",
+        input: { file_path: "/foo.ts" },
+        output: "FILE CONTENTS",
+      },
+      turnId: "t1",
+      pipelineStep: 0,
+    });
+    await appendEntry(gid, stepEntry);
+    const all = await readAll(gid);
+    assert.equal(all.length, 1);
+    const ev: any = all[0].event;
+    assert.equal(ev.type, "step");
+    assert.equal(ev.tool, "Read");
+    assert.equal(ev.output, "FILE CONTENTS");
+    assert.deepEqual(ev.input, { file_path: "/foo.ts" });
+  }
+
+  // index: read empty
   {
     const idx = await readIndex();
     assert.deepEqual(idx.groups, []);
   }
 
-  // index.json: upsert / update / remove
+  // index: upsert / update / remove
   {
     const row1 = {
       id: "g1",
@@ -108,7 +138,7 @@ try {
 
     await upsertIndexRow({ ...row1, title: "demo v2", lastTs: 2 });
     idx = await readIndex();
-    assert.equal(idx.groups.length, 1, "upsert must not duplicate");
+    assert.equal(idx.groups.length, 1);
     assert.equal(idx.groups[0].title, "demo v2");
 
     await upsertIndexRow({

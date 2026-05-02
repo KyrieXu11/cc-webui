@@ -16,18 +16,44 @@ const config: GroupConfig = {
   pipeline: ["claude", "codex"],
 };
 
-const entry = (e: Partial<GroupTurnEntry>): GroupTurnEntry =>
-  ({
-    id: e.id ?? "x",
-    ts: e.ts ?? 0,
-    type: e.type ?? "user",
-    agent: e.agent ?? "user",
-    text: e.text,
-    images: e.images,
-    tool: e.tool,
-    recipients: e.recipients,
-    meta: e.meta,
-  }) as GroupTurnEntry;
+const userEntry = (text: string): GroupTurnEntry => ({
+  agent: "user",
+  ts: 0,
+  event: { id: `u-${text}`, type: "user", text },
+});
+
+const assistantEntry = (
+  agent: "claude" | "codex",
+  text: string,
+): GroupTurnEntry => ({
+  agent,
+  ts: 0,
+  event: { id: `a-${agent}-${text}`, type: "assistant", text },
+});
+
+const thinkingEntry = (
+  agent: "claude" | "codex",
+  text: string,
+): GroupTurnEntry => ({
+  agent,
+  ts: 0,
+  event: { id: `t-${agent}`, type: "thinking", text },
+});
+
+const stepEntry = (
+  agent: "claude" | "codex",
+  output: string,
+): GroupTurnEntry => ({
+  agent,
+  ts: 0,
+  event: {
+    id: `s-${agent}-${output}`,
+    type: "step",
+    tool: "Read",
+    status: "ok",
+    output,
+  },
+});
 
 // peerLabel
 assert.equal(peerLabel("claude"), "Claude");
@@ -47,10 +73,10 @@ assert.equal(peerLabel("codex"), "Codex");
 
 // own assistant + user history visible to target
 {
-  const transcript = [
-    entry({ type: "user", agent: "user", text: "step 1?" }),
-    entry({ type: "assistant", agent: "claude", text: "doing step 1" }),
-    entry({ type: "user", agent: "user", text: "step 2?" }),
+  const transcript: GroupTurnEntry[] = [
+    userEntry("step 1?"),
+    assistantEntry("claude", "doing step 1"),
+    userEntry("step 2?"),
   ];
   const prompt = buildPrompt({
     transcript,
@@ -67,9 +93,9 @@ assert.equal(peerLabel("codex"), "Codex");
 
 // peer reply rewritten with cross-injection prefix when target = claude
 {
-  const transcript = [
-    entry({ type: "user", agent: "user", text: "go" }),
-    entry({ type: "assistant", agent: "codex", text: "I did A" }),
+  const transcript: GroupTurnEntry[] = [
+    userEntry("go"),
+    assistantEntry("codex", "I did A"),
   ];
   const prompt = buildPrompt({
     transcript,
@@ -84,9 +110,7 @@ assert.equal(peerLabel("codex"), "Codex");
 
 // symmetric: peer prefix for target = codex
 {
-  const transcript = [
-    entry({ type: "assistant", agent: "claude", text: "I did A" }),
-  ];
+  const transcript: GroupTurnEntry[] = [assistantEntry("claude", "I did A")];
   const prompt = buildPrompt({
     transcript,
     target: "codex",
@@ -98,9 +122,9 @@ assert.equal(peerLabel("codex"), "Codex");
 
 // thinking entries are skipped
 {
-  const transcript = [
-    entry({ type: "thinking", agent: "claude", text: "secret thoughts" }),
-    entry({ type: "assistant", agent: "claude", text: "answer" }),
+  const transcript: GroupTurnEntry[] = [
+    thinkingEntry("claude", "secret thoughts"),
+    assistantEntry("claude", "answer"),
   ];
   const prompt = buildPrompt({
     transcript,
@@ -112,20 +136,11 @@ assert.equal(peerLabel("codex"), "Codex");
   assert.match(prompt, /answer/);
 }
 
-// tool_call / tool_result are skipped
+// step entries are skipped (tool history not replayed)
 {
-  const transcript = [
-    entry({
-      type: "tool_call",
-      agent: "claude",
-      tool: { name: "Read", status: "ok", output: "FILE CONTENTS" },
-    }),
-    entry({
-      type: "tool_result",
-      agent: "claude",
-      tool: { name: "Read", status: "ok", output: "MORE" },
-    }),
-    entry({ type: "assistant", agent: "claude", text: "I read it" }),
+  const transcript: GroupTurnEntry[] = [
+    stepEntry("claude", "FILE CONTENTS"),
+    assistantEntry("claude", "I read it"),
   ];
   const prompt = buildPrompt({
     transcript,
@@ -137,30 +152,12 @@ assert.equal(peerLabel("codex"), "Codex");
   assert.match(prompt, /I read it/);
 }
 
-// permission / summary / error rows are skipped
+// user messages visible regardless of target
 {
-  const transcript = [
-    entry({ type: "permission", agent: "claude", text: "secret-permission" }),
-    entry({ type: "summary", agent: "claude", text: "secret-summary" }),
-    entry({ type: "error", agent: "codex", text: "secret-error" }),
-    entry({ type: "user", agent: "user", text: "real" }),
-  ];
-  const prompt = buildPrompt({
-    transcript,
-    target: "claude",
-    currentText: "go",
-    config,
-  });
-  assert.doesNotMatch(prompt, /secret-/);
-  assert.match(prompt, /real/);
-}
-
-// user messages are visible regardless of target
-{
-  const transcript = [
-    entry({ type: "user", agent: "user", text: "hi @all" }),
-    entry({ type: "assistant", agent: "claude", text: "claude done" }),
-    entry({ type: "assistant", agent: "codex", text: "codex done" }),
+  const transcript: GroupTurnEntry[] = [
+    userEntry("hi @all"),
+    assistantEntry("claude", "claude done"),
+    assistantEntry("codex", "codex done"),
   ];
   const claudeView = buildPrompt({
     transcript,
@@ -176,7 +173,6 @@ assert.equal(peerLabel("codex"), "Codex");
   });
   assert.match(claudeView, /hi @all/);
   assert.match(codexView, /hi @all/);
-  // each agent sees its own as "your previous reply", peer's as "[from X]"
   assert.match(claudeView, /你的上一条回复.*claude done/);
   assert.match(claudeView, /\[来自 Codex.*\][\s\S]*codex done/);
   assert.match(codexView, /你的上一条回复.*codex done/);
@@ -185,22 +181,12 @@ assert.equal(peerLabel("codex"), "Codex");
 
 // deterministic
 {
-  const transcript = [
-    entry({ type: "user", agent: "user", text: "x" }),
-    entry({ type: "assistant", agent: "claude", text: "y" }),
+  const transcript: GroupTurnEntry[] = [
+    userEntry("x"),
+    assistantEntry("claude", "y"),
   ];
-  const a = buildPrompt({
-    transcript,
-    target: "codex",
-    currentText: "go",
-    config,
-  });
-  const b = buildPrompt({
-    transcript,
-    target: "codex",
-    currentText: "go",
-    config,
-  });
+  const a = buildPrompt({ transcript, target: "codex", currentText: "go", config });
+  const b = buildPrompt({ transcript, target: "codex", currentText: "go", config });
   assert.equal(a, b);
 }
 
@@ -228,7 +214,6 @@ assert.equal(peerLabel("codex"), "Codex");
   const sysClaude = systemPromptFor({ config: c, target: "claude" });
   assert.match(sysClaude, /你是实现者/);
   assert.match(sysClaude, /Codex.*角色: 你是 reviewer/);
-  // own role appears before group preamble
   assert.ok(
     sysClaude.indexOf("你是实现者") < sysClaude.indexOf("群聊"),
     "own role should appear before group preamble",
