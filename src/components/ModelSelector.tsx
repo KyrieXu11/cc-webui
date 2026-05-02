@@ -10,14 +10,22 @@ interface Props {
   provider: AgentProvider;
   value: string;
   onChange: (model: string) => void;
+  direction?: "up" | "down";
+  align?: "left" | "right";
 }
 
-export default function ModelSelector({ provider, value, onChange }: Props) {
+export default function ModelSelector({
+  provider,
+  value,
+  onChange,
+  direction = "up",
+  align = "left",
+}: Props) {
   const models = modelOptionsForProvider(provider);
   return (
     <Popover
-      align="left"
-      direction="up"
+      align={align}
+      direction={direction}
       width={240}
       triggerClassName="inline-flex items-center focus:outline-none rounded px-1.5 py-0.5 hover:bg-fg/5 transition-colors group"
       trigger={

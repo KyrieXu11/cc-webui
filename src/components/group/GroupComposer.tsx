@@ -5,24 +5,51 @@ import {
   useRef,
   useState,
 } from "react";
+import type { GroupQuote } from "../../lib/types";
 
 const TARGETS = ["all", "claude", "codex"] as const;
 type Target = (typeof TARGETS)[number];
 
-const TARGET_HINTS: Record<Target, string> = {
-  all: "流水线协作（按 pipeline 顺序）",
-  claude: "只发给 Claude",
-  codex: "只发给 Codex",
+const TARGET_ACCENT: Record<Target, string> = {
+  all: "#5b6bff",
+  claude: "#ef9d5a",
+  codex: "#3ecf8e",
+};
+
+const AGENT_ACCENT: Record<"claude" | "codex", string> = {
+  claude: "#ef9d5a",
+  codex: "#3ecf8e",
+};
+
+const TARGET_HINT: Record<Target, string> = {
+  all: "pipeline · 顺序协作",
+  claude: "仅 Claude 单点",
+  codex: "仅 Codex 单点",
 };
 
 type Props = {
   running: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  quote?: GroupQuote | null;
+  onClearQuote?: () => void;
   onSend: (text: string, recipients: Target[]) => void;
   onStop: () => void;
+  // Optional right-aligned slot in the bottom toolbar (e.g. a TasksButton
+  // showing background bash counts for this group, mirroring single chat).
+  rightSlot?: React.ReactNode;
 };
 
-export default function GroupComposer({ running, onSend, onStop }: Props) {
-  const [value, setValue] = useState("");
+export default function GroupComposer({
+  running,
+  value,
+  onChange,
+  quote,
+  onClearQuote,
+  onSend,
+  onStop,
+  rightSlot,
+}: Props) {
   const [showMenu, setShowMenu] = useState(false);
   const [menuFilter, setMenuFilter] = useState("");
   const [menuIdx, setMenuIdx] = useState(0);
@@ -39,6 +66,14 @@ export default function GroupComposer({ running, onSend, onStop }: Props) {
     }
   }, [filtered.length, menuIdx]);
 
+  // Auto-resize
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [value]);
+
   const insertMention = (target: Target) => {
     const ta = taRef.current;
     if (!ta) return;
@@ -49,7 +84,7 @@ export default function GroupComposer({ running, onSend, onStop }: Props) {
     const newBefore = atIdx >= 0 ? before.slice(0, atIdx) : before;
     const insert = `@${target} `;
     const next = newBefore + insert + after;
-    setValue(next);
+    onChange(next);
     setShowMenu(false);
     setMenuFilter("");
     queueMicrotask(() => {
@@ -60,9 +95,9 @@ export default function GroupComposer({ running, onSend, onStop }: Props) {
     });
   };
 
-  const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
-    setValue(v);
+    onChange(v);
     const pos = e.target.selectionStart;
     const before = v.slice(0, pos);
     const m = before.match(/@([a-z]*)$/);
@@ -98,21 +133,30 @@ export default function GroupComposer({ running, onSend, onStop }: Props) {
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.nativeEvent.isComposing
+    ) {
       e.preventDefault();
       submit();
     }
   };
 
   // First @<target> at the start of message determines recipients;
-  // body is everything after it (so Claude/Codex don't see the @ tag).
+  // body is everything after it (so the receiving agent doesn't see the @).
+  // When a quote is attached and the user didn't explicitly @-mention,
+  // default the recipient to the quoted agent (intent: "ask the quoted
+  // agent to look at their own thing"), instead of falling back to @all.
   const parse = (
     raw: string,
   ): { text: string; recipients: Target[] } => {
     const trimmed = raw.replace(/^\s+/, "");
     const m = trimmed.match(/^@(claude|codex|all)(\s+|$)/i);
     if (!m) {
-      return { text: raw.trim(), recipients: ["all"] };
+      const fallback: Target = quote ? (quote.agent as Target) : "all";
+      return { text: raw.trim(), recipients: [fallback] };
     }
     const target = m[1].toLowerCase() as Target;
     return {
@@ -127,57 +171,159 @@ export default function GroupComposer({ running, onSend, onStop }: Props) {
     const { text, recipients } = parse(value);
     if (!text) return;
     onSend(text, recipients);
-    setValue("");
+    onChange("");
   };
 
+  const canSend = !running && value.trim().length > 0;
+
   return (
-    <div className="border-t border-soft px-3 pt-2 pb-2 relative bg-canvas">
-      {showMenu && filtered.length > 0 && (
-        <div className="absolute bottom-full left-3 mb-1 bg-surface border border-soft rounded shadow-lg z-10 min-w-[200px]">
-          {filtered.map((t, i) => (
+    <div className="px-6 pb-5 pt-2">
+      {quote && quote.text && (
+        <div className="mb-1.5 flex items-start gap-2 bg-canvas border border-line-strong rounded-lg px-3 py-1.5">
+          <div
+            className="w-0.5 self-stretch shrink-0 rounded-sm"
+            style={{
+              background: AGENT_ACCENT[quote.agent as "claude" | "codex"],
+            }}
+          />
+          <div className="min-w-0 flex-1">
             <div
-              key={t}
-              onClick={() => insertMention(t)}
-              className={`px-3 py-1.5 cursor-pointer text-[13px] flex justify-between gap-3 ${
-                i === menuIdx ? "bg-zinc-700/40" : ""
-              }`}
+              className="font-mono text-[10px] uppercase tracking-[0.12em] mb-0.5"
+              style={{
+                color: AGENT_ACCENT[quote.agent as "claude" | "codex"],
+              }}
             >
-              <span className="font-mono">@{t}</span>
-              <span className="text-subtle text-[11px]">{TARGET_HINTS[t]}</span>
+              引用 {quote.agent} 的回复
             </div>
-          ))}
+            <div className="text-[12px] text-muted leading-[1.5] line-clamp-2">
+              {quote.text}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClearQuote}
+            aria-label="移除引用"
+            className="text-subtle hover:text-fg p-0.5 rounded shrink-0 transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path
+                d="M3 3L9 9M9 3L3 9"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
         </div>
       )}
-      <textarea
-        ref={taRef}
-        value={value}
-        onChange={onChange}
-        onKeyDown={onKey}
-        placeholder="@all (流水线) / @claude / @codex …  ↵ 发送，⇧↵ 换行"
-        rows={3}
-        disabled={running}
-        className="w-full bg-surface border border-soft rounded px-3 py-2 resize-none focus:outline-none focus:border-blue text-[14px] disabled:opacity-50"
-      />
-      <div className="flex justify-end mt-1.5">
-        {running ? (
-          <button
-            onClick={onStop}
-            type="button"
-            className="px-4 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[13px]"
-          >
-            ■ 停止
-          </button>
-        ) : (
-          <button
-            onClick={submit}
-            type="button"
-            disabled={!value.trim()}
-            className="px-4 py-1 bg-blue hover:opacity-90 text-white rounded text-[13px] disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            ↑ 发送
-          </button>
+      <div className="relative bg-raised border border-line-strong rounded-2xl transition-colors focus-within:border-fg/25">
+        {showMenu && filtered.length > 0 && (
+          <div className="absolute left-2 right-2 bottom-full mb-2 bg-surface border border-line-strong rounded-lg shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] overflow-hidden z-50">
+            <div className="px-3 py-1.5 text-[10px] font-mono text-subtle uppercase tracking-[0.08em] border-b border-line flex items-center justify-between">
+              <span>mention 收件人</span>
+              <span className="text-subtle/60">↑↓ · ↵ 选择 · esc 取消</span>
+            </div>
+            <div className="py-1">
+              {filtered.map((t, i) => {
+                const active = i === menuIdx;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => insertMention(t)}
+                    onMouseEnter={() => setMenuIdx(i)}
+                    className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 font-mono text-[12.5px] transition-colors ${
+                      active ? "bg-blue/[0.15] text-fg" : "text-muted hover:text-fg"
+                    }`}
+                  >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{
+                        background: TARGET_ACCENT[t],
+                        outline: `3px solid ${TARGET_ACCENT[t]}22`,
+                      }}
+                    />
+                    <span className="text-subtle">@</span>
+                    <span>{t}</span>
+                    <span className="ml-auto text-[10.5px] text-subtle/80 normal-case tracking-normal font-sans">
+                      {TARGET_HINT[t]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
+
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={onKey}
+          placeholder={
+            quote
+              ? "针对引用提问…    ↵ 发送 · ⇧↵ 换行"
+              : "@all (流水线) / @claude / @codex …    ↵ 发送 · ⇧↵ 换行"
+          }
+          rows={1}
+          disabled={running}
+          className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-[1.6] text-fg placeholder:text-subtle focus:outline-none disabled:opacity-50"
+        />
+
+        <div className="flex items-center justify-between px-2.5 pb-2.5">
+          <div className="flex items-center gap-2 px-2">
+            <span className="font-mono text-[10.5px] text-subtle">
+              {running
+                ? "thinking…"
+                : value.trim() === ""
+                  ? "idle"
+                  : detectTarget(value, quote ?? undefined)}
+            </span>
+            {rightSlot}
+          </div>
+          {running ? (
+            <button
+              onClick={onStop}
+              type="button"
+              aria-label="停止生成"
+              title="停止生成"
+              className="w-9 h-9 rounded-full bg-red hover:brightness-110 flex items-center justify-center transition-all active:scale-95"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <rect x="2" y="2" width="8" height="8" rx="1.5" fill="white" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              type="button"
+              disabled={!canSend}
+              aria-label="发送"
+              className="w-9 h-9 rounded-full bg-blue hover:bg-blue-hover disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-95"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
+                  stroke="white"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+function detectTarget(value: string, quote?: GroupQuote | null): string {
+  const trimmed = value.replace(/^\s+/, "");
+  const m = trimmed.match(/^@(claude|codex|all)(\s|$)/i);
+  if (!m) {
+    if (quote) return `→ @${quote.agent} (引用)`;
+    return "→ @all (default)";
+  }
+  return `→ @${m[1].toLowerCase()}`;
 }

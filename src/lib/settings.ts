@@ -80,10 +80,24 @@ export const PROVIDER_OPTIONS: Array<{
 
 const CLAUDE_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
-    { id: "opus", label: "Opus 4.7", hint: "最强 · 较慢" },
-    { id: "sonnet", label: "Sonnet 4.6", hint: "均衡" },
-    { id: "haiku", label: "Haiku 4.5", hint: "快 · 便宜" },
+    { id: "claude-opus-4-7", label: "claude-opus-4-7", hint: "Opus 4.7 · 最强 · 较慢" },
+    { id: "claude-sonnet-4-6", label: "claude-sonnet-4-6", hint: "Sonnet 4.6 · 均衡" },
+    { id: "claude-haiku-4-5", label: "claude-haiku-4-5", hint: "Haiku 4.5 · 快 · 便宜" },
   ];
+
+// Legacy short aliases used in older saved data ("opus" → "claude-opus-4-7"),
+// kept so dropdown / label rendering doesn't show raw "opus" in places that
+// were saved before this rename. The Claude SDK accepts both forms; we
+// surface the canonical full name everywhere in the UI now.
+const CLAUDE_LEGACY_ALIAS: Record<string, string> = {
+  opus: "claude-opus-4-7",
+  sonnet: "claude-sonnet-4-6",
+  haiku: "claude-haiku-4-5",
+};
+
+export function canonicalizeClaudeModel(id: string): string {
+  return CLAUDE_LEGACY_ALIAS[id] ?? id;
+}
 
 const CODEX_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
@@ -124,9 +138,10 @@ export const MODE_OPTIONS: Array<{
 ];
 
 export function modelLabel(id: string): string {
+  const canonical = canonicalizeClaudeModel(id);
   return (
-    CLAUDE_MODEL_OPTIONS.find((m) => m.id === id)?.label ??
-    CODEX_MODEL_OPTIONS.find((m) => m.id === id)?.label ??
+    CLAUDE_MODEL_OPTIONS.find((m) => m.id === canonical)?.label ??
+    CODEX_MODEL_OPTIONS.find((m) => m.id === canonical)?.label ??
     id
   );
 }
@@ -139,23 +154,44 @@ export const EFFORT_OPTIONS: Array<{
   id: EffortLevel;
   label: string;
   hint: string;
-  opusOnly?: boolean;
+  // Tier only available on Claude Opus / Codex (not Sonnet/Haiku).
+  xhighTier?: boolean;
+  // `max` is a Claude-only label; the Codex SDK's top tier is xhigh,
+  // so we hide max in Codex UI to avoid implying a real tier above xhigh.
+  claudeOnly?: boolean;
 }> = [
   { id: "low", label: "Low", hint: "几乎不思考 · 最快" },
   { id: "medium", label: "Medium", hint: "均衡（默认）" },
   { id: "high", label: "High", hint: "更深入的推理" },
-  { id: "xhigh", label: "xHigh", hint: "长时间思考", opusOnly: true },
-  { id: "max", label: "Max", hint: "最大限度 · 最慢" },
+  { id: "xhigh", label: "xHigh", hint: "长时间思考", xhighTier: true },
+  {
+    id: "max",
+    label: "Max",
+    hint: "最大限度 · 最慢",
+    claudeOnly: true,
+  },
 ];
 
-export function supportsXhighEffort(model: string): boolean {
-  if (model === "opus") return true;
+function isCodexModel(model: string): boolean {
   return CODEX_MODEL_OPTIONS.some((m) => m.id === model);
 }
 
+export function supportsXhighEffort(model: string): boolean {
+  const canonical = canonicalizeClaudeModel(model);
+  if (canonical === "claude-opus-4-7") return true;
+  return isCodexModel(model);
+}
+
 export function availableEffortOptions(model: string) {
-  if (supportsXhighEffort(model)) return EFFORT_OPTIONS;
-  return EFFORT_OPTIONS.filter((o) => !o.opusOnly);
+  const codex = isCodexModel(model);
+  const canonical = canonicalizeClaudeModel(model);
+  return EFFORT_OPTIONS.filter((o) => {
+    // xhigh: only Opus + Codex models
+    if (o.xhighTier && canonical !== "claude-opus-4-7" && !codex) return false;
+    // max: Claude-only (Codex's top tier IS xhigh)
+    if (o.claudeOnly && codex) return false;
+    return true;
+  });
 }
 
 export function effortLabel(id: EffortLevel): string {

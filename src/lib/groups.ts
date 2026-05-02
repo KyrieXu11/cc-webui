@@ -79,6 +79,7 @@ export type GroupTurnRequest = {
   text: string;
   recipients: ("claude" | "codex" | "all")[];
   images?: ImageAttachment[];
+  quote?: { agent: "claude" | "codex"; text: string };
 };
 
 export async function* streamGroupTurn(

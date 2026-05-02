@@ -27,6 +27,11 @@ export type GroupTurnEntry = {
     pipelineStep?: number;
     recipients?: AgentId[];
     error?: string;
+    // User-attached quote-reply context: which agent's prior reply the
+    // user is referring to in this message. Rendered as a markdown
+    // blockquote when building the prompt and as a styled block above
+    // the user bubble in the UI.
+    quote?: { agent: AgentId; text: string };
   };
 };
 

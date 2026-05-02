@@ -222,16 +222,27 @@ export function detachForegroundToBackground(
 
 export function listBackgroundTasks(filter?: {
   sessionId?: string | null;
+  // Match any task whose sessionId STARTS WITH this prefix. Used by
+  // group chats which scope their bash MCP under `${gid}:${agentId}`
+  // — passing `${gid}:` aggregates tasks from all agents in the group.
+  sessionPrefix?: string;
 }): BackgroundTask[] {
   const filterSessionId =
     filter && "sessionId" in filter
       ? resolveTaskSessionId(filter.sessionId ?? undefined)
       : undefined;
+  const prefix = filter?.sessionPrefix;
   const all = Array.from(tasks.values());
-  const filtered =
-    filter && "sessionId" in filter
-      ? all.filter((t) => t.sessionId === filterSessionId)
-      : all;
+  let filtered: BackgroundTask[];
+  if (filter && "sessionId" in filter) {
+    filtered = all.filter((t) => t.sessionId === filterSessionId);
+  } else if (prefix) {
+    filtered = all.filter(
+      (t) => typeof t.sessionId === "string" && t.sessionId.startsWith(prefix),
+    );
+  } else {
+    filtered = all;
+  }
   return filtered.sort((a, b) => b.startedAt - a.startedAt);
 }
 

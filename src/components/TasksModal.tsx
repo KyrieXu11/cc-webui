@@ -3,13 +3,17 @@ import {
   killTask,
   subscribeTaskStream,
   subscribeTasksList,
+  subscribeTasksListScoped,
   type TaskOutput,
+  type TaskScope,
   type TaskStatus,
   type TaskSummary,
 } from "../lib/tasks";
 
 interface Props {
-  sessionId: string | null;
+  sessionId?: string | null;
+  // Either sessionId (legacy single-chat) OR scope (group: { sessionPrefix }).
+  scope?: TaskScope;
   onClose: () => void;
 }
 
@@ -45,7 +49,7 @@ function truncCmd(cmd: string, max = 56): string {
   return single.length > max ? single.slice(0, max - 1) + "…" : single;
 }
 
-export default function TasksModal({ sessionId, onClose }: Props) {
+export default function TasksModal({ sessionId, scope, onClose }: Props) {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [output, setOutput] = useState<TaskOutput | null>(null);
@@ -65,15 +69,17 @@ export default function TasksModal({ sessionId, onClose }: Props) {
 
   // Subscribe to task-list updates (SSE). Fires on add/status/kill.
   useEffect(() => {
-    return subscribeTasksList(sessionId, (d) => {
+    const onSnapshot = (d: { tasks: TaskSummary[] }) => {
       setTasks(d.tasks);
       setLoading(false);
       setSelectedId((cur) => {
         if (cur && d.tasks.some((t) => t.id === cur)) return cur;
         return d.tasks[0]?.id ?? null;
       });
-    });
-  }, [sessionId]);
+    };
+    if (scope) return subscribeTasksListScoped(scope, onSnapshot);
+    return subscribeTasksList(sessionId ?? null, onSnapshot);
+  }, [sessionId, JSON.stringify(scope)]);
 
   // Subscribe to the selected task's output (SSE). `init` seeds full buffer,
   // `stdout`/`stderr` append chunks, `status` updates lifecycle fields.

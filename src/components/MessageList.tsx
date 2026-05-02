@@ -37,6 +37,10 @@ interface Props {
   isPending?: boolean;
   retryInfo?: RetryInfo | null;
   onPreviewImage?: (img: ImageAttachment, label: string) => void;
+  // `compact` drops the outer py-8 / gap-5 spacing — useful when this list
+  // is itself rendered inside a tighter container (e.g. a per-agent block
+  // in a group chat) where the parent already provides spacing.
+  compact?: boolean;
 }
 
 export default function MessageList({
@@ -47,6 +51,7 @@ export default function MessageList({
   isPending,
   retryInfo,
   onPreviewImage,
+  compact,
 }: Props) {
   const blocks: Block[] = [];
   // Step ids that still have an unresolved permission card: those steps are
@@ -70,7 +75,7 @@ export default function MessageList({
   }
 
   return (
-    <div className="flex flex-col gap-5 py-8">
+    <div className={`flex flex-col ${compact ? "gap-3" : "gap-5 py-8"}`}>
       {blocks.map((b) => {
         if (b.kind === "step-group") {
           return (

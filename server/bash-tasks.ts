@@ -31,29 +31,32 @@ function summary(t: ReturnType<typeof listBackgroundTasks>[number]) {
   };
 }
 
-function listPayload(filter?: { sessionId?: string | null }) {
+function listPayload(filter?: {
+  sessionId?: string | null;
+  sessionPrefix?: string;
+}) {
   const tasks = listBackgroundTasks(filter).map(summary);
   const running = tasks.filter((t) => t.status === "running").length;
   return { tasks, running, total: tasks.length };
 }
 
-route.get("/", (c) => {
+function parseFilter(c: {
+  req: { query: (k: string) => string | undefined };
+}): { sessionId?: string | null; sessionPrefix?: string } | undefined {
   const sessionIdRaw = c.req.query("sessionId");
-  // Query absent → return everything. Query present (even empty) → strict
-  // filter by that sessionId; unset tasks match an empty query.
-  const filter =
-    sessionIdRaw === undefined
-      ? undefined
-      : { sessionId: sessionIdRaw === "" ? null : sessionIdRaw };
-  return c.json(listPayload(filter));
+  const prefixRaw = c.req.query("sessionPrefix");
+  if (prefixRaw) return { sessionPrefix: prefixRaw };
+  if (sessionIdRaw === undefined) return undefined;
+  // Query present (even empty) → strict filter; unset tasks match empty.
+  return { sessionId: sessionIdRaw === "" ? null : sessionIdRaw };
+}
+
+route.get("/", (c) => {
+  return c.json(listPayload(parseFilter(c)));
 });
 
 route.get("/stream", (c) => {
-  const sessionIdRaw = c.req.query("sessionId");
-  const filter =
-    sessionIdRaw === undefined
-      ? undefined
-      : { sessionId: sessionIdRaw === "" ? null : sessionIdRaw };
+  const filter = parseFilter(c);
 
   return streamSSE(c, async (stream) => {
     let dirty = false;

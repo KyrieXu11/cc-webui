@@ -4,13 +4,20 @@ import { MODE_OPTIONS, modeLabel, type PermissionMode } from "../lib/settings";
 interface Props {
   value: PermissionMode;
   onChange: (v: PermissionMode) => void;
+  direction?: "up" | "down";
+  align?: "left" | "right";
 }
 
-export default function ModeSelector({ value, onChange }: Props) {
+export default function ModeSelector({
+  value,
+  onChange,
+  direction = "up",
+  align = "left",
+}: Props) {
   return (
     <Popover
-      align="left"
-      direction="up"
+      align={align}
+      direction={direction}
       width={240}
       triggerClassName="inline-flex items-center focus:outline-none rounded px-1.5 py-0.5 hover:bg-fg/5 transition-colors group"
       trigger={

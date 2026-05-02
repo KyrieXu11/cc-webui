@@ -72,6 +72,7 @@ export type StartTurnInput = {
   text: string;
   images?: ImageAttachment[];
   recipients?: ("claude" | "codex" | "all")[];
+  quote?: { agent: AgentId; text: string };
 };
 
 export type StartTurnResult = {
@@ -113,7 +114,7 @@ export async function startTurn(
 
   // Persist the user turn first so a refresh during runner setup still
   // shows the user message.
-  const userEntry = makeEntry({
+  const userMeta: NonNullable<Parameters<typeof makeEntry>[0]> = {
     agent: "user",
     event: {
       id: newEntryId(),
@@ -124,7 +125,11 @@ export async function startTurn(
     },
     turnId,
     recipients: expanded,
-  });
+  };
+  const userEntry = makeEntry(userMeta);
+  if (input.quote) {
+    userEntry.meta = { ...(userEntry.meta ?? {}), quote: input.quote };
+  }
   await appendEntry(gid, userEntry);
 
   fanout(
@@ -135,6 +140,7 @@ export async function startTurn(
       turnId,
       userText: input.text,
       recipients: expanded,
+      quote: input.quote,
     }),
   );
 
