@@ -10,11 +10,13 @@ import { metaRoute } from "./meta.ts";
 import { permissionRoute } from "./permission.ts";
 import { bashTasksRoute } from "./bash-tasks.ts";
 import { mcpBashRoute } from "./mcp-bash-route.ts";
+import { groups } from "./groups.ts";
 
 const app = new Hono();
 
 app.route("/api", chat);
 app.route("/api/codex", codexChat);
+app.route("/api/groups", groups);
 app.route("/api/fs", fsRoute);
 app.route("/api/sessions", sessionsRoute);
 app.route("/api/upload", uploadRoute);
