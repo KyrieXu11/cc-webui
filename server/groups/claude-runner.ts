@@ -29,6 +29,9 @@ const SYSTEM_PROMPT_APPEND_BASH =
 export async function* runClaude(args: {
   config: GroupConfig;
   participant: Participant;
+  // The string to send as the user prompt for THIS turn. With resume,
+  // this is just the catchup (new user msg + peer reply cross-injection).
+  // Without resume, it's the full rendered history + current user msg.
   prompt: string;
   images: ImageAttachment[];
   ctx: RunnerCtx;
@@ -40,9 +43,9 @@ export async function* runClaude(args: {
 
   const bashMcp = createBashMcpServer({ getSessionId: () => scope });
 
-  // Compose prompt input for SDK. For v1 we use string form (concat-as-prompt
-  // — see spike / spec). Images go via the `prompt` AsyncIterable form when
-  // present (Claude SDK supports image content blocks via SDKUserMessage).
+  // String prompt or AsyncIterable for image-bearing user input. Resume
+  // (when present) keeps the SDK session warm so prompt cache stays hot
+  // across turns of the same group.
   const queryPrompt = images.length
     ? makeImagePrompt(prompt, images)
     : prompt;
@@ -51,11 +54,13 @@ export async function* runClaude(args: {
   const systemPromptAppend = `${SYSTEM_PROMPT_APPEND_BASH}\n\n${groupSystemPrompt}`;
 
   let events: ChatEvent[] = [];
+  let capturedSessionId: string | undefined = ctx.resumeSessionId;
 
   try {
     const response = query({
       prompt: queryPrompt as any,
       options: {
+        ...(ctx.resumeSessionId ? { resume: ctx.resumeSessionId } : {}),
         cwd: config.cwd,
         model: participant.model,
         permissionMode: participant.mode ?? "default",
@@ -151,11 +156,16 @@ export async function* runClaude(args: {
       yield { kind: "raw", payload: msg };
       // Fold via the same mapper the frontend uses, so persisted entries
       // and live UI render identically.
-      events = applySDKMessage(events, msg, () => {});
+      events = applySDKMessage(events, msg, (id) => {
+        capturedSessionId = id;
+      });
+      // Also pull session_id directly off any message that carries it.
+      const sid = (msg as any).session_id;
+      if (typeof sid === "string" && sid) capturedSessionId = sid;
       if ((msg as any).type === "result") break;
     }
 
-    yield { kind: "ended", ok: true, events };
+    yield { kind: "ended", ok: true, events, sessionId: capturedSessionId };
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
     yield {
@@ -163,10 +173,14 @@ export async function* runClaude(args: {
       ok: !aborted,
       error: aborted ? "aborted" : String((err as Error)?.message ?? err),
       events,
+      sessionId: capturedSessionId,
     };
   }
 }
 
+// Image-bearing user input has to go through the AsyncIterable form
+// (SDK requirement) — yield a single SDKUserMessage with text + image
+// content blocks.
 async function* makeImagePrompt(
   text: string,
   images: ImageAttachment[],

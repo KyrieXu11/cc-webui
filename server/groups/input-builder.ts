@@ -68,6 +68,71 @@ export function buildPrompt(args: BuildPromptArgs): string {
   ].join("\n\n");
 }
 
+// Build the per-turn prompt string for an agent that's resuming its
+// own session. We send only what the agent HASN'T seen yet — the
+// catchup since its most recent assistant entry in canonical:
+//
+//   - user messages from anywhere after the agent's last own reply
+//   - peer assistants with the `[来自 X]` cross-injection prefix
+//
+// We never re-send the agent's own past replies — those already live in
+// the resumed session naturally. We never re-send peer thinking / tool
+// timelines — those are the peer's private working notes; only the
+// peer's final assistant text matters for cross-talk.
+//
+// First-time invocation (agent has no prior assistant entry) → the
+// "catchup" is the entire history, equivalent to the old full-prompt
+// behavior. Each subsequent turn shrinks because there's only a small
+// diff to send.
+export function buildResumeCatchup(args: {
+  transcript: GroupTurnEntry[];
+  target: AgentId;
+}): string {
+  const { transcript, target } = args;
+
+  // Walk backwards to find the agent's most recent own assistant
+  // entry. Everything strictly after that is "new" to the agent.
+  let lastOwnIdx = -1;
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const e = transcript[i];
+    if (
+      e.agent === target &&
+      e.event &&
+      (e.event.type === "assistant" || e.event.type === "thinking" ||
+        e.event.type === "step")
+    ) {
+      lastOwnIdx = i;
+      break;
+    }
+  }
+
+  const newEntries = transcript.slice(lastOwnIdx + 1);
+  const lines: string[] = [];
+
+  for (const e of newEntries) {
+    const ev = e.event;
+    if (!ev) continue;
+
+    if (ev.type === "user" && e.agent === "user" && ev.text) {
+      lines.push(`USER: ${ev.text}`);
+      continue;
+    }
+    if (
+      ev.type === "assistant" &&
+      e.agent !== "user" &&
+      e.agent !== target &&
+      ev.text
+    ) {
+      lines.push(`[来自 ${peerLabel(e.agent)} 的回复]\n${ev.text}`);
+      continue;
+    }
+    // Skip: own assistant/thinking/step (resumed session has them) +
+    // peer thinking/step/permission (private to that agent).
+  }
+
+  return lines.join("\n\n");
+}
+
 export function systemPromptFor(args: {
   config: GroupConfig;
   target: AgentId;

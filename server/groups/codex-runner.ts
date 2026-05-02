@@ -82,6 +82,7 @@ export async function* runCodex(args: {
   };
 
   let events: ChatEvent[] = [];
+  let capturedThreadId: string | undefined = ctx.resumeSessionId;
 
   try {
     // Build the input array: text first, then any image attachments as
@@ -107,14 +108,19 @@ export async function* runCodex(args: {
     });
 
     const { sandboxMode, approvalPolicy } = mapMode(participant.mode);
-    const thread = codex.startThread({
+    const threadOptions = {
       model: participant.model,
       workingDirectory: config.cwd,
       skipGitRepoCheck: true,
       sandboxMode,
       approvalPolicy,
       modelReasoningEffort: mapEffort(participant.effort),
-    } as any);
+    } as any;
+    // Resume an existing thread if we have one; else start fresh and
+    // capture the new id.
+    const thread = ctx.resumeSessionId
+      ? codex.resumeThread(ctx.resumeSessionId, threadOptions)
+      : codex.startThread(threadOptions);
 
     const stream = await thread.runStreamed(input as any, {
       signal: ctx.signal,
@@ -126,6 +132,7 @@ export async function* runCodex(args: {
       // Re-key MCP context to the real thread id once Codex emits it.
       if (anyEv.type === "thread.started" && anyEv.thread_id) {
         updateCodexMcpSession(mcpToken, anyEv.thread_id);
+        capturedThreadId = anyEv.thread_id;
       }
 
       yield { kind: "raw", payload: ev };
@@ -134,14 +141,26 @@ export async function* runCodex(args: {
       if (anyEv.type === "turn.completed" || anyEv.type === "turn.failed") {
         if (anyEv.type === "turn.failed") {
           const errMsg = anyEv.error?.message ?? "turn failed";
-          yield { kind: "ended", ok: false, error: errMsg, events };
+          yield {
+            kind: "ended",
+            ok: false,
+            error: errMsg,
+            events,
+            sessionId: capturedThreadId,
+          };
           return;
         }
         break;
       }
     }
 
-    yield { kind: "ended", ok: true, events };
+    // Fallback: thread.id can be set after a successful run even without
+    // a thread.started event (e.g. on resume).
+    if (!capturedThreadId && (thread as any).id) {
+      capturedThreadId = (thread as any).id;
+    }
+
+    yield { kind: "ended", ok: true, events, sessionId: capturedThreadId };
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
     yield {
@@ -149,6 +168,7 @@ export async function* runCodex(args: {
       ok: !aborted,
       error: aborted ? "aborted" : String((err as Error)?.message ?? err),
       events,
+      sessionId: capturedThreadId,
     };
   } finally {
     await cleanup();
