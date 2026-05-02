@@ -13,6 +13,8 @@ import SkillsPicker from "./components/SkillsPicker";
 import HelpModal from "./components/HelpModal";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
+import GroupChatView from "./components/group/GroupChatView";
+import NewGroupDialog from "./components/group/NewGroupDialog";
 import type { ChatEvent, PermissionDecision } from "./lib/types";
 import {
   streamChat,
@@ -167,6 +169,9 @@ export default function App() {
     Array<{ fgId: string; command: string }>
   >([]);
   const [attachRetryNonce, setAttachRetryNonce] = useState(0);
+  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [groupsRefreshKey, setGroupsRefreshKey] = useState(0);
 
   const LOCAL_COMMANDS = ["skills", "help", "clear", "exit"];
   const mergedSlashCommands = [
@@ -588,7 +593,51 @@ export default function App() {
     setAllEvents([]);
     setVisibleCount(INITIAL_VISIBLE);
     setSessionId(null);
+    setCurrentGroupId(null);
   };
+
+  const openGroup = (gid: string) => {
+    clearActiveTurnState();
+    setProjectCwd("");
+    setSidebarOpen(false);
+    setAllEvents([]);
+    setSessionId(null);
+    setCurrentGroupId(gid);
+  };
+
+  const closeGroup = () => {
+    setCurrentGroupId(null);
+    setGroupsRefreshKey((k) => k + 1);
+  };
+
+  // Persist currentGroupId across refresh
+  useEffect(() => {
+    if (!didRestore.current) return;
+    try {
+      if (currentGroupId) {
+        localStorage.setItem("cc-webui:lastGroup", currentGroupId);
+      } else {
+        localStorage.removeItem("cc-webui:lastGroup");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [currentGroupId]);
+
+  // Restore last open group on first load (skipped if a project is restoring)
+  useEffect(() => {
+    if (!didRestore.current) return;
+    try {
+      const last = localStorage.getItem("cc-webui:lastGroup");
+      if (last && !projectCwd && !currentGroupId) {
+        setCurrentGroupId(last);
+      }
+    } catch {
+      /* ignore */
+    }
+    // run once after restore phase settles
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateModel = (model: string) =>
     setSettings((s) => {
@@ -909,7 +958,9 @@ export default function App() {
           />
         ))}
       <div className="flex flex-col flex-1 min-w-0">
-        {inProject ? (
+        {currentGroupId ? (
+          <GroupChatView gid={currentGroupId} onBack={closeGroup} />
+        ) : inProject ? (
           <>
             <Header
               sessionId={sessionId}
@@ -995,6 +1046,9 @@ export default function App() {
             onOpenSession={openSession}
             onOpenProject={openProject}
             onClickOpen={() => setDialogOpen(true)}
+            onOpenGroup={openGroup}
+            onCreateGroup={() => setNewGroupOpen(true)}
+            groupsRefreshKey={groupsRefreshKey}
           />
         )}
       </div>
@@ -1036,6 +1090,17 @@ export default function App() {
           onPick={(s) => {
             setSkillsPickerOpen(false);
             setComposerValue(`/${s} `);
+          }}
+        />
+      )}
+      {newGroupOpen && (
+        <NewGroupDialog
+          cwd={projectCwd || home || process.env.HOME || "/tmp"}
+          onClose={() => setNewGroupOpen(false)}
+          onCreated={(gid) => {
+            setNewGroupOpen(false);
+            setGroupsRefreshKey((k) => k + 1);
+            openGroup(gid);
           }}
         />
       )}
