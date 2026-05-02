@@ -1,14 +1,26 @@
 import { useEffect, useState } from "react";
-import { subscribeTasksList, type TaskListResponse } from "../lib/tasks";
+import {
+  subscribeTasksList,
+  subscribeTasksListScoped,
+  type TaskListResponse,
+  type TaskScope,
+} from "../lib/tasks";
 
 interface Props {
-  sessionId: string | null;
+  sessionId?: string | null;
+  // Either sessionId (legacy single-chat) OR scope (group: { sessionPrefix }).
+  scope?: TaskScope;
   onOpen: () => void;
   /** Trigger a refresh when this counter changes (e.g., after modal closes). */
   refreshKey?: number;
 }
 
-export default function TasksButton({ sessionId, onOpen, refreshKey }: Props) {
+export default function TasksButton({
+  sessionId,
+  scope,
+  onOpen,
+  refreshKey,
+}: Props) {
   const [data, setData] = useState<TaskListResponse>({
     tasks: [],
     running: 0,
@@ -16,8 +28,9 @@ export default function TasksButton({ sessionId, onOpen, refreshKey }: Props) {
   });
 
   useEffect(() => {
-    return subscribeTasksList(sessionId, setData);
-  }, [refreshKey, sessionId]);
+    if (scope) return subscribeTasksListScoped(scope, setData);
+    return subscribeTasksList(sessionId ?? null, setData);
+  }, [refreshKey, sessionId, JSON.stringify(scope)]);
 
   const { running, total } = data;
   if (total === 0) return null;

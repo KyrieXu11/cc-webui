@@ -25,6 +25,17 @@ export interface TaskListResponse {
   total: number;
 }
 
+export type TaskScope =
+  | { sessionId: string }
+  | { sessionPrefix: string };
+
+function scopeQS(scope: TaskScope): URLSearchParams {
+  if ("sessionPrefix" in scope) {
+    return new URLSearchParams({ sessionPrefix: scope.sessionPrefix });
+  }
+  return new URLSearchParams({ sessionId: scope.sessionId });
+}
+
 export async function listTasks(
   sessionId: string | null
 ): Promise<TaskListResponse> {
@@ -32,6 +43,14 @@ export async function listTasks(
   const qs = new URLSearchParams({ sessionId });
   const res = await fetch(`/api/bash/tasks?${qs}`);
   if (!res.ok) throw new Error(`listTasks failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listTasksScoped(
+  scope: TaskScope
+): Promise<TaskListResponse> {
+  const res = await fetch(`/api/bash/tasks?${scopeQS(scope)}`);
+  if (!res.ok) throw new Error(`listTasksScoped failed: ${res.status}`);
   return res.json();
 }
 
@@ -77,6 +96,25 @@ export function subscribeTasksList(
   }
   const qs = new URLSearchParams({ sessionId });
   const es = new EventSource(`/api/bash/tasks/stream?${qs}`);
+  es.addEventListener("snapshot", (e) => {
+    try {
+      onSnapshot(JSON.parse((e as MessageEvent).data));
+    } catch {
+      /* ignore malformed frame */
+    }
+  });
+  if (onError) es.addEventListener("error", onError);
+  return () => es.close();
+}
+
+// Scoped variant that supports either single sessionId or a prefix
+// (used by group chats: prefix `${gid}:` aggregates all agents).
+export function subscribeTasksListScoped(
+  scope: TaskScope,
+  onSnapshot: (data: TaskListResponse) => void,
+  onError?: (err: Event) => void
+): () => void {
+  const es = new EventSource(`/api/bash/tasks/stream?${scopeQS(scope)}`);
   es.addEventListener("snapshot", (e) => {
     try {
       onSnapshot(JSON.parse((e as MessageEvent).data));

@@ -9,14 +9,22 @@ interface Props {
   value: EffortLevel;
   onChange: (v: EffortLevel) => void;
   model: string;
+  direction?: "up" | "down";
+  align?: "left" | "right";
 }
 
-export default function EffortSelector({ value, onChange, model }: Props) {
+export default function EffortSelector({
+  value,
+  onChange,
+  model,
+  direction = "up",
+  align = "left",
+}: Props) {
   const options = availableEffortOptions(model);
   return (
     <Popover
-      align="left"
-      direction="up"
+      align={align}
+      direction={direction}
       width={220}
       triggerClassName="inline-flex items-center focus:outline-none rounded px-1.5 py-0.5 hover:bg-fg/5 transition-colors group"
       trigger={

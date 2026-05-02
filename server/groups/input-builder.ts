@@ -34,7 +34,7 @@ export function buildPrompt(args: BuildPromptArgs): string {
     }
 
     if (ev.type === "user" && e.agent === "user" && ev.text) {
-      lines.push(`USER: ${ev.text}`);
+      lines.push(renderUserText(e, ev.text));
       hasHistory = true;
       continue;
     }
@@ -66,6 +66,21 @@ export function buildPrompt(args: BuildPromptArgs): string {
     "[当前用户消息]",
     currentText,
   ].join("\n\n");
+}
+
+// User messages may carry a `meta.quote` referencing a prior agent reply
+// the user is explicitly asking about. Render as a markdown blockquote
+// so the agent treats it as quoted context.
+function renderUserText(entry: GroupTurnEntry, text: string): string {
+  const q = entry.meta?.quote;
+  if (q && q.text) {
+    const quoted = q.text
+      .split("\n")
+      .map((l: string) => `> ${l}`)
+      .join("\n");
+    return `USER:\n[引用 ${peerLabel(q.agent)} 的回复]\n${quoted}\n\n${text}`;
+  }
+  return `USER: ${text}`;
 }
 
 // Build the per-turn prompt string for an agent that's resuming its
@@ -114,7 +129,7 @@ export function buildResumeCatchup(args: {
     if (!ev) continue;
 
     if (ev.type === "user" && e.agent === "user" && ev.text) {
-      lines.push(`USER: ${ev.text}`);
+      lines.push(renderUserText(e, ev.text));
       continue;
     }
     if (

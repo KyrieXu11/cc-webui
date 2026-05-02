@@ -9,3 +9,4 @@ dist/
 .cache/
 .claude/
 .playwright-mcp/
+tmp/

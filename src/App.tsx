@@ -14,7 +14,8 @@ import HelpModal from "./components/HelpModal";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
 import GroupChatView from "./components/group/GroupChatView";
-import NewGroupDialog from "./components/group/NewGroupDialog";
+import GroupConfigDialog from "./components/group/GroupConfigDialog";
+import GroupSidebar from "./components/group/GroupSidebar";
 import type { ChatEvent, PermissionDecision } from "./lib/types";
 import {
   streamChat,
@@ -599,7 +600,7 @@ export default function App() {
   const openGroup = (gid: string) => {
     clearActiveTurnState();
     setProjectCwd("");
-    setSidebarOpen(false);
+    setSidebarOpen(true);
     setAllEvents([]);
     setSessionId(null);
     setCurrentGroupId(gid);
@@ -942,7 +943,15 @@ export default function App() {
         }
       />
       {sidebarOpen &&
-        (inProject ? (
+        (currentGroupId ? (
+          <GroupSidebar
+            home={home}
+            currentGroupId={currentGroupId}
+            refreshKey={groupsRefreshKey}
+            onOpenGroup={openGroup}
+            onCreateGroup={() => setNewGroupOpen(true)}
+          />
+        ) : inProject ? (
           <ProjectSidebar
             cwd={projectCwd}
             home={home}
@@ -959,7 +968,7 @@ export default function App() {
         ))}
       <div className="flex flex-col flex-1 min-w-0">
         {currentGroupId ? (
-          <GroupChatView gid={currentGroupId} onBack={closeGroup} />
+          <GroupChatView gid={currentGroupId} home={home} onBack={closeGroup} />
         ) : inProject ? (
           <>
             <Header
@@ -1094,14 +1103,17 @@ export default function App() {
         />
       )}
       {newGroupOpen && (
-        <NewGroupDialog
-          cwd={projectCwd || home || process.env.HOME || "/tmp"}
-          onClose={() => setNewGroupOpen(false)}
-          onCreated={(gid) => {
-            setNewGroupOpen(false);
-            setGroupsRefreshKey((k) => k + 1);
-            openGroup(gid);
+        <GroupConfigDialog
+          mode={{
+            kind: "create",
+            cwd: projectCwd || home || process.env.HOME || "/tmp",
+            onCreated: (gid) => {
+              setNewGroupOpen(false);
+              setGroupsRefreshKey((k) => k + 1);
+              openGroup(gid);
+            },
           }}
+          onClose={() => setNewGroupOpen(false)}
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}

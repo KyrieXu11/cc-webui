@@ -127,9 +127,14 @@ export default function HomeView({
         {chatGroups.length > 0 && (
           <div className="mb-10">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-fg text-[14.5px] font-semibold tracking-tight">
-                群聊
-              </h2>
+              <div className="flex items-baseline gap-2.5">
+                <h2 className="text-fg text-[14.5px] font-semibold tracking-tight">
+                  群聊
+                </h2>
+                <span className="text-[10px] font-mono text-subtle uppercase tracking-[0.1em]">
+                  multi-agent
+                </span>
+              </div>
               <button
                 onClick={onCreateGroup}
                 className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
@@ -143,31 +148,54 @@ export default function HomeView({
                 .slice()
                 .sort((a, b) => b.lastTs - a.lastTs)
                 .map((g) => (
-                  <button
+                  <div
                     key={g.id}
-                    onClick={() => onOpenGroup(g.id)}
-                    className="group/g w-full text-left py-3 border-b border-line last:border-b-0 hover:bg-fg/[0.02] flex items-center gap-3"
+                    className="group/g flex items-center gap-3 py-3 border-b border-line last:border-b-0 hover:bg-fg/[0.025] transition-colors px-1 -mx-1 rounded"
                   >
-                    <div className="flex items-center gap-2 shrink-0">
-                      {g.inFlight && (
+                    <button
+                      onClick={() => onOpenGroup(g.id)}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                    >
+                      <div className="flex items-center gap-1.5 shrink-0 w-[68px]">
                         <span
-                          className="w-1.5 h-1.5 rounded-full bg-amber pulse-dot"
-                          title="正在生成"
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{
+                            background: "#ef9d5a",
+                            outline: "3px solid #ef9d5a22",
+                          }}
                         />
-                      )}
-                      <span className="text-[11px] font-mono text-subtle">
-                        {g.participantSummary}
-                      </span>
-                    </div>
-                    <span className="text-[13px] text-fg truncate flex-1">
-                      {g.title}
-                      {g.lastSnippet && (
-                        <span className="ml-2 text-subtle text-[12px]">
-                          — {g.lastSnippet}
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-[11.5px] text-subtle shrink-0">
+                        <span className="text-subtle/40 text-[10px]">×</span>
+                        <span
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{
+                            background: "#3ecf8e",
+                            outline: "3px solid #3ecf8e22",
+                          }}
+                        />
+                        {g.inFlight && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-amber pulse-dot ml-1"
+                            title="正在生成"
+                          />
+                        )}
+                      </div>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2 min-w-0">
+                          <span className="text-[13.5px] text-fg font-medium tracking-tight truncate">
+                            {g.title}
+                          </span>
+                          <span className="font-mono text-[10.5px] text-subtle/70 shrink-0">
+                            {tildify(g.cwd, home)}
+                          </span>
+                        </div>
+                        {g.lastSnippet && (
+                          <span className="text-[12px] text-subtle truncate mt-0.5">
+                            {g.lastSnippet}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                    <span className="text-[11.5px] text-subtle shrink-0 font-mono">
                       {timeAgo(g.lastTs)}
                     </span>
                     <button
@@ -184,7 +212,7 @@ export default function HomeView({
                         />
                       </svg>
                     </button>
-                  </button>
+                  </div>
                 ))}
             </div>
           </div>

@@ -119,10 +119,17 @@ groups.patch("/:gid/config", async (c) => {
   const gid = c.req.param("gid");
   const body = await c.req.json();
   const old = await readConfig(gid);
+  // cwd is locked after creation — the agents' resumed SDK sessions
+  // were started under the original cwd, switching mid-conversation
+  // would desync them from the canonical config. Belt + suspenders:
+  // ignore any cwd in the patch body.
+  const { cwd: _ignoredCwd, id: _ignoredId, createdAt: _ignoredCreated, ...patch } =
+    body ?? {};
   const merged: GroupConfig = {
     ...old,
-    ...body,
+    ...patch,
     id: old.id,
+    cwd: old.cwd,
     createdAt: old.createdAt,
     updatedAt: Date.now(),
   };
@@ -156,10 +163,16 @@ groups.post("/:gid/turn", async (c) => {
     ? body.recipients
     : ["all"];
   const images = Array.isArray(body.images) ? body.images : [];
+  const quote =
+    body.quote &&
+    typeof body.quote.text === "string" &&
+    (body.quote.agent === "claude" || body.quote.agent === "codex")
+      ? { agent: body.quote.agent, text: body.quote.text }
+      : undefined;
 
   let result;
   try {
-    result = await startTurn({ gid, text, images, recipients });
+    result = await startTurn({ gid, text, images, recipients, quote });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return c.json({ error: msg }, 409);

@@ -45,8 +45,15 @@ export type GroupTurnEntry = {
     pipelineStep?: number;
     recipients?: GroupAgentId[];
     error?: string;
+    // When the user sent this message as a "quote-reply" to a prior
+    // agent message, we stash the quoted text + source agent here so
+    // the bubble can render the quote block visually and the prompt
+    // builder can prepend "> [来自 X]" context for the recipients.
+    quote?: { agent: GroupAgentId; text: string };
   };
 };
+
+export type GroupQuote = { agent: GroupAgentId; text: string };
 
 export type GroupIndexRow = {
   id: string;
@@ -64,6 +71,7 @@ export type GroupSseEvent =
       turnId: string;
       userText: string;
       recipients: GroupAgentId[];
+      quote?: GroupQuote;
     }
   | {
       type: "agent_begin";
