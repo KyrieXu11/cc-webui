@@ -3,7 +3,6 @@ import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,6 +14,13 @@ import {
   type WakeupRequest,
   type WakeupSlot,
 } from "./wakeup.ts";
+import {
+  getOrCreateAllowance,
+  getOrCreateInputAllowance,
+  permissionInputKey,
+  relabelScope,
+  sessionPermissionSuggestions,
+} from "./shared/permission-flow.ts";
 
 const MCP_BASH_RUN = "mcp__bash__run";
 const MCP_BASH_OUTPUT = "mcp__bash__output";
@@ -75,63 +81,6 @@ const ALLOWED_EFFORTS: EffortLevel[] = [
   "max",
 ];
 
-// Explicit WebUI-only allowances. These are separate from Claude Code's own
-// session permission suggestions.
-const sessionToolAllowances = new Map<string, Set<string>>();
-const sessionInputAllowances = new Map<string, Set<string>>();
-
-function getOrCreateAllowance(id: string | undefined): Set<string> {
-  if (!id) return new Set<string>();
-  let set = sessionToolAllowances.get(id);
-  if (!set) {
-    set = new Set<string>();
-    sessionToolAllowances.set(id, set);
-  }
-  return set;
-}
-
-function getOrCreateInputAllowance(id: string | undefined): Set<string> {
-  if (!id) return new Set<string>();
-  let set = sessionInputAllowances.get(id);
-  if (!set) {
-    set = new Set<string>();
-    sessionInputAllowances.set(id, set);
-  }
-  return set;
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    return `{${Object.keys(obj)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function permissionInputKey(toolName: string, input: Record<string, unknown>): string {
-  return `${toolName}:${stableStringify(input)}`;
-}
-
-function sessionPermissionSuggestions(
-  suggestions: readonly PermissionUpdate[] | undefined
-): PermissionUpdate[] {
-  return (suggestions ?? []).filter((s) => {
-    if (s.destination !== "session") return false;
-    if (s.type === "addRules") {
-      return s.behavior === "allow" && s.rules.length > 0;
-    }
-    if (s.type === "addDirectories") {
-      return s.directories.length > 0;
-    }
-    return false;
-  });
-}
 
 // ============================================================
 // In-flight chat registry
@@ -611,20 +560,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         const emittedId = m.session_id as string | undefined;
         if (emittedId && emittedId !== currentSessionId) {
           const previousId = currentSessionId;
-          if (!previousId) {
-            sessionToolAllowances.set(emittedId, allowance);
-            sessionInputAllowances.set(emittedId, inputAllowance);
-          } else if (sessionToolAllowances.get(previousId) === allowance) {
-            sessionToolAllowances.delete(previousId);
-            sessionToolAllowances.set(emittedId, allowance);
-          }
-          if (
-            previousId &&
-            sessionInputAllowances.get(previousId) === inputAllowance
-          ) {
-            sessionInputAllowances.delete(previousId);
-            sessionInputAllowances.set(emittedId, inputAllowance);
-          }
+          relabelScope(previousId, emittedId, allowance, inputAllowance);
           relabelTasksSessionId(previousId, emittedId);
           if (previousId && activeChats.get(previousId) === entry) {
             activeChats.delete(previousId);
