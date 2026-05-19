@@ -103,16 +103,53 @@ function activeTurnUserEvent(turn: ActiveTurn): ChatEvent {
   };
 }
 
+function findActiveProgressStart(events: ChatEvent[]): number {
+  let lastUserIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "user") {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  const start = lastUserIndex + 1;
+  const suffix = events.slice(start);
+  const hasWaitingProgress = suffix.some(
+    (e) =>
+      (e.type === "permission" && e.resolved === undefined && !e.stale) ||
+      (e.type === "step" && e.status === "pending")
+  );
+  return hasWaitingProgress ? start : events.length;
+}
+
 function ensureActiveTurnUserEvent(
   events: ChatEvent[],
   turn: ActiveTurn | null,
-  cwd: string
+  cwd: string,
+  provider?: AgentProvider
 ): ChatEvent[] {
   if (!turn || turn.cwd !== cwd || !turn.prompt.trim()) return events;
+  if (provider && turn.agentProvider !== provider) return events;
   const hasPrompt = events.some(
     (e) => e.type === "user" && e.text.trim() === turn.prompt.trim()
   );
-  return hasPrompt ? events : [...events, activeTurnUserEvent(turn)];
+  if (hasPrompt) return events;
+  const idx = findActiveProgressStart(events);
+  const userEvent = activeTurnUserEvent(turn);
+  return [...events.slice(0, idx), userEvent, ...events.slice(idx)];
+}
+
+function historyEventsForActiveTurn(
+  msgs: Parameters<typeof sessionMessagesToEvents>[0],
+  turn: ActiveTurn | null,
+  cwd: string,
+  provider: AgentProvider
+): ChatEvent[] {
+  return sessionMessagesToEvents(
+    msgs,
+    turn && turn.cwd === cwd && turn.agentProvider === provider
+      ? { beforeMs: turn.startedAt }
+      : undefined
+  );
 }
 
 function isVisibleProgress(ev: ChatEvent): boolean {
@@ -256,11 +293,18 @@ export default function App() {
           .then((msgs) => {
             forceScrollBottom.current = true;
             setAllEvents(
-              ensureActiveTurnUserEvent(sessionMessagesToEvents(msgs), active, cwd)
+              ensureActiveTurnUserEvent(
+                historyEventsForActiveTurn(msgs, active, cwd, restoreProvider),
+                active,
+                cwd,
+                restoreProvider
+              )
             );
           })
           .catch(() =>
-            setAllEvents(ensureActiveTurnUserEvent([], active, cwd))
+            setAllEvents(
+              ensureActiveTurnUserEvent([], active, cwd, restoreProvider)
+            )
           )
           .finally(() => setLoadingSession(false));
       } else if (active?.prompt && active.cwd === cwd) {
@@ -339,6 +383,16 @@ export default function App() {
       );
     } catch (err) {
       console.error("permission resolve failed:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes("no longer pending")) {
+        setAllEvents((prev) =>
+          prev.map((e) =>
+            e.type === "permission" && e.permissionId === permissionId
+              ? { ...e, stale: true }
+              : e
+          )
+        );
+      }
     }
   };
 
@@ -440,7 +494,12 @@ export default function App() {
         }
         setAllEvents((prev) =>
           applySDKMessage(
-            ensureActiveTurnUserEvent(prev, activeTurn, projectCwd),
+            ensureActiveTurnUserEvent(
+              prev,
+              activeTurn,
+              projectCwd,
+              attachProvider
+            ),
             msg,
             (id) => {
               setSessionId(id);

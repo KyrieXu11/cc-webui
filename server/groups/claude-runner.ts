@@ -113,15 +113,28 @@ export async function* runClaude(args: {
           // uses.
           events = applySDKMessage(events, permPayload, () => {});
           ctx.emitPermission(permPayload);
-          const decision = await awaitPermission(id, permOpts.signal);
+          let decision: Awaited<ReturnType<typeof awaitPermission>>;
+          try {
+            decision = await awaitPermission(id, permOpts.signal);
+          } catch (err) {
+            const resolvedPayload = {
+              type: "permission_resolved",
+              id,
+              stale: true,
+            };
+            events = applySDKMessage(events, resolvedPayload, () => {});
+            ctx.emitPermission(resolvedPayload);
+            throw err;
+          }
+          const resolvedPayload = {
+            type: "permission_resolved",
+            id,
+            behavior: decision.behavior,
+          };
+          ctx.emitPermission(resolvedPayload);
           // Mark the in-memory permission entry as resolved so a refresh
           // after turn_end shows the card in its post-decision state.
-          const resolvedBehavior = decision.behavior;
-          events = events.map((e) =>
-            e.type === "permission" && e.permissionId === id
-              ? { ...e, resolved: resolvedBehavior }
-              : e,
-          );
+          events = applySDKMessage(events, resolvedPayload, () => {});
           if (decision.behavior === "allow") {
             return { behavior: "allow", updatedInput: input };
           }

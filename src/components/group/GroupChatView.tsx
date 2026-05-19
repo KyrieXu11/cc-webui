@@ -225,6 +225,28 @@ export default function GroupChatView({ gid, home, onBack }: Props) {
       );
     } catch (e) {
       console.error("permission resolve failed:", e);
+      const message = e instanceof Error ? e.message : String(e);
+      if (message.includes("no longer pending")) {
+        setLiveByAgent((s) => {
+          const next: typeof s = {};
+          for (const [agent, events] of Object.entries(s)) {
+            if (!events) continue;
+            next[agent as GroupAgentId] = events.map((ev) =>
+              ev.type === "permission" && ev.permissionId === pid
+                ? { ...ev, stale: true }
+                : ev,
+            );
+          }
+          return next;
+        });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.event.type === "permission" && m.event.permissionId === pid
+              ? { ...m, event: { ...m.event, stale: true } }
+              : m,
+          ),
+        );
+      }
     }
   };
 

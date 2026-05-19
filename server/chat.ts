@@ -115,6 +115,12 @@ interface InFlightChat {
   cancelIterator?: () => Promise<void>;
 }
 
+function permissionBehavior(
+  decision: Awaited<ReturnType<typeof awaitPermission>>
+): string {
+  return decision.behavior;
+}
+
 const activeChats = new Map<string, InFlightChat>();
 const activeChatsByClientTurn = new Map<string, InFlightChat>();
 
@@ -474,7 +480,28 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
                 toolUseId: permOpts.toolUseID,
               })
             );
-            const decision = await awaitPermission(id, permOpts.signal);
+            let decision: Awaited<ReturnType<typeof awaitPermission>>;
+            try {
+              decision = await awaitPermission(id, permOpts.signal);
+            } catch (err) {
+              fanout(
+                "permission_resolved",
+                JSON.stringify({
+                  type: "permission_resolved",
+                  id,
+                  stale: true,
+                })
+              );
+              throw err;
+            }
+            fanout(
+              "permission_resolved",
+              JSON.stringify({
+                type: "permission_resolved",
+                id,
+                behavior: permissionBehavior(decision),
+              })
+            );
             if (decision.behavior === "allow") {
               return { behavior: "allow", updatedInput: input };
             }

@@ -30,7 +30,7 @@ export type RunnerCtx = {
   turnId: string;
   agentId: AgentId;
   signal: AbortSignal;
-  // fanout for permission_request events; orchestrator wraps these with
+  // Fanout for permission lifecycle events; orchestrator wraps these with
   // {agent, turnId} when re-emitting on the group SSE channel.
   emitPermission: (payload: unknown) => void;
   // Pre-existing SDK session id, if any. When present, the runner

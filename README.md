@@ -124,6 +124,74 @@ npm run dev
 | `CC_WEBUI_SESSION_INDEX` | WebUI 自己维护的 provider-aware session index（目前用于 Codex 历史） | `~/.cc-webui/sessions.json` |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
+| `FEISHU_CLAUDE_APP_ID` / `_APP_SECRET` / `_ENCRYPT_KEY` / `_VERIFY_TOKEN` | 飞书 Claude 机器人凭据（详见下面「飞书机器人」一节） | 未设置则不启用 |
+| `FEISHU_BASE_URL` | 飞书 OpenAPI base URL；Lark 国际版填 `https://open.larksuite.com` | `https://open.feishu.cn` |
+| `CC_WEBUI_DOTENV` | `.env` 文件路径（用于 feishu 凭据） | 项目根目录 `.env` |
+
+## 飞书机器人（实验性，MVP）
+
+把 cc-webui 接到飞书群里，用 @ 机器人触发 Claude agent 跑一轮，结果回到群里。
+
+### 传输模式
+
+两种二选一，默认 **WebSocket 长连接**：
+
+| | WebSocket（默认） | HTTP Webhook |
+|---|---|---|
+| 公网入口 | **不需要** | 需要（HTTPS） |
+| 凭据 | App ID + Secret | + Encrypt Key + Verify Token |
+| URL 校验 | 不需要 | 需要 |
+| 启用方式 | 不设环境变量 | `FEISHU_USE_WEBHOOK=1` |
+| 飞书后台「订阅方式」 | 「使用长连接接收事件」 | 「将事件发送至开发者服务器」 |
+
+### 1. 飞书开放平台
+
+在 [open.feishu.cn](https://open.feishu.cn) 创建自建应用（推荐命名 `cc-webui-claude`），开启「机器人」能力，记下：
+
+- **App ID / App Secret**（凭证与基础信息）
+- Encrypt Key / Verification Token（仅 webhook 模式需要，在「事件与回调 → 加密策略」）
+
+**权限**（权限管理）：`im:message`、`im:message:send_as_bot`、`im:resource`（可选）。
+
+**事件订阅**（事件与回调 → 事件配置）→ 添加 `im.message.receive_v1`：
+- **WS 模式**：订阅方式选「使用 长连接 接收事件」
+- **Webhook 模式**：选「将事件发送至开发者服务器」，请求地址填 `https://<你的公网域名>/feishu/claude/events`
+
+发布应用并把机器人拉进测试群。
+
+### 2. 本地配置
+
+复制 `.env.example` 为 `.env`：
+
+- WS 模式：填 `FEISHU_CLAUDE_APP_ID` + `FEISHU_CLAUDE_APP_SECRET` 即可
+- Webhook 模式：再加 `FEISHU_CLAUDE_ENCRYPT_KEY` + `FEISHU_CLAUDE_VERIFY_TOKEN`，并设置 `FEISHU_USE_WEBHOOK=1`
+
+启动 server 时日志会显示 `[feishu] mode=<ws|webhook>, loaded bots: claude`；WS 模式连上后还会打 `[feishu claude ws] connected`。
+
+### 3. 使用
+
+**零配置上手** —— 不需要先去 webui 建 group。直接在飞书群里 @ bot 发消息：
+
+```
+@cc-webui-claude 你好，看看当前目录里有什么          ← 第一次发会自动建会话 + 绑定
+@cc-webui-claude /cd /Users/foo/code/myproj       ← 切目录（新建会话）
+@cc-webui-claude /cwd                              ← 查看当前会话的工作目录
+@cc-webui-claude /new                              ← 保留目录但清空历史，起新会话
+@cc-webui-claude /stop                             ← 中止本群正在跑的一轮
+@cc-webui-claude /status                           ← 当前会话状态
+@cc-webui-claude /help                             ← 全部命令
+```
+
+默认 cwd 在 `.env` 里用 `FEISHU_DEFAULT_CWD` 设；不设的话用 `CC_WEBUI_CWD`，再不设就是启动 server 时的工作目录。
+
+**高级**：如果你想让飞书群和 webui 网页共享同一个会话上下文，可以先在 webui 建 group 拿到 gid，再用 `@bot /bind <gid>` 显式绑定。私聊场景同理。
+
+**特性 / 限制（MVP）**：
+- 只支持文本消息（不支持图片 / 文件）
+- 只支持群聊场景（不支持私聊）
+- 不是 token-streaming：等 agent 跑完一段（`agent_end`）后整段发回飞书，UI 体验不如卡片流式
+- 撤回 / 卡片按钮 / 工具确认（permission）暂未对接 —— group 配置建议用 `acceptEdits` 或 `bypassPermissions`
+- 签名验证强制要求（响应头里没有 `X-Lark-Signature` 直接 401）
 
 ## 键盘快捷键
 

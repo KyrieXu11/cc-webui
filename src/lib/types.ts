@@ -17,7 +17,7 @@ export type GroupAgentId = "claude" | "codex";
 export type GroupParticipant = {
   id: GroupAgentId;
   model: string;
-  mode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
+  mode?: "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto" | "dontAsk";
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   systemPrompt?: string;
   skills: string[];
@@ -133,6 +133,7 @@ export type ChatEvent =
       tool: string;
       input: Record<string, any>;
       resolved?: PermissionDecision;
+      stale?: boolean;
       toolUseId?: string;
       title?: string;
       displayName?: string;

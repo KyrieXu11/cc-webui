@@ -1,0 +1,13 @@
+{
+  "name": "@cc-webui/subagent-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stdio MCP server exposing Claude (Claude Agent SDK) as a subagent for Codex CLI and other MCP hosts.",
+  "bin": {
+    "claude-subagent-mcp": "index.ts"
+  },
+  "scripts": {
+    "start": "tsx index.ts"
+  }
+}

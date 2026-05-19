@@ -20,6 +20,7 @@ import {
   validateConfig,
   type GroupConfig,
 } from "./groups/config.ts";
+import { createGroup } from "./groups/lifecycle.ts";
 import {
   startTurn,
   stopTurn,
@@ -65,34 +66,15 @@ groups.get("/", async (c) => {
 
 groups.post("/", async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const id = newGroupId();
   const cwd =
     expandHome(body.cwd) || process.env.CC_WEBUI_CWD || process.cwd();
-  const skeleton = defaultConfig({
-    id,
+  const id = await createGroup({
     title: body.title || "新群聊",
     cwd,
-  });
-  const cfg: GroupConfig = {
-    ...skeleton,
     participants: Array.isArray(body.participants)
       ? body.participants
-      : skeleton.participants,
-    pipeline: Array.isArray(body.pipeline) ? body.pipeline : skeleton.pipeline,
-  };
-  cfg.id = id;
-  validateConfig(cfg);
-  await writeConfig(cfg);
-  await upsertIndexRow({
-    id: cfg.id,
-    title: cfg.title,
-    cwd: cfg.cwd,
-    lastTs: Date.now(),
-    participantSummary: cfg.participants
-      .map((p) => (p.id === "claude" ? "Claude" : "Codex"))
-      .join(" · "),
-    lastSnippet: "",
-    inFlight: false,
+      : undefined,
+    pipeline: Array.isArray(body.pipeline) ? body.pipeline : undefined,
   });
   return c.json({ id });
 });
