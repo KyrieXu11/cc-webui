@@ -75,3 +75,16 @@ export async function getAgentSessionId(
   const cur = await readRuntime(gid);
   return cur.agents[agentId]?.sessionId;
 }
+
+// Forget the persisted SDK session id for this agent so the next turn
+// starts a brand new session (no `resume:`). Used when model changes,
+// since resuming a different model on the same session id mis-routes.
+export async function clearAgentSessionId(
+  gid: string,
+  agentId: AgentId,
+): Promise<void> {
+  const cur = await readRuntime(gid);
+  if (!cur.agents[agentId]?.sessionId) return;
+  cur.agents[agentId] = { ...(cur.agents[agentId] ?? {}), sessionId: undefined };
+  await writeRuntime(gid, cur);
+}

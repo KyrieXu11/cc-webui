@@ -15,6 +15,7 @@ export type SessionMessage = {
   uuid: string;
   session_id: string;
   message: unknown;
+  timestamp?: string;
 };
 
 export type CodexSessionTurn = {

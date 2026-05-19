@@ -129,6 +129,7 @@ export function connectAttach(
     "user",
     "stream_event",
     "permission_request",
+    "permission_resolved",
     "codex_event",
     "foreground_started",
     "foreground_ended",

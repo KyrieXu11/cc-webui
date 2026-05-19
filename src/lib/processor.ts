@@ -126,6 +126,21 @@ export function applySDKMessage(
     ];
   }
 
+  if (msg.type === "permission_resolved" && msg.id) {
+    const behavior =
+      msg.behavior === "allow" ||
+      msg.behavior === "allow_session" ||
+      msg.behavior === "allow_tool_session" ||
+      msg.behavior === "deny"
+        ? msg.behavior
+        : undefined;
+    return events.map((e) =>
+      e.type === "permission" && e.permissionId === msg.id
+        ? { ...e, resolved: behavior ?? e.resolved, stale: !behavior || e.stale }
+        : e
+    );
+  }
+
   if (msg.type === "stream_event" && msg.event) {
     const ev = msg.event;
 
@@ -449,9 +464,16 @@ function upsertStepEvent(
   ];
 }
 
-export function sessionMessagesToEvents(msgs: SessionHistoryItem[]): ChatEvent[] {
+export function sessionMessagesToEvents(
+  msgs: SessionHistoryItem[],
+  opts?: { beforeMs?: number }
+): ChatEvent[] {
   const events: ChatEvent[] = [];
   for (const m of msgs) {
+    if (opts?.beforeMs !== undefined) {
+      const ts = historyTimestampMs(m);
+      if (ts !== null && ts >= opts.beforeMs) continue;
+    }
     if ((m as CodexSessionTurn).provider === "codex") {
       const turn = m as CodexSessionTurn;
       if (turn.prompt.trim()) {
@@ -547,7 +569,7 @@ export function sessionMessagesToEvents(msgs: SessionHistoryItem[]): ChatEvent[]
               type: "step",
               tool: toolName,
               arg: summarize(toolName, b.input),
-              status: "ok",
+              status: "pending",
               input: b.input,
             });
           }
@@ -556,6 +578,17 @@ export function sessionMessagesToEvents(msgs: SessionHistoryItem[]): ChatEvent[]
     }
   }
   return events;
+}
+
+function historyTimestampMs(m: SessionHistoryItem): number | null {
+  if ((m as CodexSessionTurn).provider === "codex") {
+    const ts = (m as CodexSessionTurn).startedAt;
+    return Number.isFinite(ts) ? ts : null;
+  }
+  const raw = (m as SessionMessage).timestamp;
+  if (typeof raw !== "string") return null;
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : null;
 }
 
 export function summarize(tool: string, input: any): string | undefined {

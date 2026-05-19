@@ -11,6 +11,7 @@ import { permissionRoute } from "./permission.ts";
 import { bashTasksRoute } from "./bash-tasks.ts";
 import { mcpBashRoute } from "./mcp-bash-route.ts";
 import { groups } from "./groups.ts";
+import { feishu } from "./feishu/index.ts";
 
 const app = new Hono();
 
@@ -24,6 +25,7 @@ app.route("/api/permission", permissionRoute);
 app.route("/api/meta", metaRoute);
 app.route("/api/bash/tasks", bashTasksRoute);
 app.route("/api/mcp", mcpBashRoute);
+app.route("/feishu", feishu);
 
 const isProd = process.env.NODE_ENV === "production";
 if (isProd) {

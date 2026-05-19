@@ -8,6 +8,7 @@ interface Props {
   title?: string;
   description?: string;
   hasSessionPermissionSuggestions?: boolean;
+  stale?: boolean;
   delay?: number;
   onAnswer: (decision: PermissionDecision, message?: string) => void;
 }
@@ -50,12 +51,13 @@ export default function PermissionCard({
   title,
   description,
   hasSessionPermissionSuggestions = false,
+  stale = false,
   delay = 0,
   onAnswer,
 }: Props) {
   const [reason, setReason] = useState("");
   const [showReason, setShowReason] = useState(false);
-  const locked = resolved !== undefined;
+  const locked = resolved !== undefined || stale;
   const summary = summarizeInput(tool, input);
 
   const btnBase =
@@ -77,7 +79,7 @@ export default function PermissionCard({
         <span className="font-mono text-[12.5px] text-fg">{tool}</span>
         {locked && (
           <span className="ml-auto font-mono text-[10.5px] text-subtle">
-            {RESOLVED_LABEL[resolved!]}
+            {resolved ? RESOLVED_LABEL[resolved] : "已失效"}
           </span>
         )}
       </div>

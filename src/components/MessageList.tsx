@@ -121,6 +121,7 @@ export default function MessageList({
                 tool={ev.tool}
                 input={ev.input}
                 resolved={ev.resolved}
+                stale={ev.stale}
                 title={ev.title}
                 description={ev.description}
                 hasSessionPermissionSuggestions={

@@ -9,7 +9,11 @@ export type GroupMode =
   | "default"
   | "acceptEdits"
   | "plan"
-  | "bypassPermissions";
+  | "bypassPermissions"
+  // SDK ≥ 0.2.x: model-classifier auto-approval (only ambiguous prompts ask)
+  | "auto"
+  // SDK ≥ 0.2.x: silently deny any non-pre-approved tool
+  | "dontAsk";
 
 export type GroupEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -105,7 +109,7 @@ export function defaultConfig(opts: {
         id: "claude",
         model: "claude-opus-4-7",
         mode: "default",
-        effort: "medium",
+        effort: "xhigh",
         systemPrompt: "",
         skills: [],
         mcpServers: ["bash"],
@@ -113,7 +117,7 @@ export function defaultConfig(opts: {
       {
         id: "codex",
         model: "gpt-5.3-codex",
-        effort: "medium",
+        effort: "xhigh",
         systemPrompt: "",
         skills: [],
         mcpServers: ["bash"],
