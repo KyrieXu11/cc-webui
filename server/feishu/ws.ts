@@ -1,5 +1,6 @@
 import * as lark from "@larksuiteoapi/node-sdk";
 import type { BotConfig } from "./config.ts";
+import { handleCardAction } from "./card-action.ts";
 import { handleNormalizedMessage } from "./handler.ts";
 
 const CHANNELS = new Map<string, lark.LarkChannel>();
@@ -33,6 +34,16 @@ export async function startChannel(bot: BotConfig): Promise<void> {
       await handleNormalizedMessage(bot, channel, msg);
     } catch (err) {
       console.error(`[feishu ${bot.key}] handle:`, err);
+    }
+  });
+  channel.on("cardAction", (evt) => {
+    console.log(
+      `[feishu ${bot.key}] cardAction received: action.value=${JSON.stringify(evt.action?.value)} operator=${evt.operator?.name ?? evt.operator?.openId}`,
+    );
+    try {
+      handleCardAction(bot, evt);
+    } catch (err) {
+      console.error(`[feishu ${bot.key}] cardAction:`, err);
     }
   });
 

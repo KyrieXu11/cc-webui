@@ -66,7 +66,7 @@ export async function* runClaude(args: {
         permissionMode: participant.mode ?? "default",
         effort: participant.effort,
         includePartialMessages: true,
-        mcpServers: { bash: bashMcp },
+        mcpServers: { bash: bashMcp, ...(ctx.extraMcpServers ?? {}) },
         disallowedTools: ["Bash", "BashOutput", "KillBash"],
         systemPrompt: {
           type: "preset",
@@ -81,6 +81,20 @@ export async function* runClaude(args: {
             toolName === MCP_BASH_LIST
           ) {
             return { behavior: "allow", updatedInput: input };
+          }
+          // Adapter-injected MCP servers (e.g. Feishu's `lark` namespace)
+          // are cc-webui-internal — they don't touch the user's filesystem
+          // beyond what the adapter explicitly does, so we auto-allow them.
+          // Tool names are namespaced like `mcp__lark__send_file`.
+          if (
+            ctx.extraMcpServers &&
+            typeof toolName === "string" &&
+            toolName.startsWith("mcp__")
+          ) {
+            const ns = toolName.slice(5).split("__")[0];
+            if (ns && ns in ctx.extraMcpServers) {
+              return { behavior: "allow", updatedInput: input };
+            }
           }
           if (allowance.has(toolName)) {
             return { behavior: "allow", updatedInput: input };

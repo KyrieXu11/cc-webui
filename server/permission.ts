@@ -37,9 +37,9 @@ export function awaitPermission(
       settle(() =>
         resolve({
           behavior: "deny",
-          message: `user did not respond within ${Math.round(
+          message: `由于用户 ${Math.round(
             PERMISSION_TIMEOUT_MS / 1000
-          )}s`,
+          )}s 没有反应，所以拒绝执行`,
         })
       );
 

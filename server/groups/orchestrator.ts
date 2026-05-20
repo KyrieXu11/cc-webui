@@ -73,6 +73,14 @@ export type StartTurnInput = {
   images?: ImageAttachment[];
   recipients?: ("claude" | "codex" | "all")[];
   quote?: { agent: AgentId; text: string };
+  // Adapter-supplied MCP servers (e.g. Feishu adapter injects a `lark`
+  // MCP bound to the originating chat). Each agent's runner merges these
+  // with its own built-in MCP servers and auto-allows their tools.
+  // Values must be SDK-wrapped (createSdkMcpServer), not raw McpServer.
+  extraMcpServers?: Record<
+    string,
+    import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance
+  >;
 };
 
 export type StartTurnResult = {
@@ -152,9 +160,13 @@ export async function startTurn(
     expanded,
     text: input.text,
     images: input.images ?? [],
+    extraMcpServers: input.extraMcpServers,
   })
     .catch((err) => {
-      console.error(`[group ${gid}] pipeline crash:`, err);
+      console.error(
+        `[group ${gid}] pipeline crash:`,
+        err instanceof Error ? err.stack ?? err.message : err,
+      );
       turn.status = "error";
       turn.errorMsg = err instanceof Error ? err.message : String(err);
       fanout(
@@ -196,8 +208,12 @@ async function runPipeline(args: {
   expanded: AgentId[];
   text: string;
   images: ImageAttachment[];
+  extraMcpServers?: Record<
+    string,
+    import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance
+  >;
 }): Promise<void> {
-  const { turn, config, expanded, text, images } = args;
+  const { turn, config, expanded, text, images, extraMcpServers } = args;
   let pipelineOk = true;
 
   for (let step = 0; step < expanded.length; step++) {
@@ -250,6 +266,7 @@ async function runPipeline(args: {
       agentId,
       signal: turn.abort.signal,
       resumeSessionId,
+      extraMcpServers,
       emitPermission: (payload) => {
         // Fan out as agent_event so the client's applySDKMessage folds it
         // into the live ChatEvent[] (same code path as single chat).
@@ -307,8 +324,10 @@ async function runPipeline(args: {
     let stepEvents: ChatEvent[] = [];
     let stepSessionId: string | undefined;
 
+    let rawCount = 0;
     for await (const ev of runner) {
       if (ev.kind === "raw") {
+        rawCount++;
         // Wrap in agent_event so the client knows which agent it came from.
         fanout(
           turn,
@@ -327,6 +346,9 @@ async function runPipeline(args: {
         stepSessionId = ev.sessionId;
       }
     }
+    console.log(
+      `[orch ${turn.gid}] step=${step} agent=${agentId} ok=${stepOk} rawEvents=${rawCount} stepEvents=${stepEvents.length}${stepError ? ` error=${stepError}` : ""}`,
+    );
 
     // Persist the discovered session id so the next turn can resume
     // (keeps Anthropic prompt cache warm across the conversation).
