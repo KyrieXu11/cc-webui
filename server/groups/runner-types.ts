@@ -1,3 +1,4 @@
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentId } from "./store.ts";
 import type { ChatEvent } from "../../src/lib/types.ts";
 
@@ -37,4 +38,12 @@ export type RunnerCtx = {
   // passes it to the SDK as `resume:` and only sends the catchup
   // prompt (peer replies + new user message) instead of full history.
   resumeSessionId?: string;
+  // Per-turn in-process MCP servers contributed by the caller (e.g. the
+  // Feishu adapter injects a `lark` MCP holding chatId + LarkChannel so
+  // Claude can send files back to the IM chat that initiated the turn).
+  // Merged with built-in mcpServers in the runner; tools under these
+  // namespaces are auto-allowed (they don't touch the user's filesystem).
+  // Values are SDK-wrapped via `createSdkMcpServer`, NOT raw McpServer
+  // instances — the SDK only accepts McpServerConfig shapes.
+  extraMcpServers?: Record<string, McpSdkServerConfigWithInstance>;
 };

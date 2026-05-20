@@ -16,6 +16,7 @@ import {
 import type { ImageAttachment } from "../groups/store.ts";
 import { bridgeTurn } from "./bridge.ts";
 import { getBinding, removeBinding, setBinding } from "./binding.ts";
+import { createLarkMcpServer } from "./lark-mcp.ts";
 import { fetchQuotedContext } from "./quote.ts";
 import {
   defaultCwd,
@@ -482,6 +483,13 @@ export async function handleNormalizedMessage(
         }
       }
 
+      // Per-turn MCP server bound to this chat so Claude can push files /
+      // images back to Feishu under the bot's identity (no OAuth required).
+      const larkMcp = createLarkMcpServer({
+        channel,
+        defaultChatId: chatId,
+      });
+
       let result;
       try {
         result = await startTurn({
@@ -489,6 +497,7 @@ export async function handleNormalizedMessage(
           text: textWithQuote,
           images,
           recipients: [bot.agentId],
+          extraMcpServers: { lark: larkMcp },
         });
       } catch (err) {
         const m = errMsg(err);
@@ -501,13 +510,20 @@ export async function handleNormalizedMessage(
         );
         return;
       }
-      await bridgeTurn({
+      // Fire-and-forget: do NOT await bridgeTurn here. LarkChannel's safety
+      // module serializes events per chat_id — if this handler stays awaiting
+      // bridge until turn_end, a subsequent cardAction (e.g. permission card
+      // click) is queued behind us and never reaches our cardAction handler,
+      // which means the permission never resolves and the turn deadlocks.
+      void bridgeTurn({
         bot,
         channel,
         chatId,
         parentMessageId: messageId,
         gid,
         turn: result.turn,
+      }).catch((err) => {
+        console.error(`[feishu ${bot.key}] bridge crash:`, err);
       });
       return;
     }

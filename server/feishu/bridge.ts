@@ -4,6 +4,12 @@ import type {
   InFlightGroupTurn,
 } from "../groups/orchestrator.ts";
 import type { AgentId } from "../groups/store.ts";
+import {
+  permissionRequestCard,
+  permissionResolvedCard,
+  type PermissionRequestPayload,
+  type PermissionResolvedPayload,
+} from "./cards.ts";
 import type { BotConfig } from "./config.ts";
 
 export type BridgeArgs = {
@@ -31,12 +37,76 @@ type AgentState = {
   // tool_use) replaces it. thinking_delta content itself is never shown.
   thinkingPlaceholderActive: boolean;
   realContentStarted: boolean;
+  // tool_use blocks stream their input as input_json_delta chunks after
+  // content_block_start. We buffer the partial JSON keyed by block index
+  // and emit the formatted tool line only on content_block_stop, when the
+  // input is complete.
+  pendingTools: Map<number, { name: string; inputJson: string }>;
 };
 
 export async function bridgeTurn(args: BridgeArgs): Promise<void> {
   const { channel, chatId, parentMessageId, turn } = args;
 
   const states = new Map<AgentId, AgentState>();
+  // Permission cards live alongside the markdown stream. The map stores the
+  // *Promise* for each card's send so that a permission_resolved arriving
+  // before send completes still awaits the same handle.
+  type PermissionCardEntry = {
+    messageId: string;
+    request: PermissionRequestPayload;
+  };
+  const permissionCards = new Map<string, Promise<PermissionCardEntry | null>>();
+
+  function sendPermissionCard(payload: PermissionRequestPayload): void {
+    console.log(
+      `[feishu bridge] send permission card id=${payload.id} tool=${payload.tool}`,
+    );
+    const promise: Promise<PermissionCardEntry | null> = channel
+      .send(
+        chatId,
+        { card: permissionRequestCard(payload) },
+        { replyTo: parentMessageId },
+      )
+      .then((res) => {
+        console.log(
+          `[feishu bridge] permission card sent id=${payload.id} msg=${res.messageId}`,
+        );
+        return { messageId: res.messageId, request: payload };
+      })
+      .catch((err) => {
+        console.error(`[feishu bridge] send permission card failed:`, err);
+        return null;
+      });
+    permissionCards.set(payload.id, promise);
+  }
+
+  async function updatePermissionCard(
+    payload: PermissionResolvedPayload,
+  ): Promise<void> {
+    console.log(
+      `[feishu bridge] update permission card id=${payload.id} behavior=${payload.behavior} stale=${payload.stale} mapHas=${permissionCards.has(payload.id)}`,
+    );
+    const handle = permissionCards.get(payload.id);
+    if (!handle) return;
+    const entry = await handle;
+    if (!entry) {
+      console.warn(
+        `[feishu bridge] permission card promise resolved to null id=${payload.id}`,
+      );
+      return;
+    }
+    try {
+      await channel.updateCard(
+        entry.messageId,
+        permissionResolvedCard(entry.request, payload),
+      );
+      console.log(
+        `[feishu bridge] permission card updated id=${payload.id} msg=${entry.messageId}`,
+      );
+    } catch (err) {
+      console.error(`[feishu bridge] update permission card failed:`, err);
+    }
+  }
 
   function startStream(agent: AgentId): AgentState {
     const cached = states.get(agent);
@@ -51,6 +121,7 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
       fallback: false,
       thinkingPlaceholderActive: false,
       realContentStarted: false,
+      pendingTools: new Map(),
     };
     const done = new Promise<void>((resolve) => {
       state.resolveProducer = resolve;
@@ -166,6 +237,17 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
       }
       if (event === "agent_event") {
         const agent = data.agent as AgentId;
+        const p = data.payload;
+        // Permission lifecycle bypasses the markdown stream — it gets its
+        // own interactive card instead.
+        if (p?.type === "permission_request") {
+          void sendPermissionCard(p as PermissionRequestPayload);
+          return;
+        }
+        if (p?.type === "permission_resolved") {
+          void updatePermissionCard(p as PermissionResolvedPayload);
+          return;
+        }
         const s = startStream(agent);
         const action = deriveStreamAction(data.payload, s);
         if (!action) return;
@@ -242,18 +324,14 @@ function deriveStreamAction(
       return { kind: "append", text: "\n\n" };
     }
     if (block?.type === "tool_use") {
-      const name = block.name ?? "Tool";
-      const summary = summarizeToolInput(block.input);
-      const header = summary
-        ? `🔧 **${name}** \`${summary}\`\n`
-        : `🔧 **${name}**\n`;
-      if (state.thinkingPlaceholderActive) {
-        state.thinkingPlaceholderActive = false;
-        state.realContentStarted = true;
-        return { kind: "replace", text: header };
-      }
-      state.realContentStarted = true;
-      return { kind: "append", text: `\n\n${header}` };
+      // Don't emit anything yet — params come as `input_json_delta` chunks
+      // after block_start. Buffer name + index, render on block_stop.
+      const index = typeof evt.index === "number" ? evt.index : -1;
+      state.pendingTools.set(index, {
+        name: block.name ?? "Tool",
+        inputJson: "",
+      });
+      return null;
     }
   }
 
@@ -262,9 +340,57 @@ function deriveStreamAction(
     if (d?.type === "text_delta" && typeof d.text === "string") {
       return { kind: "append", text: d.text };
     }
+    if (d?.type === "input_json_delta" && typeof d.partial_json === "string") {
+      const idx = typeof evt.index === "number" ? evt.index : -1;
+      const pending = state.pendingTools.get(idx);
+      if (pending) pending.inputJson += d.partial_json;
+      return null;
+    }
     // thinking_delta intentionally dropped — placeholder is the only signal.
   }
+
+  if (evt?.type === "content_block_stop") {
+    const idx = typeof evt.index === "number" ? evt.index : -1;
+    const pending = state.pendingTools.get(idx);
+    if (!pending) return null;
+    state.pendingTools.delete(idx);
+    let input: unknown = {};
+    try {
+      input = JSON.parse(pending.inputJson || "{}");
+    } catch {
+      /* keep empty input */
+    }
+    const display = prettifyToolName(pending.name);
+    const summary = summarizeToolInput(input);
+    // Function-call style: `bash(cmd)` / `lark.send_file(/path/x)`.
+    // Inline code can't contain literal backticks — strip them to keep
+    // markdown rendering intact.
+    const safeSummary = summary.replace(/`/g, "'");
+    const line = safeSummary
+      ? `🔧 \`${display}(${safeSummary})\``
+      : `🔧 \`${display}()\``;
+    if (state.thinkingPlaceholderActive) {
+      state.thinkingPlaceholderActive = false;
+      state.realContentStarted = true;
+      return { kind: "replace", text: line };
+    }
+    state.realContentStarted = true;
+    return { kind: "append", text: `\n${line}` };
+  }
   return null;
+}
+
+// `mcp__bash__run` → `bash` (drop the canonical `.run` suffix);
+// `mcp__bash__output` → `bash.output`;
+// `mcp__lark__send_file` → `lark.send_file`;
+// built-in tool names (Bash / Read / ToolSearch) stay as-is.
+function prettifyToolName(name: string): string {
+  if (name.startsWith("mcp__")) {
+    const parts = name.slice(5).split("__");
+    if (parts.length === 2 && parts[1] === "run") return parts[0];
+    return parts.join(".");
+  }
+  return name;
 }
 
 function summarizeToolInput(input: unknown): string {
@@ -277,7 +403,10 @@ function summarizeToolInput(input: unknown): string {
     (typeof o.url === "string" && o.url) ||
     (typeof o.query === "string" && o.query) ||
     (typeof o.pattern === "string" && o.pattern) ||
+    (typeof o.text === "string" && o.text) ||
+    (typeof o.chat_id === "string" && o.chat_id) ||
     "";
   if (!candidate) return "";
-  return candidate.length > 60 ? candidate.slice(0, 60) + "…" : candidate;
+  const oneLine = candidate.replace(/\s+/g, " ").trim();
+  return oneLine.length > 80 ? oneLine.slice(0, 80) + "…" : oneLine;
 }
