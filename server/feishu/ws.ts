@@ -27,6 +27,14 @@ export async function startChannel(bot: BotConfig): Promise<void> {
       dedup: { ttl: 5 * 60_000, maxEntries: 4096 },
       staleMessageWindowMs: 30_000,
     },
+    outbound: {
+      // SDK default is 100ms / 50 chars per stream flush. Tighten both so
+      // Claude's token-by-token output feels closer to a real typewriter
+      // and stays roughly in sync with permission cards (which post as a
+      // separate message and bypass throttling).
+      streamThrottleMs: 50,
+      streamThrottleChars: 8,
+    },
   });
 
   channel.on("message", async (msg) => {
