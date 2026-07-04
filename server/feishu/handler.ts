@@ -3,17 +3,19 @@ import type * as lark from "@larksuiteoapi/node-sdk";
 import {
   readConfig,
   writeConfig,
+  defaultParticipant,
   type GroupEffort,
   type GroupMode,
 } from "../groups/config.ts";
 import { createGroup, relocateGroup } from "../groups/lifecycle.ts";
-import { readIndex } from "../groups/store.ts";
+import { readIndex, readAll } from "../groups/store.ts";
+import { clearAgentSessionId } from "../groups/runtime.ts";
 import {
   getInFlightTurn,
   startTurn,
   stopTurn,
 } from "../groups/orchestrator.ts";
-import type { ImageAttachment } from "../groups/store.ts";
+import type { ImageAttachment, AgentId } from "../groups/store.ts";
 import { bridgeTurn } from "./bridge.ts";
 import { getBinding, removeBinding, setBinding } from "./binding.ts";
 import { createLarkMcpServer } from "./lark-mcp.ts";
@@ -82,13 +84,54 @@ async function isAccessibleDir(p: string): Promise<boolean> {
 async function createBoundGroup(
   chatId: string,
   cwd: string,
+  soloAgent?: AgentId,
 ): Promise<string> {
   const id = await createGroup({
     title: `飞书 ${chatId.slice(-6)}`,
     cwd,
+    // A p2p (1:1) chat is single-agent — create a 1-participant session for
+    // the bot being talked to, not a 2-agent group with a phantom peer.
+    ...(soloAgent
+      ? { participants: [defaultParticipant(soloAgent)], pipeline: [soloAgent] }
+      : {}),
   });
   await setBinding(chatId, id);
   return id;
+}
+
+// Migrate a pre-existing p2p chat's group to the single-agent shape. Older
+// p2p chats were created as 2-participant groups before single-agent sessions
+// existed; on the next message we trim the bound group down to just the agent
+// that's actually reachable in a p2p chat. The transcript is left untouched —
+// only the config's participants/pipeline change. Skips groups where the other
+// agent actually has history (e.g. a p2p chat manually /bind-ed to a real
+// 2-agent web group) so we never orphan that agent's replies.
+async function normalizeSoloGroup(
+  gid: string,
+  agentId: AgentId,
+): Promise<void> {
+  let cfg;
+  try {
+    cfg = await readConfig(gid);
+  } catch {
+    return;
+  }
+  if (cfg.participants.length <= 1) return;
+  const keep = cfg.participants.find((p) => p.id === agentId);
+  if (!keep) return;
+  const dropped = cfg.participants.filter((p) => p.id !== agentId);
+  const transcript = await readAll(gid);
+  const droppedHasHistory = transcript.some(
+    (e) =>
+      e.event?.type === "assistant" && dropped.some((d) => d.id === e.agent),
+  );
+  if (droppedHasHistory) return;
+  cfg.participants = [keep];
+  cfg.pipeline = [agentId];
+  cfg.updatedAt = Date.now();
+  await writeConfig(cfg);
+  for (const d of dropped) await clearAgentSessionId(gid, d.id);
+  console.log(`[feishu] migrated p2p group ${gid} → solo [${agentId}]`);
 }
 
 // Entry point invoked from ws.ts on each normalized message event.
@@ -110,6 +153,11 @@ export async function handleNormalizedMessage(
   console.log(
     `[feishu ${bot.key}] inbound chat_type=${msg.chatType} chat_id=${chatId} mid=${messageId} mentionedBot=${msg.mentionedBot}`,
   );
+
+  // A Feishu p2p (1:1) chat is a single-agent session — only the DMed bot can
+  // ever run. Group chats stay multi-agent (default 2 participants).
+  const soloAgent: AgentId | undefined =
+    msg.chatType === "p2p" ? bot.agentId : undefined;
 
   const cmd = parseCommand(text);
   switch (cmd.kind) {
@@ -177,7 +225,7 @@ export async function handleNormalizedMessage(
       const gid = await getBinding(chatId);
       if (!gid) {
         // No binding yet — fresh start at target cwd.
-        const newGid = await createBoundGroup(chatId, target);
+        const newGid = await createBoundGroup(chatId, target, soloAgent);
         await reply(
           channel,
           messageId,
@@ -215,7 +263,7 @@ export async function handleNormalizedMessage(
           await reply(channel, messageId, `⚠️ 目录不存在或不可读: ${target}`);
           return;
         }
-        const gid = await createBoundGroup(chatId, target);
+        const gid = await createBoundGroup(chatId, target, soloAgent);
         await reply(
           channel,
           messageId,
@@ -233,7 +281,7 @@ export async function handleNormalizedMessage(
           /* fall back to default */
         }
       }
-      const gid = await createBoundGroup(chatId, cwd);
+      const gid = await createBoundGroup(chatId, cwd, soloAgent);
       await reply(
         channel,
         messageId,
@@ -469,10 +517,14 @@ export async function handleNormalizedMessage(
     case "chat": {
       let gid = await getBinding(chatId);
       if (!gid) {
-        gid = await createBoundGroup(chatId, defaultCwd());
+        gid = await createBoundGroup(chatId, defaultCwd(), soloAgent);
         console.log(
           `[feishu ${bot.key}] auto-created group ${gid} for chat ${chatId} cwd=${defaultCwd()}`,
         );
+      } else if (soloAgent) {
+        // Existing p2p chat created before single-agent sessions existed —
+        // trim the bound group to the reachable agent on first use.
+        await normalizeSoloGroup(gid, soloAgent);
       }
 
       // Pull images + text from the message the user is replying-to, if any.

@@ -232,6 +232,48 @@ assert.equal(peerLabel("codex"), "Codex");
   assert.match(sys, /Codex/);
 }
 
+// Solo (single-agent) session: no group preamble, no "群聊" framing
+{
+  const soloConfig: GroupConfig = {
+    ...config,
+    participants: [
+      {
+        id: "claude",
+        model: "claude-opus-4-8",
+        systemPrompt: "你是助手",
+        skills: [],
+        mcpServers: [],
+      },
+    ],
+    pipeline: ["claude"],
+  };
+  // only the agent's own prompt — no multi-agent preamble
+  const sys = systemPromptFor({ config: soloConfig, target: "claude" });
+  assert.equal(sys, "你是助手");
+  assert.doesNotMatch(sys, /群聊/);
+  assert.doesNotMatch(sys, /其他参与者/);
+
+  // empty own prompt → empty (SDK default), NOT the group preamble
+  const soloBlank: GroupConfig = {
+    ...soloConfig,
+    participants: [
+      { id: "claude", model: "x", systemPrompt: "", skills: [], mcpServers: [] },
+    ],
+  };
+  assert.equal(systemPromptFor({ config: soloBlank, target: "claude" }), "");
+
+  // buildPrompt uses neutral framing (no "群聊") for a solo session
+  const prompt = buildPrompt({
+    transcript: [userEntry("u1"), assistantEntry("claude", "a1")],
+    target: "claude",
+    currentText: "go",
+    config: soloConfig,
+  });
+  assert.match(prompt, /\[对话历史\]/);
+  assert.match(prompt, /\[当前消息\]/);
+  assert.doesNotMatch(prompt, /群聊/);
+}
+
 // ============================================================
 // buildResumeCatchup — diff-only prompt for resumed sessions
 // ============================================================

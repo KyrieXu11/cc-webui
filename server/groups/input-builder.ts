@@ -59,11 +59,13 @@ export function buildPrompt(args: BuildPromptArgs): string {
 
   if (!hasHistory) return currentText;
 
+  // Single-agent session → neutral framing (no "群聊" wording).
+  const solo = args.config.participants.length <= 1;
   return [
-    "[群聊历史]",
+    solo ? "[对话历史]" : "[群聊历史]",
     ...lines,
     "",
-    "[当前用户消息]",
+    solo ? "[当前消息]" : "[当前用户消息]",
     currentText,
   ].join("\n\n");
 }
@@ -163,6 +165,12 @@ export function systemPromptFor(args: {
     : "另一方";
 
   const own = me?.systemPrompt?.trim() ?? "";
+
+  // Solo session (single participant, e.g. a Feishu p2p chat with one bot):
+  // there is no peer, so skip the multi-agent group preamble entirely — just
+  // use the agent's own system prompt (empty → SDK default). Without this a
+  // single chat would be told it's in a group with a phantom peer.
+  if (!peer) return own;
 
   const groupPreamble = [
     "你正在参与一个多 agent 群聊。",

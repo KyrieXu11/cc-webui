@@ -21,11 +21,15 @@ export async function createGroup(opts: {
 }): Promise<string> {
   const id = newGroupId();
   const skeleton = defaultConfig({ id, title: opts.title, cwd: opts.cwd });
+  const participants = opts.participants ?? skeleton.participants;
   const cfg: GroupConfig = {
     ...skeleton,
     id,
-    participants: opts.participants ?? skeleton.participants,
-    pipeline: opts.pipeline ?? skeleton.pipeline,
+    participants,
+    // Default the pipeline to the participants' own order — otherwise a
+    // single-participant override would inherit the 2-agent skeleton pipeline
+    // and fail validation (pipeline length must match participants).
+    pipeline: opts.pipeline ?? participants.map((p) => p.id),
   };
   validateConfig(cfg);
   await writeConfig(cfg);
