@@ -43,12 +43,31 @@ try {
   // accepts valid
   assert.doesNotThrow(() => validateConfig(baseConfig()));
 
-  // rejects participants.length != 2
-  assert.throws(() => {
+  // accepts a single-participant (single-agent) config
+  assert.doesNotThrow(() => {
     const c = baseConfig();
     c.participants = [c.participants[0]] as any;
+    c.pipeline = ["claude"] as any;
     validateConfig(c);
-  }, /exactly 2 participants/);
+  });
+
+  // rejects 0 participants
+  assert.throws(() => {
+    const c = baseConfig();
+    c.participants = [] as any;
+    validateConfig(c);
+  }, /1 or 2 participants/);
+
+  // rejects >2 participants (length check fires before the id checks)
+  assert.throws(() => {
+    const c = baseConfig();
+    c.participants = [
+      c.participants[0],
+      c.participants[1],
+      { ...c.participants[0] },
+    ] as any;
+    validateConfig(c);
+  }, /1 or 2 participants/);
 
   // rejects duplicate ids
   assert.throws(() => {

@@ -47,8 +47,14 @@ export function validateConfig(c: GroupConfig): void {
   if (!c.cwd || typeof c.cwd !== "string") {
     throw new Error("config.cwd required");
   }
-  if (!Array.isArray(c.participants) || c.participants.length !== 2) {
-    throw new Error("config requires exactly 2 participants");
+  if (
+    !Array.isArray(c.participants) ||
+    c.participants.length < 1 ||
+    c.participants.length > 2
+  ) {
+    // 1 participant = single-agent session (e.g. a Feishu p2p chat with one
+    // bot); 2 = multi-agent group. v1 caps at 2.
+    throw new Error("config requires 1 or 2 participants");
   }
   const ids = c.participants.map((p) => p.id);
   if (new Set(ids).size !== ids.length) {
@@ -92,6 +98,31 @@ export async function readConfig(gid: string): Promise<GroupConfig> {
   return parsed;
 }
 
+// Default Participant template for one agent. Exported so non-group callers
+// (e.g. the Feishu adapter creating a single-agent session for a p2p chat)
+// can build a 1-participant config without duplicating model/effort defaults.
+export function defaultParticipant(id: AgentId): Participant {
+  if (id === "claude") {
+    return {
+      id: "claude",
+      model: "claude-opus-4-8",
+      mode: "default",
+      effort: "xhigh",
+      systemPrompt: "",
+      skills: [],
+      mcpServers: ["bash"],
+    };
+  }
+  return {
+    id: "codex",
+    model: "gpt-5.5",
+    effort: "xhigh",
+    systemPrompt: "",
+    skills: [],
+    mcpServers: ["bash"],
+  };
+}
+
 export function defaultConfig(opts: {
   id: string;
   title: string;
@@ -104,25 +135,7 @@ export function defaultConfig(opts: {
     cwd: opts.cwd,
     createdAt: now,
     updatedAt: now,
-    participants: [
-      {
-        id: "claude",
-        model: "claude-opus-4-8",
-        mode: "default",
-        effort: "xhigh",
-        systemPrompt: "",
-        skills: [],
-        mcpServers: ["bash"],
-      },
-      {
-        id: "codex",
-        model: "gpt-5.5",
-        effort: "xhigh",
-        systemPrompt: "",
-        skills: [],
-        mcpServers: ["bash"],
-      },
-    ],
+    participants: [defaultParticipant("claude"), defaultParticipant("codex")],
     pipeline: ["claude", "codex"],
   };
 }
