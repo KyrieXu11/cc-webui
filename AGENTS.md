@@ -80,16 +80,26 @@ npm test           # tsx --test "server/**/*.test.ts"（8 个测试文件，纯 
 - 权限：`permissionMode: default` 时每个工具弹卡；`本次会话都允许` 缓存进 `permission-flow` 的
   allowance Set（scope = sessionId）；10 分钟无响应自动 deny。
 
-### 3. 多 agent 群聊（`server/groups/`）
-- 独立于单聊。canonical 真相是 `~/.cc-webui/groups/<gid>/transcript.jsonl`（append-only）。
-- `store.ts` 读写 jsonl + `index.json`；`config.ts` 群配置 + 校验（**必须恰好 2 个 participant：claude+codex**）；
-  `lifecycle.ts` 群 CRUD；`runtime.ts` in-flight 运行态 + per-agent session id 持久化。
+### 3. 会话引擎：群聊 + 单 agent 会话（`server/groups/`）
+- **会话模型**：一个会话有 **1 或 2 个 agent**。2 个 = 群聊（Claude + Codex 协作）；1 个 = 单 agent
+  会话（如飞书 p2p 私聊，只有一个 bot）。`gid` 是会话 id。（v1 上限 2 个。）
+- 独立于网页单聊。canonical 真相是 `~/.cc-webui/groups/<gid>/transcript.jsonl`（append-only），
+  格式与 agent 数无关。
+- `store.ts` 读写 jsonl + `index.json`；`config.ts` 会话配置 + 校验（**1 或 2 个 participant**，id ∈
+  {claude, codex} 且唯一；`defaultParticipant(id)` 造单个）；`lifecycle.ts` CRUD（`createGroup` 可传
+  participants，pipeline 缺省按 participants 顺序推导）；`runtime.ts` in-flight 运行态 + per-agent
+  native session id 持久化。
 - `input-builder.ts`（纯函数，最关键）把 transcript 渲染成给某个 agent 的 prompt；跨 agent 发言以
-  `[来自 X 的回复]` 前缀注入；**不重放工具历史**（只给结论文字）。
-- `orchestrator.ts` 编排：`@claude`/`@codex` 单点，`@all` 按 `config.pipeline` 顺序跑（默认 Claude→Codex）。
-- `claude-runner.ts` / `codex-runner.ts` 单次 SDK 调用；输出直接是 `ChatEvent`（**和单聊同构**），
-  orchestrator 原样 fan-out 到 SSE。
-- ⚠️ **实现已偏离 spec**：现在用**隐藏的 native session resume 做 prompt 缓存**（不是 spec 说的纯 single-shot
+  `[来自 X 的回复]` 前缀注入；**不重放工具历史**（只给结论文字）。**单 agent 会话没有 peer**，会
+  跳过"多 agent 群聊"系统前言 + 跨注入框架（单聊不会被塞群聊人格）。
+- `orchestrator.ts` 编排：`@claude`/`@codex` 单点，`@all` 按 `config.pipeline` 顺序跑；每 agent 单次
+  SDK 调用。**session/thread 失效自愈**：resume 的 native session（Claude）/ thread（Codex）不存在时
+  （"No conversation found" / "no rollout found"），清掉坏 id + 用全量历史起新会话重跑一次。
+- `claude-runner.ts` / `codex-runner.ts` 输出直接是 `ChatEvent`（**和网页单聊同构**），orchestrator
+  原样 fan-out 到 SSE。
+- **飞书 p2p → 单 agent**：新 p2p 聊直接建 1-participant 会话；已有的 2-agent p2p 群在**下条消息惰性
+  裁剪**成单 agent（`handler.normalizeSoloGroup`，护栏：被删 agent 若有历史则跳过，不孤立其回复）。
+- ⚠️ **已偏离 spec**：现在用**隐藏 native session resume 做 prompt 缓存**（非 spec 的纯 single-shot
   全量重放）——`input-builder` 有 `buildResumeCatchup` 增量路径。改这块前先读代码，别信 spec。
 
 ### 4. 飞书机器人（`server/feishu/`，**仅 WS 模式**）
@@ -174,6 +184,7 @@ npm test           # tsx --test "server/**/*.test.ts"（8 个测试文件，纯 
 | runner 放 `server/shared/` | 在 `server/groups/`（plan 已改，spec 图没改） |
 | 抽 `server/shared/inflight.ts`（plan Task 5） | **没抽**；单聊仍用 `chat.ts` 内联注册表，群聊用 `runtime.ts`/`lifecycle.ts`，两套并行 |
 | 群聊纯 single-shot、不用 native resume | 现在**用隐藏 native session resume 做 prompt 缓存** + `buildResumeCatchup` 增量 |
+| 会话固定 2 participants（claude+codex） | 现在 **1..2**：1 个 = 单 agent 会话（飞书 p2p 自动建/迁移），2 个 = 群聊 |
 | `NewGroupDialog.tsx` | 实际是 `GroupConfigDialog.tsx`；另有 `AgentTunePopover` / `GroupSidebar` |
 | runner 用独立 `RunnerEvent` 类型 | 收敛成直接吐 `ChatEvent`（`runner-types.ts`） |
 | 飞书 webhook 模式「保留但可能落后」 | **未实现**（见上） |
