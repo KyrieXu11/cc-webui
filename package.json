@@ -8,15 +8,16 @@
     "build": "vite build",
     "start": "npm run build && NODE_ENV=production tsx server/index.ts",
     "serve": "npm start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"server/**/*.test.ts\""
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.116",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.201",
     "@hono/node-server": "^1.13.0",
     "@larksuite/cli": "^1.0.33",
     "@larksuiteoapi/node-sdk": "^1.64.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@openai/codex-sdk": "^0.125.0",
+    "@openai/codex-sdk": "^0.142.5",
     "hono": "^4.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

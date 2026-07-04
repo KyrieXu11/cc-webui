@@ -107,7 +107,7 @@ export function defaultConfig(opts: {
     participants: [
       {
         id: "claude",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
         mode: "default",
         effort: "xhigh",
         systemPrompt: "",
@@ -116,7 +116,7 @@ export function defaultConfig(opts: {
       },
       {
         id: "codex",
-        model: "gpt-5.3-codex",
+        model: "gpt-5.5",
         effort: "xhigh",
         systemPrompt: "",
         skills: [],

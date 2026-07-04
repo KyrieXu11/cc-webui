@@ -1,5 +1,6 @@
 export type PermissionMode =
   | "default"
+  | "auto"
   | "acceptEdits"
   | "plan"
   | "bypassPermissions";
@@ -80,19 +81,22 @@ export const PROVIDER_OPTIONS: Array<{
 
 const CLAUDE_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
-    { id: "claude-opus-4-7", label: "claude-opus-4-7", hint: "Opus 4.7 · 最强 · 较慢" },
+    { id: "claude-fable-5", label: "claude-fable-5", hint: "Fable 5 · Mythos 级 · 最强" },
+    { id: "claude-opus-4-8", label: "claude-opus-4-8", hint: "Opus 4.8 · 旗舰 · 深度推理" },
     { id: "claude-sonnet-4-6", label: "claude-sonnet-4-6", hint: "Sonnet 4.6 · 均衡" },
     { id: "claude-haiku-4-5", label: "claude-haiku-4-5", hint: "Haiku 4.5 · 快 · 便宜" },
   ];
 
-// Legacy short aliases used in older saved data ("opus" → "claude-opus-4-7"),
+// Legacy short aliases used in older saved data ("opus" → latest Opus),
 // kept so dropdown / label rendering doesn't show raw "opus" in places that
 // were saved before this rename. The Claude SDK accepts both forms; we
-// surface the canonical full name everywhere in the UI now.
+// surface the canonical full name everywhere in the UI now. Bare aliases
+// track the latest model of each family (same policy as the Feishu bridge).
 const CLAUDE_LEGACY_ALIAS: Record<string, string> = {
-  opus: "claude-opus-4-7",
+  opus: "claude-opus-4-8",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5",
+  fable: "claude-fable-5",
 };
 
 export function canonicalizeClaudeModel(id: string): string {
@@ -132,6 +136,7 @@ export const MODE_OPTIONS: Array<{
   hint: string;
 }> = [
   { id: "default", label: "Default", hint: "每次弹权限" },
+  { id: "auto", label: "Auto", hint: "模型判断，仅存疑时才问" },
   { id: "acceptEdits", label: "Accept Edits", hint: "自动批 Edit/Write" },
   { id: "plan", label: "Plan", hint: "只规划不执行" },
   { id: "bypassPermissions", label: "Bypass", hint: "全部放行（危险）" },
@@ -176,9 +181,17 @@ function isCodexModel(model: string): boolean {
   return CODEX_MODEL_OPTIONS.some((m) => m.id === model);
 }
 
+// Claude models whose effort selector exposes the xhigh tier
+// (top-tier reasoning models: Opus 4.7/4.8 and Fable 5).
+const XHIGH_CLAUDE_MODELS = new Set([
+  "claude-opus-4-7",
+  "claude-opus-4-8",
+  "claude-fable-5",
+]);
+
 export function supportsXhighEffort(model: string): boolean {
   const canonical = canonicalizeClaudeModel(model);
-  if (canonical === "claude-opus-4-7") return true;
+  if (XHIGH_CLAUDE_MODELS.has(canonical)) return true;
   return isCodexModel(model);
 }
 
@@ -186,8 +199,10 @@ export function availableEffortOptions(model: string) {
   const codex = isCodexModel(model);
   const canonical = canonicalizeClaudeModel(model);
   return EFFORT_OPTIONS.filter((o) => {
-    // xhigh: only Opus + Codex models
-    if (o.xhighTier && canonical !== "claude-opus-4-7" && !codex) return false;
+    // xhigh: only top-tier Claude (Opus/Fable) + Codex models
+    if (o.xhighTier && !XHIGH_CLAUDE_MODELS.has(canonical) && !codex) {
+      return false;
+    }
     // max: Claude-only (Codex's top tier IS xhigh)
     if (o.claudeOnly && codex) return false;
     return true;

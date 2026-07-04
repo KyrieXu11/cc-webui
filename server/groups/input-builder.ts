@@ -171,6 +171,7 @@ export function systemPromptFor(args: {
       peer ? peerLabel(peer.id) : "对方"
     } 的回复]"前缀的 USER 消息形式出现在历史里 —— 那不是真实用户说的，是另一个 agent 说的，你可以认同 / 反驳 / 补充。`,
     '本次群聊的实际用户（人）只通过不带前缀的 "USER:" 出现。',
+    "如果当前环境提供 lark MCP 工具，并且你需要主动通知 / 交接任务给某个人或机器人，可以用 lark.list_chat_members 获取人的 open_id，用 lark.list_mention_targets 查看已知机器人 / 别名，然后用 lark.send_text 的 mention_open_ids 或 mention_targets 发送真正的飞书 @ 消息。",
   ].join("\n");
 
   return own ? `${own}\n\n---\n${groupPreamble}` : groupPreamble;

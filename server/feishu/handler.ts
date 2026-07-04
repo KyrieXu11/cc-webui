@@ -28,10 +28,21 @@ import {
   parseCommand,
 } from "./parse.ts";
 
-const MODEL_ALIASES: Record<string, string> = {
-  opus: "claude-opus-4-7",
-  sonnet: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5-20251001",
+const MODEL_ALIASES: Record<BotConfig["agentId"], Record<string, string>> = {
+  claude: {
+    opus: "claude-opus-4-8", // bare alias tracks the latest Opus
+    "opus4.8": "claude-opus-4-8",
+    "opus-4.8": "claude-opus-4-8",
+    "opus4.7": "claude-opus-4-7",
+    "opus-4.7": "claude-opus-4-7",
+    sonnet: "claude-sonnet-4-6",
+    haiku: "claude-haiku-4-5-20251001",
+  },
+  codex: {
+    codex: "gpt-5.5",
+    full: "gpt-5.5",
+    mini: "gpt-5.1-codex-mini",
+  },
 };
 
 const VALID_EFFORTS: readonly GroupEffort[] = [
@@ -55,8 +66,8 @@ const MODE_ALIASES: Record<string, GroupMode> = {
   deny: "dontAsk",
 };
 
-function resolveModelName(input: string): string {
-  return MODEL_ALIASES[input.toLowerCase()] ?? input;
+function resolveModelName(agentId: BotConfig["agentId"], input: string): string {
+  return MODEL_ALIASES[agentId][input.toLowerCase()] ?? input;
 }
 
 async function isAccessibleDir(p: string): Promise<boolean> {
@@ -243,7 +254,7 @@ export async function handleNormalizedMessage(
         await reply(channel, messageId, `🤖 当前模型: ${participant.model}`);
         return;
       }
-      participant.model = resolveModelName(cmd.name);
+      participant.model = resolveModelName(bot.agentId, cmd.name);
       ctx.cfg.updatedAt = Date.now();
       try {
         await writeConfig(ctx.cfg);
@@ -476,15 +487,21 @@ export async function handleNormalizedMessage(
           const quoted = q.text.replace(/\n/g, "\n> ");
           textWithQuote = `> [引用]: ${quoted}\n\n${cmd.text}`;
         }
+        if (q.imagePaths.length > 0) {
+          const lines = q.imagePaths.map((p) => `  - ${p}`).join("\n");
+          textWithQuote += `\n\n[引用消息附带 ${q.imagePaths.length} 张图片已落盘:\n${lines}\n你既能通过 vision 直接看图内容；如果用户要求保存/复制到别的路径，用 Bash cp 这些源文件即可。]`;
+        }
         if (images.length > 0 || q.text) {
           console.log(
-            `[feishu ${bot.key}] quoted ${msg.replyToMessageId}: ${images.length} image(s), ${q.text.length} char text`,
+            `[feishu ${bot.key}] quoted ${msg.replyToMessageId}: ${images.length} image(s) @ ${q.imagePaths[0] ?? "?"}, ${q.text.length} char text`,
           );
         }
       }
 
-      // Per-turn MCP server bound to this chat so Claude can push files /
-      // images back to Feishu under the bot's identity (no OAuth required).
+      // Per-turn MCP server/context bound to this chat so the active agent can
+      // push files / images back to Feishu under the bot's identity (no OAuth
+      // required). Claude consumes the in-process SDK server; Codex consumes
+      // the HTTP MCP route backed by codexMcp.lark.
       const larkMcp = createLarkMcpServer({
         channel,
         defaultChatId: chatId,
@@ -498,6 +515,7 @@ export async function handleNormalizedMessage(
           images,
           recipients: [bot.agentId],
           extraMcpServers: { lark: larkMcp },
+          codexMcp: { lark: { channel, defaultChatId: chatId } },
         });
       } catch (err) {
         const m = errMsg(err);

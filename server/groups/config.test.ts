@@ -29,7 +29,7 @@ const baseConfig = () => ({
     },
     {
       id: "codex" as const,
-      model: "gpt-5.3-codex",
+      model: "gpt-5.5",
       effort: "medium" as const,
       systemPrompt: "你是 reviewer",
       skills: [],

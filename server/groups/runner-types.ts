@@ -1,6 +1,7 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentId } from "./store.ts";
 import type { ChatEvent } from "../../src/lib/types.ts";
+import type { CodexLarkContext } from "../codex-mcp-context.ts";
 
 // All runner output flows as raw SDK events that the orchestrator
 // forwards to the client SSE channel verbatim — the frontend's
@@ -24,6 +25,11 @@ export type RunnerEvent =
       // emits back (usually unchanged). Orchestrator persists this to
       // runtime.json so the next turn can pass it as `resume:`.
       sessionId?: string;
+      // Set when the run failed specifically because `resume:` pointed at a
+      // session the SDK no longer has ("No conversation found with session
+      // ID ..."). Signals the orchestrator to forget the persisted id and
+      // retry once with a fresh session + full history instead of bricking.
+      sessionNotFound?: boolean;
     };
 
 export type RunnerCtx = {
@@ -46,4 +52,10 @@ export type RunnerCtx = {
   // Values are SDK-wrapped via `createSdkMcpServer`, NOT raw McpServer
   // instances — the SDK only accepts McpServerConfig shapes.
   extraMcpServers?: Record<string, McpSdkServerConfigWithInstance>;
+  // Codex consumes MCP servers over HTTP rather than in-process SDK
+  // instances. Adapter-supplied context (currently Feishu/Lark send tools)
+  // is stored behind the same bearer token used by the Codex MCP routes.
+  codexMcp?: {
+    lark?: CodexLarkContext;
+  };
 };

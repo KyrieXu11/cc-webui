@@ -49,6 +49,16 @@ function mapMode(mode: string | undefined): {
   return { sandboxMode: "workspace-write", approvalPolicy: "never" };
 }
 
+// Codex surfaces resuming a thread it no longer has as an error like:
+// "thread/resume: thread/resume failed: no rollout found for thread id <id>".
+// Detect it so the orchestrator can drop the dead thread id and retry with
+// a fresh thread + full history (mirrors the Claude "No conversation found
+// with session ID" self-heal path).
+function isThreadNotFound(msg: string | undefined): boolean {
+  if (!msg) return false;
+  return /no rollout found for thread|thread\/resume failed/i.test(msg);
+}
+
 export async function* runCodex(args: {
   config: GroupConfig;
   participant: Participant;
@@ -70,6 +80,7 @@ export async function* runCodex(args: {
     token: mcpToken,
     sessionId: scope,
     cwd: config.cwd,
+    lark: ctx.codexMcp?.lark,
   });
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cc-webui-group-codex-"));
@@ -103,7 +114,12 @@ export async function* runCodex(args: {
     }
 
     const codex = new Codex({
-      config: createCodexMcpConfig(getCodexMcpUrl()),
+      config: createCodexMcpConfig({
+        bashUrl: getCodexMcpUrl(process.env, "bash"),
+        larkUrl: ctx.codexMcp?.lark
+          ? getCodexMcpUrl(process.env, "lark")
+          : undefined,
+      }),
       env: createCodexMcpEnv(mcpToken),
     });
 
@@ -141,12 +157,16 @@ export async function* runCodex(args: {
       if (anyEv.type === "turn.completed" || anyEv.type === "turn.failed") {
         if (anyEv.type === "turn.failed") {
           const errMsg = anyEv.error?.message ?? "turn failed";
+          const notFound = isThreadNotFound(errMsg);
           yield {
             kind: "ended",
             ok: false,
             error: errMsg,
             events,
-            sessionId: capturedThreadId,
+            // On a stale-thread resume, don't hand the dead id back for
+            // persistence; the orchestrator clears it and retries fresh.
+            sessionId: notFound ? undefined : capturedThreadId,
+            sessionNotFound: notFound,
           };
           return;
         }
@@ -163,12 +183,20 @@ export async function* runCodex(args: {
     yield { kind: "ended", ok: true, events, sessionId: capturedThreadId };
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
+    const errMsg = String((err as Error)?.message ?? err);
+    const notFound = !aborted && isThreadNotFound(errMsg);
     yield {
       kind: "ended",
-      ok: !aborted,
-      error: aborted ? "aborted" : String((err as Error)?.message ?? err),
+      // Any thrown error is a failed turn (was `!aborted`, which wrongly
+      // marked genuine exceptions ok:true — so the orchestrator neither
+      // surfaced them nor triggered the stale-thread self-heal).
+      ok: false,
+      error: aborted ? "aborted" : errMsg,
       events,
-      sessionId: capturedThreadId,
+      // On a stale-thread resume, drop the dead id so the orchestrator
+      // retries with a fresh thread instead of re-persisting a bad id.
+      sessionId: notFound ? undefined : capturedThreadId,
+      sessionNotFound: notFound,
     };
   } finally {
     await cleanup();

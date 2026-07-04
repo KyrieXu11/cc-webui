@@ -1,7 +1,15 @@
+import type * as lark from "@larksuiteoapi/node-sdk";
+
+export type CodexLarkContext = {
+  channel: lark.LarkChannel;
+  defaultChatId: string;
+};
+
 interface CodexMcpContext {
   token: string;
   sessionId: string;
   cwd?: string;
+  lark?: CodexLarkContext;
   createdAt: number;
 }
 
@@ -11,11 +19,13 @@ export function registerCodexMcpContext(opts: {
   token: string;
   sessionId: string;
   cwd?: string;
+  lark?: CodexLarkContext;
 }): void {
   contexts.set(opts.token, {
     token: opts.token,
     sessionId: opts.sessionId,
     cwd: opts.cwd,
+    lark: opts.lark,
     createdAt: Date.now(),
   });
 }
@@ -44,4 +54,3 @@ export function extractBearerToken(header: string | undefined): string | null {
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   return match?.[1] ?? null;
 }
-

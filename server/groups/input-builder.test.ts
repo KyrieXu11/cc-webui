@@ -16,7 +16,7 @@ const config: GroupConfig = {
   updatedAt: 0,
   participants: [
     { id: "claude", model: "claude-opus-4-7", skills: [], mcpServers: [] },
-    { id: "codex", model: "gpt-5.3-codex", skills: [], mcpServers: [] },
+    { id: "codex", model: "gpt-5.5", skills: [], mcpServers: [] },
   ],
   pipeline: ["claude", "codex"],
 };
@@ -209,7 +209,7 @@ assert.equal(peerLabel("codex"), "Codex");
       },
       {
         id: "codex",
-        model: "gpt-5.3-codex",
+        model: "gpt-5.5",
         systemPrompt: "你是 reviewer",
         skills: [],
         mcpServers: [],

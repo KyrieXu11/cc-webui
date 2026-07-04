@@ -484,6 +484,17 @@ export default function App() {
           );
           return;
         }
+        if (msg?.type === "system" && msg.subtype === "api_retry") {
+          // Same retry banner as the initiating-stream path in handleSend —
+          // a refresh mid-retry should keep showing the countdown.
+          setRetryInfo({
+            attempt: msg.attempt ?? 0,
+            maxRetries: msg.max_retries ?? 0,
+            retryDelayMs: msg.retry_delay_ms ?? 0,
+            errorStatus: msg.error_status ?? null,
+          });
+          return;
+        }
         if (msg?.type === "system" && msg.subtype === "init") {
           if (Array.isArray(msg.slash_commands)) {
             setSlashCommands(msg.slash_commands);
@@ -492,6 +503,7 @@ export default function App() {
             setSkills(msg.skills);
           }
         }
+        setRetryInfo((cur) => (cur ? null : cur));
         setAllEvents((prev) =>
           applySDKMessage(
             ensureActiveTurnUserEvent(

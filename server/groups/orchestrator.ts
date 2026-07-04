@@ -6,6 +6,7 @@ import { readConfig } from "./config.ts";
 import {
   getAgentSessionId,
   setAgentSessionId,
+  clearAgentSessionId,
 } from "./runtime.ts";
 import type { ChatEvent } from "../../src/lib/types.ts";
 import {
@@ -19,6 +20,7 @@ import {
   type ImageAttachment,
 } from "./store.ts";
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
+import type { CodexLarkContext } from "../codex-mcp-context.ts";
 
 // ============================================================
 // Group turn state + in-flight registry
@@ -81,6 +83,9 @@ export type StartTurnInput = {
     string,
     import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance
   >;
+  codexMcp?: {
+    lark?: CodexLarkContext;
+  };
 };
 
 export type StartTurnResult = {
@@ -161,6 +166,7 @@ export async function startTurn(
     text: input.text,
     images: input.images ?? [],
     extraMcpServers: input.extraMcpServers,
+    codexMcp: input.codexMcp,
   })
     .catch((err) => {
       console.error(
@@ -212,8 +218,12 @@ async function runPipeline(args: {
     string,
     import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance
   >;
+  codexMcp?: {
+    lark?: CodexLarkContext;
+  };
 }): Promise<void> {
-  const { turn, config, expanded, text, images, extraMcpServers } = args;
+  const { turn, config, expanded, text, images, extraMcpServers, codexMcp } =
+    args;
   let pipelineOk = true;
 
   for (let step = 0; step < expanded.length; step++) {
@@ -260,13 +270,14 @@ async function runPipeline(args: {
     // only pay for the catchup diff each turn.
     const resumeSessionId = await getAgentSessionId(turn.gid, agentId);
 
-    const ctx: RunnerCtx = {
+    const makeCtx = (resume: string | undefined): RunnerCtx => ({
       gid: turn.gid,
       turnId: turn.turnId,
       agentId,
       signal: turn.abort.signal,
-      resumeSessionId,
+      resumeSessionId: resume,
       extraMcpServers,
+      codexMcp,
       emitPermission: (payload) => {
         // Fan out as agent_event so the client's applySDKMessage folds it
         // into the live ChatEvent[] (same code path as single chat).
@@ -281,71 +292,73 @@ async function runPipeline(args: {
           }),
         );
       },
+    });
+
+    // Run one attempt. `resume` present => catchup prompt + SDK resume;
+    // absent => full rendered history (includes the just-appended user
+    // message) in a fresh session.
+    const runAttempt = async (resume: string | undefined) => {
+      const prompt = resume
+        ? buildResumeCatchup({ transcript, target: agentId })
+        : buildPrompt({
+            transcript,
+            target: agentId,
+            currentText: text,
+            config,
+          });
+      const ctx = makeCtx(resume);
+      const runner =
+        agentId === "claude"
+          ? runClaude({ config, participant, prompt, images, ctx })
+          : runCodex({ config, participant, prompt, images, ctx });
+      let ended: Extract<RunnerEvent, { kind: "ended" }> | undefined;
+      let rawCount = 0;
+      for await (const ev of runner) {
+        if (ev.kind === "raw") {
+          rawCount++;
+          // Wrap in agent_event so the client knows which agent it came from.
+          fanout(
+            turn,
+            "agent_event",
+            JSON.stringify({
+              type: "agent_event",
+              turnId: turn.turnId,
+              agent: agentId,
+              payload: ev.payload,
+            }),
+          );
+        } else if (ev.kind === "ended") {
+          ended = ev;
+        }
+      }
+      return { ended, rawCount };
     };
 
-    let claudePrompt: string;
-    let codexPrompt: string;
-    if (resumeSessionId) {
-      // Existing session: send only what the agent hasn't seen yet.
-      claudePrompt = buildResumeCatchup({ transcript, target: agentId });
-      codexPrompt = claudePrompt;
-    } else {
-      // First-time invocation: send the full rendered history (which
-      // includes the just-appended user message).
-      const fullPrompt = buildPrompt({
-        transcript,
-        target: agentId,
-        currentText: text,
-        config,
-      });
-      claudePrompt = fullPrompt;
-      codexPrompt = fullPrompt;
+    let { ended, rawCount } = await runAttempt(resumeSessionId);
+
+    // Self-heal a stale hidden session: if resume failed because the SDK
+    // no longer has that conversation on disk (compacted away, or a CLI
+    // upgrade invalidated it), forget the id and retry once with the full
+    // history in a fresh session. Without this the group is bricked — every
+    // turn resumes the same dead id and returns no content.
+    if (
+      ended &&
+      !ended.ok &&
+      ended.sessionNotFound &&
+      resumeSessionId &&
+      !turn.abort.signal.aborted
+    ) {
+      console.warn(
+        `[orch ${turn.gid}] stale session for ${agentId} (${ended.error}); clearing + retrying fresh`,
+      );
+      await clearAgentSessionId(turn.gid, agentId);
+      ({ ended, rawCount } = await runAttempt(undefined));
     }
 
-    const runner =
-      agentId === "claude"
-        ? runClaude({
-            config,
-            participant,
-            prompt: claudePrompt,
-            images,
-            ctx,
-          })
-        : runCodex({
-            config,
-            participant,
-            prompt: codexPrompt,
-            images,
-            ctx,
-          });
-
-    let stepOk = true;
-    let stepError: string | undefined;
-    let stepEvents: ChatEvent[] = [];
-    let stepSessionId: string | undefined;
-
-    let rawCount = 0;
-    for await (const ev of runner) {
-      if (ev.kind === "raw") {
-        rawCount++;
-        // Wrap in agent_event so the client knows which agent it came from.
-        fanout(
-          turn,
-          "agent_event",
-          JSON.stringify({
-            type: "agent_event",
-            turnId: turn.turnId,
-            agent: agentId,
-            payload: ev.payload,
-          }),
-        );
-      } else if (ev.kind === "ended") {
-        stepOk = ev.ok;
-        stepError = ev.error;
-        stepEvents = ev.events;
-        stepSessionId = ev.sessionId;
-      }
-    }
+    const stepOk = ended?.ok ?? false;
+    const stepError = ended?.error ?? (ended ? undefined : "no runner result");
+    const stepEvents = ended?.events ?? [];
+    const stepSessionId = ended?.sessionId;
     console.log(
       `[orch ${turn.gid}] step=${step} agent=${agentId} ok=${stepOk} rawEvents=${rawCount} stepEvents=${stepEvents.length}${stepError ? ` error=${stepError}` : ""}`,
     );

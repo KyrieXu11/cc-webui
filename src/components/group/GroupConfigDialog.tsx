@@ -23,13 +23,13 @@ const defaultParticipant = (id: "claude" | "codex"): GroupParticipant => {
   const opts = modelOptionsForProvider(provider);
   const model =
     id === "claude"
-      ? opts.find((m) => m.id.includes("opus"))?.id ?? opts[0]?.id ?? "claude-opus-4-7"
-      : opts.find((m) => m.id.includes("codex"))?.id ?? opts[0]?.id ?? "gpt-5.3-codex";
+      ? opts.find((m) => m.id.includes("opus"))?.id ?? opts[0]?.id ?? "claude-opus-4-8"
+      : opts[0]?.id ?? "gpt-5.5";
   return {
     id,
     model,
     mode: id === "claude" ? "default" : undefined,
-    effort: "medium",
+    effort: id === "codex" ? "xhigh" : "medium",
     systemPrompt: "",
     skills: [],
     mcpServers: ["bash"],
