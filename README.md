@@ -51,8 +51,8 @@
   - **其他文件** → 落盘 `/tmp/cc-webui-uploads/`，路径以 `附件:` 形式带进 prompt，Claude 用 Read 访问
 - **`@path` 原子删除** — composer 里 Backspace 到 `@path` 末尾时整段一次性删掉，不用逐字符退
 - **模型 / 模式 / Effort** — 底栏直接选：
-  - Claude：Opus 4.7 / Sonnet 4.6 / Haiku 4.5
-  - Codex：GPT-5.3-Codex / GPT-5.1 Codex mini
+  - Claude：Fable 5 / Opus 4.8 / Sonnet 4.6 / Haiku 4.5
+  - Codex：GPT-5.5 / GPT-5.4 / GPT-5.4 mini / GPT-5.3-Codex / GPT-5.2
   - 权限：Default / Accept Edits / Plan / Bypass
   - Effort：Low / Medium / High / xHigh / Max（不支持 `xHigh` 的模型会自动降到 High）
 - **Markdown 渲染** — `react-markdown + remark-gfm`，支持标题 / 列表 / 表格 / 代码块 / 链接；中英混排下中文标点紧邻 URL 时自动分隔，autolink 不再吞中文；单 `~` 不会误触发删除线（`~~双~~` 才是）
@@ -122,29 +122,39 @@ npm run dev
 | `CC_WEBUI_CWD` | claude 的默认工作目录（UI 里也能切） | `process.cwd()` |
 | `CC_WEBUI_UPLOAD_DIR` | 文件上传落盘目录 | `os.tmpdir()/cc-webui-uploads` |
 | `CC_WEBUI_SESSION_INDEX` | WebUI 自己维护的 provider-aware session index（目前用于 Codex 历史） | `~/.cc-webui/sessions.json` |
+| `CC_WEBUI_GROUPS_DIR` | 多 agent 群聊数据目录（`<gid>/config.json` + `transcript.jsonl` + `index.json`） | `~/.cc-webui/groups` |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
 | `FEISHU_CLAUDE_APP_ID` / `_APP_SECRET` / `_ENCRYPT_KEY` / `_VERIFY_TOKEN` | 飞书 Claude 机器人凭据（详见下面「飞书机器人」一节） | 未设置则不启用 |
+| `FEISHU_CODEX_APP_ID` / `_APP_SECRET` / `_ENCRYPT_KEY` / `_VERIFY_TOKEN` | 飞书 Codex 机器人凭据；和 Claude bot 加到同一群时共享同一个 cc-webui group，@ 谁就路由到谁 | 未设置则不启用 |
+| `FEISHU_MENTION_ALIASES` | 可选 JSON；给人或外部 bot 配置 @ 别名，例如 `{"alice":{"open_id":"ou_xxx","name":"Alice"}}`。已加载的 Claude/Codex bot 会自动注册别名 | 未设置 |
 | `FEISHU_BASE_URL` | 飞书 OpenAPI base URL；Lark 国际版填 `https://open.larksuite.com` | `https://open.feishu.cn` |
 | `CC_WEBUI_DOTENV` | `.env` 文件路径（用于 feishu 凭据） | 项目根目录 `.env` |
 
 ## 飞书机器人
 
-把 cc-webui 接到飞书群里，用 @ 机器人触发 Claude agent —— 流式 markdown 回复、工具
-权限审批卡（按钮点允许/拒绝）、bot 主动发文件 / 图片、引用图片让 Claude 看图。
+把 cc-webui 接到飞书群里，用 @ 机器人触发 Claude / Codex agent —— 流式 markdown
+回复、工具权限审批卡（Claude）、bot 主动发文件 / 图片 / @ 人或 bot、引用图片让 agent 看图。
 
 **完整接入指南：[docs/feishu.md](./docs/feishu.md)**（约 15 分钟）。
+飞书权限至少需要 `im:message`、`im:message:send_as_bot`、`cardkit:card:write`；
+引用图片还需要 `im:resource`，列群成员用于主动 @ 人需要 `im:chat.members:read`
+或 `im:chat:readonly`，调试 binding 可加 `im:chat:readonly`。
 
 最小启动配置（飞书应用已建好、bot 已加入群）：
 
 ```env
 FEISHU_CLAUDE_APP_ID=cli_xxx
 FEISHU_CLAUDE_APP_SECRET=xxx
+# 可选：再建一个飞书应用作为 Codex bot
+# FEISHU_CODEX_APP_ID=cli_yyy
+# FEISHU_CODEX_APP_SECRET=yyy
 FEISHU_DEFAULT_CWD=/Users/yourname/code/myproj   # 可选；自动建会话用的默认目录
 ```
 
-启动后日志看到 `[feishu claude channel] connected (bot=...)` 即可在群里 / 私聊
-`@cc-webui-claude 你好` 开始用。常用命令清单见 docs/feishu.md。
+启动后日志看到 `[feishu claude channel] connected (bot=...)` / `[feishu codex channel] connected ...`
+即可在群里 / 私聊 `@cc-webui-claude 你好` 或 `@cc-webui-codex 你好` 开始用。
+常用命令清单见 docs/feishu.md。
 
 
 ## 键盘快捷键

@@ -616,8 +616,30 @@ export function summarize(tool: string, input: any): string | undefined {
       return input.url;
     case "WebSearch":
       return input.query;
+    // "Task" is the legacy name of the subagent tool (now "Agent");
+    // keep both so old transcripts still render.
     case "Task":
+    case "Agent":
       return input.description || input.subagent_type;
+    // Claude Code ≥2.1 replaced the TodoWrite snapshot list with
+    // incremental Task tools (TaskCreate/TaskUpdate/TaskGet/TaskList).
+    case "TaskCreate":
+      return truncate(input.subject, 80);
+    case "TaskUpdate": {
+      const subject =
+        typeof input.subject === "string" ? truncate(input.subject, 60) : null;
+      const target = subject ?? (input.taskId ? `#${input.taskId}` : undefined);
+      if (input.status && target) return `${target} → ${input.status}`;
+      return target;
+    }
+    case "TaskGet":
+      return input.taskId ? `#${input.taskId}` : undefined;
+    case "TaskList":
+      return "tasks";
+    // Built-in background-task tools (subagent output polling / stop).
+    case "TaskOutput":
+    case "TaskStop":
+      return input.task_id ?? input.shell_id;
     case "TodoWrite":
       return `${(input.todos ?? []).length} items`;
     default: {

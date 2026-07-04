@@ -7,8 +7,17 @@ import {
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import {
+  DEFAULT_MEMBER_LIMIT,
+  MAX_MEMBER_LIMIT,
+  buildMentionInfos,
+  fetchChatMembers,
+  knownMentionTargetSummary,
+  listMentionTargets,
+} from "./mentions.ts";
 
 // In-process MCP server that exposes Feishu IM send capabilities to Claude.
+// Codex gets the same tools through the HTTP MCP route in mcp-bash-route.ts.
 // Created per-turn so the LarkChannel + originating chat_id are baked in;
 // tools accept an optional chat_id override (so Claude can also push files
 // to other chats it knows about — e.g. via Feishu chat-id mentioned in
@@ -96,21 +105,42 @@ export function createLarkMcpServer(args: {
 
   const sendText = tool(
     "send_text",
-    "Send a plain-text message to a Feishu chat. Useful for posting " +
-      "side-channel notifications to *other* chats (the current chat already " +
-      "receives Claude's streaming reply). chat_id defaults to the current chat.",
+    "Send a plain-text message to a Feishu chat, optionally with real Feishu @ mentions. " +
+      "Use mention_open_ids from list_chat_members, or mention_targets aliases/open_ids. " +
+      `${knownMentionTargetSummary()} chat_id defaults to the current chat.`,
     {
       text: z.string().describe("Text content to send"),
       chat_id: z
         .string()
         .optional()
         .describe("Feishu chat_id. Defaults to the current chat."),
+      mention_open_ids: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Feishu user/bot open_id values to @. For people, call list_chat_members first.",
+        ),
+      mention_targets: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Named targets from list_mention_targets (for example codex-bot/claude-bot) or raw open_id values.",
+        ),
     },
-    async ({ text, chat_id }) => {
+    async ({ text, chat_id, mention_open_ids, mention_targets }) => {
       try {
-        const res = await channel.send(chat_id ?? defaultChatId, { text });
+        const mentionResult = buildMentionInfos(mention_targets, mention_open_ids);
+        if (mentionResult.error) return errorResult(mentionResult.error);
+        const targetChatId = chat_id ?? defaultChatId;
+        const res = await channel.send(
+          targetChatId,
+          { text },
+          mentionResult.mentions.length > 0
+            ? { mentions: mentionResult.mentions }
+            : undefined,
+        );
         return textResult(
-          `sent text → ${chat_id ?? defaultChatId} (message_id=${res.messageId})`,
+          `sent text → ${targetChatId} (message_id=${res.messageId}${mentionResult.resolved.length > 0 ? `, mentioned=${mentionResult.resolved.map((m) => m.name ?? m.alias).join(", ")}` : ""})`,
         );
       } catch (err) {
         return errorResult(errMsg(err));
@@ -118,10 +148,69 @@ export function createLarkMcpServer(args: {
     },
   );
 
+  const listChatMembers = tool(
+    "list_chat_members",
+    "List human members of a Feishu group and return their open_id values for @ mentions. " +
+      "Feishu's chat-members API does not return bot members; use list_mention_targets for known bots.",
+    {
+      chat_id: z
+        .string()
+        .optional()
+        .describe("Feishu chat_id. Defaults to the current chat."),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_MEMBER_LIMIT)
+        .optional()
+        .describe(`Maximum members to return. Defaults to ${DEFAULT_MEMBER_LIMIT}.`),
+    },
+    async ({ chat_id, limit }) => {
+      try {
+        const targetChatId = chat_id ?? defaultChatId;
+        const members = await fetchChatMembers(channel, targetChatId, limit);
+        return textResult(
+          JSON.stringify(
+            {
+              chat_id: targetChatId,
+              member_id_type: "open_id",
+              note:
+                "Feishu does not return bot members from this API; call list_mention_targets for known bots.",
+              members,
+            },
+            null,
+            2,
+          ),
+        );
+      } catch (err) {
+        return errorResult(errMsg(err));
+      }
+    },
+  );
+
+  const listMentionTargetsTool = tool(
+    "list_mention_targets",
+    "List configured/built-in mention target aliases that send_text can @ without scanning the current message. " +
+      "Loaded Feishu bots are registered here, so Claude/Codex can proactively mention each other.",
+    {},
+    async () =>
+      textResult(
+        JSON.stringify(
+          {
+            targets: listMentionTargets(),
+            usage:
+              "Pass one or more target.alias values as send_text({ mention_targets: [...] }).",
+          },
+          null,
+          2,
+        ),
+      ),
+  );
+
   return createSdkMcpServer({
     name: "lark",
     version: "0.1.0",
-    tools: [sendFile, sendImage, sendText],
+    tools: [sendFile, sendImage, sendText, listChatMembers, listMentionTargetsTool],
   });
 }
 

@@ -2,6 +2,7 @@ import * as lark from "@larksuiteoapi/node-sdk";
 import type { BotConfig } from "./config.ts";
 import { handleCardAction } from "./card-action.ts";
 import { handleNormalizedMessage } from "./handler.ts";
+import { registerBotMentionTarget } from "./mentions.ts";
 
 const CHANNELS = new Map<string, lark.LarkChannel>();
 
@@ -74,6 +75,7 @@ export async function startChannel(bot: BotConfig): Promise<void> {
 
   try {
     await channel.connect();
+    registerBotMentionTarget(bot, channel.botIdentity);
     console.log(
       `[feishu ${bot.key} channel] connected (bot=${channel.botIdentity?.name ?? "?"})`,
     );

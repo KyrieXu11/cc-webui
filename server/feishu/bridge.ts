@@ -11,6 +11,7 @@ import {
   type PermissionResolvedPayload,
 } from "./cards.ts";
 import type { BotConfig } from "./config.ts";
+import { rememberFeishuMessage } from "./quote.ts";
 
 export type BridgeArgs = {
   bot: BotConfig;
@@ -42,6 +43,14 @@ type AgentState = {
   // and emit the formatted tool line only on content_block_stop, when the
   // input is complete.
   pendingTools: Map<number, { name: string; inputJson: string }>;
+  // Codex item.updated events carry the full current text for an item, not
+  // token deltas. Track the last rendered text per item so Feishu streaming
+  // only appends the newly-added suffix.
+  codexTextByItem: Map<string, string>;
+  // Tool-like Codex items are upserts in the SDK stream. Feishu markdown is
+  // append-oriented, so render each tool item once when it first appears.
+  codexToolItems: Set<string>;
+  renderedText: string;
 };
 
 export async function bridgeTurn(args: BridgeArgs): Promise<void> {
@@ -71,6 +80,10 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
         console.log(
           `[feishu bridge] permission card sent id=${payload.id} msg=${res.messageId}`,
         );
+        void rememberFeishuMessage(res.messageId, {
+          text: permissionRequestQuoteText(payload),
+          agent: args.bot.agentId,
+        });
         return { messageId: res.messageId, request: payload };
       })
       .catch((err) => {
@@ -100,6 +113,10 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
         entry.messageId,
         permissionResolvedCard(entry.request, payload),
       );
+      void rememberFeishuMessage(entry.messageId, {
+        text: permissionResolvedQuoteText(entry.request, payload),
+        agent: args.bot.agentId,
+      });
       console.log(
         `[feishu bridge] permission card updated id=${payload.id} msg=${entry.messageId}`,
       );
@@ -122,6 +139,9 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
       thinkingPlaceholderActive: false,
       realContentStarted: false,
       pendingTools: new Map(),
+      codexTextByItem: new Map(),
+      codexToolItems: new Set(),
+      renderedText: "",
     };
     const done = new Promise<void>((resolve) => {
       state.resolveProducer = resolve;
@@ -148,6 +168,13 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
         },
         { replyTo: parentMessageId },
       )
+      .then((res) => {
+        void rememberFeishuMessage(res.messageId, {
+          text: state.renderedText,
+          agent,
+        });
+        return res;
+      })
       .catch(async (err) => {
         console.error(`[feishu bridge ${agent}] stream failed:`, err);
         state.fallback = true;
@@ -155,11 +182,15 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
         state.pending.length = 0;
         if (buffered) {
           try {
-            await channel.send(
+            const res = await channel.send(
               chatId,
               { text: buffered },
               { replyTo: parentMessageId },
             );
+            void rememberFeishuMessage(res.messageId, {
+              text: state.renderedText || buffered,
+              agent,
+            });
           } catch (e) {
             console.error(`[feishu bridge ${agent}] fallback send:`, e);
           }
@@ -172,6 +203,7 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
   function appendTo(agent: AgentId, text: string): void {
     if (!text) return;
     const s = startStream(agent);
+    s.renderedText += text;
     if (s.fallback) {
       s.pending.push(text);
       return;
@@ -187,6 +219,7 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
 
   function replaceContent(agent: AgentId, text: string): void {
     const s = startStream(agent);
+    s.renderedText = text;
     if (s.fallback) {
       // For fallback (plain text) just reset what we'll send at the end.
       s.pending = text ? [text] : [];
@@ -207,6 +240,7 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
     s.ended = true;
     if (errorMsg) {
       const tail = `\n\n❌ ${errorMsg}`;
+      s.renderedText += tail;
       if (s.controller) {
         s.controller.append(tail).catch(() => {});
       } else {
@@ -220,6 +254,12 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
       s.pending.length = 0;
       channel
         .send(chatId, { text }, { replyTo: parentMessageId })
+        .then((res) =>
+          rememberFeishuMessage(res.messageId, {
+            text: s.renderedText || text,
+            agent,
+          }),
+        )
         .catch((err) =>
           console.error(`[feishu bridge ${agent}] fallback final:`, err),
         );
@@ -288,6 +328,40 @@ export async function bridgeTurn(args: BridgeArgs): Promise<void> {
   await Promise.allSettled(
     Array.from(states.values()).map((s) => s.streamPromise),
   );
+}
+
+function permissionRequestQuoteText(payload: PermissionRequestPayload): string {
+  const summary = summarizeToolInput(payload.input);
+  return [
+    `🔒 工具权限请求: ${payload.tool}`,
+    payload.description || payload.displayName || "",
+    summary ? `参数: ${summary}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function permissionResolvedQuoteText(
+  request: PermissionRequestPayload,
+  resolved: PermissionResolvedPayload,
+): string {
+  const status = resolved.stale
+    ? "已过期 / 中止"
+    : resolved.behavior === "deny"
+      ? "已拒绝"
+      : resolved.behavior === "allow_session"
+        ? "本轮都允许"
+        : resolved.behavior === "allow_tool_session"
+          ? "该工具本轮都允许"
+          : "已允许";
+  const summary = summarizeToolInput(request.input);
+  return [
+    `${status}: ${request.tool}`,
+    request.description || request.displayName || "",
+    summary ? `参数: ${summary}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 type StreamAction =
@@ -377,7 +451,110 @@ function deriveStreamAction(
     state.realContentStarted = true;
     return { kind: "append", text: `\n${line}` };
   }
-  return null;
+  return deriveCodexStreamAction(payload, state);
+}
+
+function deriveCodexStreamAction(
+  payload: any,
+  state: AgentState,
+): StreamAction | null {
+  if (
+    payload?.type !== "item.started" &&
+    payload?.type !== "item.updated" &&
+    payload?.type !== "item.completed"
+  ) {
+    return null;
+  }
+  const item = payload.item;
+  if (!item || typeof item !== "object") return null;
+  const id = String(item.id ?? `${item.type}-${payload.type}`);
+
+  if (item.type === "reasoning") {
+    if (!state.realContentStarted && !state.thinkingPlaceholderActive) {
+      state.thinkingPlaceholderActive = true;
+      return { kind: "replace", text: "🤔 思考中…" };
+    }
+    return null;
+  }
+
+  if (item.type === "agent_message") {
+    const text = typeof item.text === "string" ? item.text : "";
+    if (!text) return null;
+    const prev = state.codexTextByItem.get(id) ?? "";
+    state.codexTextByItem.set(id, text);
+    if (prev === text) return null;
+
+    if (state.thinkingPlaceholderActive && !state.realContentStarted) {
+      state.thinkingPlaceholderActive = false;
+      state.realContentStarted = true;
+      return { kind: "replace", text };
+    }
+
+    const hadRealContent = state.realContentStarted;
+    state.realContentStarted = true;
+    if (!prev) {
+      return {
+        kind: "append",
+        text: hadRealContent ? `\n\n${text}` : text,
+      };
+    }
+    if (text.startsWith(prev)) {
+      return { kind: "append", text: text.slice(prev.length) };
+    }
+    return { kind: "append", text: `\n\n${text}` };
+  }
+
+  const line = codexToolLine(item);
+  if (!line) return null;
+  if (state.codexToolItems.has(id)) return null;
+  state.codexToolItems.add(id);
+
+  if (state.thinkingPlaceholderActive) {
+    state.thinkingPlaceholderActive = false;
+    state.realContentStarted = true;
+    return { kind: "replace", text: line };
+  }
+  state.realContentStarted = true;
+  return { kind: "append", text: `\n${line}` };
+}
+
+function codexToolLine(item: any): string | null {
+  let display = "";
+  let summary = "";
+
+  switch (item.type) {
+    case "command_execution":
+      display = "CodexShell";
+      summary = typeof item.command === "string" ? item.command : "";
+      break;
+    case "mcp_tool_call":
+      display = prettifyToolName(
+        `${item.server ?? "mcp"}.${item.tool ?? "tool"}`,
+      );
+      summary = summarizeAnyToolInput(item.arguments);
+      break;
+    case "file_change":
+      display = "ApplyPatch";
+      summary = summarizeFileChange(item.changes);
+      break;
+    case "web_search":
+      display = "WebSearch";
+      summary = typeof item.query === "string" ? item.query : "";
+      break;
+    case "todo_list":
+      display = "TodoWrite";
+      summary = `${Array.isArray(item.items) ? item.items.length : 0} items`;
+      break;
+    case "error":
+      return `❌ ${truncateOneLine(item.message ?? "Codex error", 120)}`;
+    default:
+      return null;
+  }
+
+  const safeSummary = truncateOneLine(summary, 80).replace(/`/g, "'");
+  return safeSummary
+    ? `🔧 \`${display}(${safeSummary})\``
+    : `🔧 \`${display}()\``;
 }
 
 // `mcp__bash__run` → `bash` (drop the canonical `.run` suffix);
@@ -385,6 +562,10 @@ function deriveStreamAction(
 // `mcp__lark__send_file` → `lark.send_file`;
 // built-in tool names (Bash / Read / ToolSearch) stay as-is.
 function prettifyToolName(name: string): string {
+  if (name === "bash.run") return "bash";
+  if (name === "bash.output") return "bash.output";
+  if (name === "bash.kill") return "bash.kill";
+  if (name === "bash.list") return "bash.list";
   if (name.startsWith("mcp__")) {
     const parts = name.slice(5).split("__");
     if (parts.length === 2 && parts[1] === "run") return parts[0];
@@ -409,4 +590,41 @@ function summarizeToolInput(input: unknown): string {
   if (!candidate) return "";
   const oneLine = candidate.replace(/\s+/g, " ").trim();
   return oneLine.length > 80 ? oneLine.slice(0, 80) + "…" : oneLine;
+}
+
+function summarizeAnyToolInput(input: unknown): string {
+  if (!input) return "";
+  if (typeof input === "object") {
+    const summary = summarizeToolInput(input);
+    if (summary) return summary;
+    try {
+      return JSON.stringify(input);
+    } catch {
+      return "";
+    }
+  }
+  return String(input);
+}
+
+function summarizeFileChange(changes: unknown): string {
+  if (!Array.isArray(changes)) return "";
+  if (changes.length === 0) return "0 files";
+  const paths = changes
+    .map((c) => {
+      if (!c || typeof c !== "object") return "";
+      const o = c as Record<string, unknown>;
+      return (
+        (typeof o.path === "string" && o.path) ||
+        (typeof o.file_path === "string" && o.file_path) ||
+        ""
+      );
+    })
+    .filter(Boolean);
+  if (paths.length > 0) return paths.join(", ");
+  return `${changes.length} files`;
+}
+
+function truncateOneLine(input: unknown, max: number): string {
+  const oneLine = String(input ?? "").replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
 }

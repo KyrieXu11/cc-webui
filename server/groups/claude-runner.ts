@@ -67,7 +67,10 @@ export async function* runClaude(args: {
         effort: participant.effort,
         includePartialMessages: true,
         mcpServers: { bash: bashMcp, ...(ctx.extraMcpServers ?? {}) },
-        disallowedTools: ["Bash", "BashOutput", "KillBash"],
+        // ScheduleWakeup additionally disabled: group turns are driven by
+        // the orchestrator's pipeline — a CLI-side wakeup would re-enter a
+        // session outside the orchestrator's control.
+        disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
@@ -179,6 +182,8 @@ export async function* runClaude(args: {
     if (ctx.signal.aborted) abortHandler();
     else ctx.signal.addEventListener("abort", abortHandler, { once: true });
 
+    let resultError: string | undefined;
+    let sessionNotFound = false;
     for await (const msg of response) {
       yield { kind: "raw", payload: msg };
       // Fold via the same mapper the frontend uses, so persisted entries
@@ -189,15 +194,56 @@ export async function* runClaude(args: {
       // Also pull session_id directly off any message that carries it.
       const sid = (msg as any).session_id;
       if (typeof sid === "string" && sid) capturedSessionId = sid;
-      if ((msg as any).type === "result") break;
+      if ((msg as any).type === "result") {
+        // A `result` can be terminal-but-failed and is NOT thrown — e.g.
+        // resuming a session id the SDK no longer has on disk yields
+        // subtype "error_during_execution" + is_error + errors:[...]. If we
+        // don't detect it here, the turn reports ok with zero content and
+        // the caller shows "(no content)".
+        const m = msg as any;
+        const isErr =
+          m.is_error === true ||
+          (typeof m.subtype === "string" && m.subtype !== "success");
+        if (isErr) {
+          const errs = Array.isArray(m.errors)
+            ? m.errors
+                .filter((e: unknown) => typeof e === "string")
+                .join("; ")
+            : "";
+          resultError =
+            errs ||
+            (typeof m.subtype === "string"
+              ? m.subtype
+              : "error_during_execution");
+          sessionNotFound = /no conversation found with session id/i.test(
+            errs,
+          );
+        }
+        break;
+      }
     }
 
-    yield { kind: "ended", ok: true, events, sessionId: capturedSessionId };
+    if (resultError) {
+      yield {
+        kind: "ended",
+        ok: false,
+        error: resultError,
+        events,
+        // On a stale-resume failure the captured id is the dead one — don't
+        // hand it back for persistence; the orchestrator clears + retries.
+        sessionId: sessionNotFound ? undefined : capturedSessionId,
+        sessionNotFound,
+      };
+    } else {
+      yield { kind: "ended", ok: true, events, sessionId: capturedSessionId };
+    }
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
     yield {
       kind: "ended",
-      ok: !aborted,
+      // Any thrown error is a failed turn (was `!aborted`, which wrongly
+      // reported genuine exceptions as ok:true and swallowed them).
+      ok: false,
       error: aborted ? "aborted" : String((err as Error)?.message ?? err),
       events,
       sessionId: capturedSessionId,

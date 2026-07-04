@@ -61,12 +61,14 @@ function expandHome(p: string | undefined): string | undefined {
 
 type PermissionMode =
   | "default"
+  | "auto"
   | "acceptEdits"
   | "plan"
   | "bypassPermissions";
 
 const ALLOWED_MODES: PermissionMode[] = [
   "default",
+  "auto",
   "acceptEdits",
   "plan",
   "bypassPermissions",
@@ -431,7 +433,11 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           effort: opts.effort,
           includePartialMessages: true,
           mcpServers: { bash: bashMcp, schedule: scheduleMcp },
-          disallowedTools: ["Bash", "BashOutput", "KillBash"],
+          // ScheduleWakeup: the CLI ships a built-in wakeup tool, but its
+          // timers live inside the CLI process and die with the turn. Keep
+          // it disabled so the model only uses mcp__schedule__wakeup, whose
+          // timers the server owns (survive across turns, cancellable).
+          disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
           systemPrompt: {
             type: "preset",
             preset: "claude_code",
