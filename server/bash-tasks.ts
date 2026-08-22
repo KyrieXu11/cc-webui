@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { currentUser } from "./auth/middleware.ts";
+import { canSeeTaskSession } from "./auth/scope.ts";
 import {
   listBackgroundTasks,
   getBackgroundTaskById,
@@ -31,11 +33,18 @@ function summary(t: ReturnType<typeof listBackgroundTasks>[number]) {
   };
 }
 
-function listPayload(filter?: {
-  sessionId?: string | null;
-  sessionPrefix?: string;
-}) {
-  const tasks = listBackgroundTasks(filter).map(summary);
+// `visible` is applied on the raw tasks (which carry sessionId) before they are
+// summarised — the summary drops sessionId, and the caller-supplied filter was
+// never a security boundary: it defaulted to "everything".
+function listPayload(
+  filter:
+    | { sessionId?: string | null; sessionPrefix?: string }
+    | undefined,
+  visible: (sessionId: string | undefined) => boolean,
+) {
+  const tasks = listBackgroundTasks(filter)
+    .filter((t) => visible(t.sessionId))
+    .map(summary);
   const running = tasks.filter((t) => t.status === "running").length;
   return { tasks, running, total: tasks.length };
 }
@@ -52,11 +61,16 @@ function parseFilter(c: {
 }
 
 route.get("/", (c) => {
-  return c.json(listPayload(parseFilter(c)));
+  const user = currentUser(c)!;
+  return c.json(
+    listPayload(parseFilter(c), (sid) => canSeeTaskSession(user, sid)),
+  );
 });
 
 route.get("/stream", (c) => {
   const filter = parseFilter(c);
+  const user = currentUser(c)!;
+  const visible = (sid: string | undefined) => canSeeTaskSession(user, sid);
 
   return streamSSE(c, async (stream) => {
     let dirty = false;
@@ -86,7 +100,7 @@ route.get("/stream", (c) => {
 
     await stream.writeSSE({
       event: "snapshot",
-      data: JSON.stringify(listPayload(filter)),
+      data: JSON.stringify(listPayload(filter, visible)),
     });
 
     while (!closed) {
@@ -105,7 +119,7 @@ route.get("/stream", (c) => {
       dirty = false;
       await stream.writeSSE({
         event: "snapshot",
-        data: JSON.stringify(listPayload(filter)),
+        data: JSON.stringify(listPayload(filter, visible)),
       });
     }
   });
@@ -114,7 +128,11 @@ route.get("/stream", (c) => {
 route.get("/:id/output", (c) => {
   const id = c.req.param("id");
   const t = getBackgroundTaskById(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  // 404 for both "no such task" and "not yours": task ids used to be a bare
+  // global map lookup, so anyone could read anyone's output.
+  if (!t || !canSeeTaskSession(currentUser(c)!, t.sessionId)) {
+    return c.json({ error: "not_found" }, 404);
+  }
   return c.json({
     ...summary(t),
     stdout: t.stdout,
@@ -124,6 +142,10 @@ route.get("/:id/output", (c) => {
 
 route.post("/:id/kill", (c) => {
   const id = c.req.param("id");
+  const existing = getBackgroundTaskById(id);
+  if (!existing || !canSeeTaskSession(currentUser(c)!, existing.sessionId)) {
+    return c.json({ error: "not_found" }, 404);
+  }
   const result = killBackgroundTaskById(id);
   if (!result.ok && result.reason === "not_found") {
     return c.json({ error: "not_found" }, 404);
@@ -134,7 +156,9 @@ route.post("/:id/kill", (c) => {
 route.get("/:id/stream", (c) => {
   const id = c.req.param("id");
   const t = getBackgroundTaskById(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  if (!t || !canSeeTaskSession(currentUser(c)!, t.sessionId)) {
+    return c.json({ error: "not_found" }, 404);
+  }
 
   return streamSSE(c, async (stream) => {
     type QueueItem = { event: string; data: string };
@@ -220,7 +244,12 @@ route.get("/foreground", (c) => {
     sessionIdRaw === undefined
       ? undefined
       : { sessionId: sessionIdRaw === "" ? null : sessionIdRaw };
-  return c.json({ foreground: listForegroundInvocations(filter) });
+  const user = currentUser(c)!;
+  return c.json({
+    foreground: listForegroundInvocations(filter).filter((f) =>
+      canSeeTaskSession(user, f.sessionId),
+    ),
+  });
 });
 
 // Detach a running foreground bash to a BackgroundTask. The foreground SDK
@@ -229,6 +258,11 @@ route.get("/foreground", (c) => {
 // the task lifecycle.
 route.post("/foreground/:fgId/detach", (c) => {
   const fgId = c.req.param("fgId");
+  const user = currentUser(c)!;
+  const owned = listForegroundInvocations().some(
+    (f) => f.fgId === fgId && canSeeTaskSession(user, f.sessionId),
+  );
+  if (!owned) return c.json({ error: "not_found" }, 404);
   const result = detachForegroundToBackground(fgId);
   if (!result.ok && result.reason === "not_found") {
     return c.json({ error: "not_found" }, 404);

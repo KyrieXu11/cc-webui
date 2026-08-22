@@ -31,6 +31,7 @@ import {
 } from "./bash-mcp.ts";
 import { isCodexModelMismatchNotice } from "./codex-events.ts";
 import { currentUser } from "./auth/middleware.ts";
+import { visibilityFor } from "./auth/scope.ts";
 import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 
 const codexChat = new Hono();
@@ -491,7 +492,10 @@ codexChat.post("/chat/cancel", async (c) => {
 });
 
 codexChat.get("/chat/inflight", (c) => {
-  return c.json({ sessionIds: Array.from(activeCodexChats.keys()) });
+  // Scoped: previously every caller saw every running thread id.
+  const visible = visibilityFor(currentUser(c)!);
+  const sessionIds = Array.from(activeCodexChats.keys()).filter(visible);
+  return c.json({ sessionIds });
 });
 
 codexChat.get("/chat/attach", (c) => {

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { currentUser } from "./auth/middleware.ts";
 import { recordOwner } from "./auth/ownership.ts";
+import { visibilityFor } from "./auth/scope.ts";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
@@ -60,9 +61,12 @@ function streamSSEUnbuffered(
 groups.get("/", async (c) => {
   const idx = await readIndex();
   const inFlight = new Set(listInFlightTurns().map((t) => t.gid));
+  const visible = visibilityFor(currentUser(c)!);
   // Reflect live in-flight state on the index without persisting
   return c.json({
-    groups: idx.groups.map((g) => ({ ...g, inFlight: inFlight.has(g.id) })),
+    groups: idx.groups
+      .filter((g) => visible(g.id))
+      .map((g) => ({ ...g, inFlight: inFlight.has(g.id) })),
   });
 });
 
@@ -264,12 +268,15 @@ groups.post("/:gid/stop", async (c) => {
 // ============================================================
 
 groups.get("/inflight/all", async (c) => {
+  const visible = visibilityFor(currentUser(c)!);
   return c.json({
-    inflight: listInFlightTurns().map((t) => ({
-      gid: t.gid,
-      turnId: t.turnId,
-      startedAt: t.startedAt,
-    })),
+    inflight: listInFlightTurns()
+      .filter((t) => visible(t.gid))
+      .map((t) => ({
+        gid: t.gid,
+        turnId: t.turnId,
+        startedAt: t.startedAt,
+      })),
   });
 });
 

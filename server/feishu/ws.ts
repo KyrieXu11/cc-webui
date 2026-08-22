@@ -50,7 +50,7 @@ export async function startChannel(bot: BotConfig): Promise<void> {
       `[feishu ${bot.key}] cardAction received: action.value=${JSON.stringify(evt.action?.value)} operator=${evt.operator?.name ?? evt.operator?.openId}`,
     );
     try {
-      handleCardAction(bot, evt);
+      void handleCardAction(bot, evt);
     } catch (err) {
       console.error(`[feishu ${bot.key}] cardAction:`, err);
     }

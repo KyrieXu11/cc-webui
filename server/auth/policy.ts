@@ -150,9 +150,9 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "GET /api/meta": { auth: "user", note: "leaks which skills/commands are installed" },
   "POST /api/permission/:id": {
     auth: "user",
-    // The pending map is global; the handler checks the card belongs to the
-    // caller. Cannot be declarative here because permission ids are not in the
-    // ownership table.
+    // Not declarative: permission ids are not in the ownership table. The
+    // pending entry itself records who may answer it, and resolvePermission
+    // enforces that — see server/permission.ts.
     handlerScoped: true,
   },
 

@@ -4,6 +4,7 @@ import {
   type PermissionDecision,
 } from "../permission.ts";
 import type { BotConfig } from "./config.ts";
+import { getBinding } from "./binding.ts";
 
 // Receives Feishu card-action events for permission cards rendered by
 // bridge.ts and forwards the user's decision to cc-webui's pending
@@ -12,10 +13,10 @@ import type { BotConfig } from "./config.ts";
 // The matching `permission_resolved` payload that claude-runner emits
 // right after resolvePermission is what triggers the card to be patched
 // with the final state (handled by bridge.ts, not here).
-export function handleCardAction(
+export async function handleCardAction(
   bot: BotConfig,
   evt: lark.CardActionEvent,
-): void {
+): Promise<void> {
   const value = evt.action?.value as
     | { kind?: string; id?: string; decision?: string }
     | undefined;
@@ -48,7 +49,11 @@ export function handleCardAction(
       return;
   }
 
-  const ok = resolvePermission(id, decision);
+  // A card click carries a chat, not a cc-webui account — so authorise by the
+  // group this chat is bound to. Without it, a click in one Feishu chat could
+  // resolve a prompt raised by a turn in another.
+  const gid = await getBinding(evt.chatId);
+  const ok = resolvePermission(id, decision, { gid: gid ?? "\u0000none" });
   if (ok) {
     console.log(
       `[feishu ${bot.key} cardAction] permission ${id} → ${decisionStr} by ${operatorName}`,

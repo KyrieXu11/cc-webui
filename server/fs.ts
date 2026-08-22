@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { currentUser } from "./auth/middleware.ts";
+import { getAllowedPaths } from "./auth/users.ts";
+import { canonicalizePattern, matchesAnyPattern } from "./auth/paths.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -195,26 +198,36 @@ fsRoute.get("/tree", async (c) => {
 fsRoute.get("/scan", async (c) => {
   const home = os.homedir();
   const dirs = await walkDirs(home);
-  return c.json({ dirs, home });
+  // Only offer what this account may actually open. Cosmetic — the binding
+  // check still happens server-side when a path is used (OpenProjectDialog
+  // accepts hand-typed paths) — but offering unopenable folders is worse than
+  // not listing them.
+  //
+  // Patterns are canonicalised once, then matched synchronously: realpath'ing
+  // each of up to 2000 directories would be pointless work for a picker.
+  const patterns = await Promise.all(
+    getAllowedPaths(currentUser(c)!.id).map(canonicalizePattern),
+  );
+  return c.json({ dirs: dirs.filter((d) => matchesAnyPattern(d, patterns)), home });
 });
 
 fsRoute.get("/recents", async (c) => {
-  // TODO(permissions): scope to the authenticated user instead of "".
-  return c.json({ recents: listOpenedProjects() });
+  return c.json({ recents: listOpenedProjects(currentUser(c)!.id) });
 });
 
 fsRoute.post("/recents", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const p: string = body.path;
   if (!p) return c.json({ error: "path required" }, 400);
-  recordOpenedProject(p);
-  return c.json({ recents: listOpenedProjects() });
+  const userId = currentUser(c)!.id;
+  recordOpenedProject(p, userId);
+  return c.json({ recents: listOpenedProjects(userId) });
 });
 
 fsRoute.delete("/recents", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const p: string = body.path;
-  if (p) removeOpenedProject(p);
+  if (p) removeOpenedProject(p, currentUser(c)!.id);
   return c.json({ ok: true });
 });
 
