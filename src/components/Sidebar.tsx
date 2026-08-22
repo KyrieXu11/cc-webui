@@ -5,6 +5,7 @@ interface Props {
   onToggleSidebar?: () => void;
   onOpenProject?: () => void;
   onOpenHelp?: () => void;
+  onOpenAdmin?: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -13,6 +14,7 @@ export default function Sidebar({
   onToggleSidebar,
   onOpenProject,
   onOpenHelp,
+  onOpenAdmin,
   theme,
   onToggleTheme,
 }: Props) {
@@ -38,6 +40,17 @@ export default function Sidebar({
         </button>
       </div>
       <div className="flex flex-col items-center gap-1">
+        {/* Admin only — a plain user never sees this exists. */}
+        {isAdmin && (
+          <button
+            onClick={onOpenAdmin}
+            aria-label="管理"
+            title="管理（用户 / 权限 / 飞书映射）"
+            className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          >
+            <AdminIcon />
+          </button>
+        )}
         <button
           onClick={onOpenHelp}
           aria-label="操作手册"
@@ -66,6 +79,13 @@ export default function Sidebar({
     </aside>
   );
 }
+
+const AdminIcon = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l7 3v6c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6l7-3z" />
+    <path d="M9 12l2 2 4-4" />
+  </svg>
+);
 
 const SignOutIcon = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">

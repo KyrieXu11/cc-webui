@@ -11,6 +11,7 @@ import HomeView from "./components/HomeView";
 import OpenProjectDialog from "./components/OpenProjectDialog";
 import SkillsPicker from "./components/SkillsPicker";
 import HelpModal from "./components/HelpModal";
+import AdminView from "./components/AdminView";
 import TasksButton from "./components/TasksButton";
 import TasksModal from "./components/TasksModal";
 import GroupChatView from "./components/group/GroupChatView";
@@ -201,6 +202,7 @@ export default function App() {
   const [skills, setSkills] = useState<string[]>([]);
   const [skillsPickerOpen, setSkillsPickerOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
@@ -1036,6 +1038,7 @@ export default function App() {
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         onOpenProject={() => setDialogOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
+        onOpenAdmin={() => setAdminOpen(true)}
         theme={settings.theme}
         onToggleTheme={() =>
           setSettings((s) => ({
@@ -1069,7 +1072,9 @@ export default function App() {
           />
         ))}
       <div className="flex flex-col flex-1 min-w-0">
-        {currentGroupId ? (
+        {adminOpen && isAdmin ? (
+          <AdminView onClose={() => setAdminOpen(false)} />
+        ) : currentGroupId ? (
           <GroupChatView gid={currentGroupId} home={home} onBack={closeGroup} />
         ) : inProject ? (
           <>

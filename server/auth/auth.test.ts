@@ -20,6 +20,8 @@ const {
   assertCanOpen,
   PathNotAllowedError,
 } = await import("./paths.ts");
+const { claimUnowned, ownerOf, recordOwner, canAccessResource } =
+  await import("./ownership.ts");
 const {
   createUser,
   authenticate,
@@ -225,6 +227,49 @@ try {
   setPassword(seeded!.id, "changed-by-hand");
   assert.equal(seedAdminFromEnv("boss:s3cr3t:with:colons"), null);
   assert.equal(authenticate("boss", "changed-by-hand")?.id, seeded!.id);
+
+  // ── ownership + claiming what predates accounts (decision 15) ────────────
+
+  const owner = createUser({ username: "owner", password: "x", role: "user" });
+  const other = createUser({ username: "other", password: "x", role: "user" });
+  const boss = getUserByUsername("boss")!; // admin, seeded above
+
+  recordOwner("res-1", "group", owner.id);
+  assert.equal(ownerOf("res-1"), owner.id);
+  assert.equal(canAccessResource(owner, "res-1"), true);
+  assert.equal(canAccessResource(other, "res-1"), false);
+  // Admins reach everything (decision 11) — including unowned resources.
+  assert.equal(canAccessResource(boss, "res-1"), true);
+  assert.equal(canAccessResource(boss, "never-recorded"), true);
+  // A plain user may NOT reach an unowned resource: the orphans include the
+  // machine owner's own terminal sessions (decision 10).
+  assert.equal(canAccessResource(other, "never-recorded"), false);
+
+  // Claiming picks up rows in the DB that no one owns yet. Seed one of each.
+  const { getDb } = await import("../db.ts");
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO opened_projects(user_id, path, last_used) VALUES ('', '/legacy', 1)",
+  ).run();
+  db.prepare(
+    `INSERT INTO groups_index(gid, title, cwd, last_ts, participant_summary, last_snippet)
+          VALUES ('g-legacy', 't', '/c', 1, 'Claude', '')`,
+  ).run();
+  db.prepare(
+    "INSERT INTO codex_sessions(session_id, last_modified) VALUES ('cx-legacy', 1)",
+  ).run();
+
+  const claimed = claimUnowned(boss.id);
+  assert.equal(claimed.projects, 1);
+  assert.equal(claimed.groups, 1);
+  assert.equal(claimed.codexSessions, 1);
+  assert.equal(ownerOf("g-legacy"), boss.id);
+  assert.equal(ownerOf("cx-legacy"), boss.id);
+
+  // Idempotent, and it must not steal what someone already owns.
+  const again = claimUnowned(boss.id);
+  assert.deepEqual(again, { projects: 0, groups: 0, codexSessions: 0 });
+  assert.equal(ownerOf("res-1"), owner.id, "an owned resource is left alone");
 
   console.log("auth.test.ts: all assertions passed");
 } finally {
