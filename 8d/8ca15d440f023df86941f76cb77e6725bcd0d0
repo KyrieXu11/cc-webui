@@ -1,0 +1,19 @@
+docs/user-permissions.md
+  s_58b7404ce04904::t_bae9109eb10f3a 1-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "8d8ca15d440f023df86941f76cb77e6725bcd0d0",
+  "prompts": {},
+  "sessions": {
+    "s_58b7404ce04904": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "efe0b87b-c0fe-4dd2-8af0-d8534e03f095",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
