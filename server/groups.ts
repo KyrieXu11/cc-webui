@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { currentUser } from "./auth/middleware.ts";
+import { recordOwner } from "./auth/ownership.ts";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
@@ -76,6 +78,8 @@ groups.post("/", async (c) => {
       : undefined,
     pipeline: Array.isArray(body.pipeline) ? body.pipeline : undefined,
   });
+  const owner = currentUser(c);
+  if (owner) recordOwner(id, "group", owner.id);
   return c.json({ id });
 });
 

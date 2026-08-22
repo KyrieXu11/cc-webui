@@ -30,6 +30,8 @@ import {
   subscribeForegroundEvents,
 } from "./bash-mcp.ts";
 import { isCodexModelMismatchNotice } from "./codex-events.ts";
+import { currentUser } from "./auth/middleware.ts";
+import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 
 const codexChat = new Hono();
 const KEEPALIVE_MS = 15_000;
@@ -332,6 +334,7 @@ codexChat.post("/chat", async (c) => {
     abort: new AbortController(),
   };
   if (threadId) activeCodexChats.set(threadId, entry);
+  const ownerId = currentUser(c)?.id;
   if (clientTurnId) activeCodexChatsByClientTurn.set(clientTurnId, entry);
 
   const fanout = fanoutFactory(entry);
@@ -404,6 +407,12 @@ codexChat.post("/chat", async (c) => {
           }
           entry.threadId = ev.thread_id;
           activeCodexChats.set(ev.thread_id, entry);
+          // Codex issues the thread id, so ownership is recorded here — see the
+          // same pattern in chat.ts.
+          if (ownerId) {
+            recordOwner(ev.thread_id, "codex", ownerId);
+            relabelOwner(previousTaskSessionId, ev.thread_id);
+          }
         }
         turnEvents.push(ev);
         fanout("codex_event", JSON.stringify(ev));
