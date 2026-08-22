@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import { getDb } from "../db.ts";
 import type { ChatEvent } from "../../src/lib/types.ts";
 
 export type AgentId = "claude" | "codex";
@@ -121,38 +122,89 @@ export async function readAll(gid: string): Promise<GroupTurnEntry[]> {
   return out;
 }
 
-export async function readIndex(): Promise<GroupIndex> {
-  try {
-    const raw = await fs.readFile(indexPath(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<GroupIndex>;
-    return { groups: Array.isArray(parsed?.groups) ? parsed.groups : [] };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return { groups: [] };
-    }
-    throw err;
-  }
+// The group index lives in SQLite (see server/db.ts). It used to be
+// index.json, read-modify-written in full on every update — two turns ending
+// at once dropped one row's lastTs/lastSnippet. Each function below is a single
+// statement, so that race is gone.
+//
+// `inFlight` is not stored: every reader already overwrote it from the live
+// in-memory registry (groups.ts:63), so persisting it was dead weight. It is
+// returned as false and callers fill it in.
+
+type IndexDbRow = {
+  gid: string;
+  title: string;
+  cwd: string;
+  lastTs: number;
+  participantSummary: string;
+  lastSnippet: string;
+};
+
+const SELECT_INDEX = `SELECT gid, title, cwd,
+                             last_ts             AS lastTs,
+                             participant_summary AS participantSummary,
+                             last_snippet        AS lastSnippet
+                        FROM groups_index`;
+
+function toRow(r: IndexDbRow): GroupIndexRow {
+  return {
+    id: r.gid,
+    title: r.title,
+    cwd: r.cwd,
+    lastTs: r.lastTs,
+    participantSummary: r.participantSummary,
+    lastSnippet: r.lastSnippet,
+    inFlight: false,
+  };
 }
 
-export async function writeIndex(idx: GroupIndex): Promise<void> {
-  await fs.mkdir(groupsRoot(), { recursive: true });
-  const tmp = indexPath() + ".tmp";
-  await fs.writeFile(tmp, JSON.stringify(idx, null, 2));
-  await fs.rename(tmp, indexPath());
+export async function readIndex(): Promise<GroupIndex> {
+  const rows = getDb()
+    .prepare(`${SELECT_INDEX} ORDER BY last_ts DESC`)
+    .all() as IndexDbRow[];
+  return { groups: rows.map(toRow) };
 }
 
 export async function upsertIndexRow(row: GroupIndexRow): Promise<void> {
-  const idx = await readIndex();
-  const i = idx.groups.findIndex((g) => g.id === row.id);
-  if (i >= 0) idx.groups[i] = row;
-  else idx.groups.push(row);
-  await writeIndex(idx);
+  getDb()
+    .prepare(
+      `INSERT INTO groups_index(gid, title, cwd, last_ts, participant_summary, last_snippet)
+            VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(gid) DO UPDATE SET
+            title               = excluded.title,
+            cwd                 = excluded.cwd,
+            last_ts             = excluded.last_ts,
+            participant_summary = excluded.participant_summary,
+            last_snippet        = excluded.last_snippet`,
+    )
+    .run(
+      row.id,
+      row.title,
+      row.cwd,
+      row.lastTs,
+      row.participantSummary,
+      row.lastSnippet,
+    );
+}
+
+// Update only the descriptive columns, leaving lastTs / lastSnippet as they
+// are. Callers used to read the old row and copy those two fields forward by
+// hand, which is precisely how a concurrent turn's update got clobbered.
+export async function updateIndexMeta(
+  gid: string,
+  fields: { title: string; cwd: string; participantSummary: string },
+): Promise<void> {
+  getDb()
+    .prepare(
+      `UPDATE groups_index
+          SET title = ?, cwd = ?, participant_summary = ?
+        WHERE gid = ?`,
+    )
+    .run(fields.title, fields.cwd, fields.participantSummary, gid);
 }
 
 export async function removeIndexRow(gid: string): Promise<void> {
-  const idx = await readIndex();
-  idx.groups = idx.groups.filter((g) => g.id !== gid);
-  await writeIndex(idx);
+  getDb().prepare("DELETE FROM groups_index WHERE gid = ?").run(gid);
 }
 
 // Helper: assemble a GroupTurnEntry from a ChatEvent. Centralizes the

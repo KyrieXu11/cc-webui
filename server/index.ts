@@ -13,6 +13,7 @@ import { mcpBashRoute } from "./mcp-bash-route.ts";
 import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
 import { groupsEnabled } from "./features.ts";
+import { importLegacyJson } from "./import-legacy-json.ts";
 
 const app = new Hono();
 
@@ -32,6 +33,10 @@ app.route("/api/meta", metaRoute);
 app.route("/api/bash/tasks", bashTasksRoute);
 app.route("/api/mcp", mcpBashRoute);
 app.route("/feishu", feishu);
+
+// Move the flat JSON stores into SQLite before anything serves a request, so
+// no handler can observe a half-migrated state.
+await importLegacyJson();
 
 const isProd = process.env.NODE_ENV === "production";
 if (isProd) {

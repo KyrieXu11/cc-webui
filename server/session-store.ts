@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
+import { getDb, transact } from "./db.ts";
 import path from "node:path";
 
 export type AgentProvider = "claude" | "codex";
@@ -21,15 +22,6 @@ export interface CodexStoredTurn {
   events: unknown[];
 }
 
-interface CodexStoredSession extends SessionSummary {
-  provider: "codex";
-  turns: CodexStoredTurn[];
-}
-
-interface StoreFile {
-  codexSessions: CodexStoredSession[];
-}
-
 interface NativeCodexSession extends SessionSummary {
   provider: "codex";
   filePath: string;
@@ -41,9 +33,14 @@ type CodexRolloutRecord = {
   payload?: any;
 };
 
-const STORE_PATH =
-  process.env.CC_WEBUI_SESSION_INDEX ||
-  path.join(os.homedir(), ".cc-webui", "sessions.json");
+// Legacy location of cc-webui's Codex index, now only read once by
+// server/import-legacy-json.ts.
+export function legacyCodexIndexPath(): string {
+  return (
+    process.env.CC_WEBUI_SESSION_INDEX ||
+    path.join(os.homedir(), ".cc-webui", "sessions.json")
+  );
+}
 const CODEX_SESSIONS_DIR =
   process.env.CODEX_SESSIONS_DIR ||
   path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
@@ -373,48 +370,61 @@ async function readNativeCodexTurns(
   return turns;
 }
 
-async function readStore(): Promise<StoreFile> {
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<StoreFile>;
-    return {
-      codexSessions: Array.isArray(parsed.codexSessions)
-        ? parsed.codexSessions
-        : [],
-    };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return { codexSessions: [] };
-    }
-    throw err;
-  }
-}
+// cc-webui's own Codex index lives in SQLite (see server/db.ts). It used to be
+// ~/.cc-webui/sessions.json, where turn payloads were ~67% of the bytes — so
+// listing summaries dragged every transcript along. Now they are separate
+// tables and the list query never touches codex_turns.
+//
+// The NATIVE Codex store (~/.codex/sessions) is untouched: it is Codex's own
+// format, we only read it. Merging the two is unchanged, below.
 
-async function writeStore(store: StoreFile): Promise<void> {
-  await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
-  const tmp = STORE_PATH + ".tmp";
-  await fs.writeFile(tmp, JSON.stringify(store, null, 2));
-  await fs.rename(tmp, STORE_PATH);
+type StoredSummaryRow = {
+  sessionId: string;
+  cwd: string | null;
+  summary: string | null;
+  firstPrompt: string | null;
+  customTitle: string | null;
+  lastModified: number;
+};
+
+function listStoredCodexSummaries(): SessionSummary[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT session_id    AS sessionId,
+              cwd,
+              summary,
+              first_prompt  AS firstPrompt,
+              custom_title  AS customTitle,
+              last_modified AS lastModified
+         FROM codex_sessions`,
+    )
+    .all() as StoredSummaryRow[];
+  return rows.map((r) => ({
+    sessionId: r.sessionId,
+    provider: "codex" as const,
+    summary: r.summary ?? "",
+    lastModified: r.lastModified,
+    cwd: r.cwd ?? undefined,
+    firstPrompt: r.firstPrompt ?? undefined,
+    customTitle: r.customTitle ?? undefined,
+  }));
 }
 
 export async function listCodexSessions(opts: {
   limit: number;
   cwd?: string;
 }): Promise<SessionSummary[]> {
-  const [store, nativeSessions] = await Promise.all([
-    readStore(),
-    listNativeCodexSessions(),
-  ]);
+  const nativeSessions = await listNativeCodexSessions();
+  const stored = listStoredCodexSummaries();
   const byId = new Map<string, SessionSummary>();
 
   for (const native of nativeSessions) {
     byId.set(native.sessionId, publicSummary(native));
   }
 
-  for (const stored of store.codexSessions) {
-    const { turns: _turns, ...storedSummary } = stored;
-    const existing = byId.get(stored.sessionId);
-    byId.set(stored.sessionId, {
+  for (const storedSummary of stored) {
+    const existing = byId.get(storedSummary.sessionId);
+    byId.set(storedSummary.sessionId, {
       ...existing,
       ...storedSummary,
       provider: "codex",
@@ -444,8 +454,24 @@ export async function getCodexSessionTurns(
     if (nativeTurns.length > 0) return nativeTurns;
   }
 
-  const store = await readStore();
-  return store.codexSessions.find((s) => s.sessionId === sessionId)?.turns ?? [];
+  const rows = getDb()
+    .prepare(
+      `SELECT prompt, started_at AS startedAt, events
+         FROM codex_turns
+        WHERE session_id = ?
+        ORDER BY started_at, id`,
+    )
+    .all(sessionId) as Array<{
+    prompt: string;
+    startedAt: number;
+    events: string;
+  }>;
+  return rows.map((r) => ({
+    provider: "codex" as const,
+    prompt: r.prompt,
+    startedAt: r.startedAt,
+    events: JSON.parse(r.events) as unknown[],
+  }));
 }
 
 export async function appendCodexTurn(opts: {
@@ -455,45 +481,48 @@ export async function appendCodexTurn(opts: {
   startedAt: number;
   events: unknown[];
 }): Promise<void> {
-  const store = await readStore();
   const now = Date.now();
-  let session = store.codexSessions.find((s) => s.sessionId === opts.sessionId);
-  if (!session) {
-    const summary = summarizePrompt(opts.prompt) || "Codex conversation";
-    session = {
-      sessionId: opts.sessionId,
-      provider: "codex",
-      cwd: opts.cwd,
-      summary,
-      firstPrompt: opts.prompt,
-      lastModified: now,
-      turns: [],
-    };
-    store.codexSessions.push(session);
-  }
-
-  session.cwd = opts.cwd ?? session.cwd;
-  session.firstPrompt = session.firstPrompt || opts.prompt;
-  session.summary = session.summary || summarizePrompt(opts.prompt);
-  session.lastModified = now;
-  session.turns.push({
-    provider: "codex",
-    prompt: opts.prompt,
-    startedAt: opts.startedAt,
-    events: opts.events,
+  const db = getDb();
+  // Session upsert + turn insert in one transaction, so a crash between them
+  // cannot leave a turn attached to a session row that was never written.
+  //
+  // COALESCE(NULLIF(col,''), excluded.col) reproduces the old
+  // `session.summary = session.summary || …` semantics: first value wins,
+  // later turns do not overwrite it.
+  transact(() => {
+    db.prepare(
+      `INSERT INTO codex_sessions(session_id, cwd, summary, first_prompt, last_modified)
+            VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET
+            cwd           = COALESCE(excluded.cwd, cwd),
+            summary       = COALESCE(NULLIF(summary, ''), excluded.summary),
+            first_prompt  = COALESCE(NULLIF(first_prompt, ''), excluded.first_prompt),
+            last_modified = excluded.last_modified`,
+    ).run(
+      opts.sessionId,
+      opts.cwd ?? null,
+      summarizePrompt(opts.prompt) || "Codex conversation",
+      opts.prompt,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO codex_turns(session_id, prompt, started_at, events)
+            VALUES (?, ?, ?, ?)`,
+    ).run(
+      opts.sessionId,
+      opts.prompt,
+      opts.startedAt,
+      JSON.stringify(opts.events),
+    );
   });
-
-  await writeStore(store);
 }
 
 export async function deleteCodexSession(sessionId: string): Promise<boolean> {
-  const store = await readStore();
-  const before = store.codexSessions.length;
-  store.codexSessions = store.codexSessions.filter(
-    (s) => s.sessionId !== sessionId
-  );
-  const removedStored = store.codexSessions.length !== before;
-  if (removedStored) await writeStore(store);
+  // codex_turns has ON DELETE CASCADE, so the transcripts go with it.
+  const res = getDb()
+    .prepare("DELETE FROM codex_sessions WHERE session_id = ?")
+    .run(sessionId);
+  const removedStored = Number(res.changes) > 0;
 
   const nativeFile = await findNativeCodexSessionFile(sessionId);
   if (!nativeFile) return removedStored;
