@@ -3,6 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
+import {
+  listOpenedProjects,
+  recordOpenedProject,
+  removeOpenedProject,
+} from "./opened-projects.ts";
+
 const fsRoute = new Hono();
 
 const IGNORE_DIRS = new Set([
@@ -192,47 +198,23 @@ fsRoute.get("/scan", async (c) => {
   return c.json({ dirs, home });
 });
 
-const RECENTS_PATH = path.join(os.homedir(), ".cc-webui", "recents.json");
-
-type Recent = { path: string; lastUsed: number };
-
-async function loadRecents(): Promise<Recent[]> {
-  try {
-    const raw = await fs.readFile(RECENTS_PATH, "utf-8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveRecents(recents: Recent[]) {
-  await fs.mkdir(path.dirname(RECENTS_PATH), { recursive: true });
-  await fs.writeFile(RECENTS_PATH, JSON.stringify(recents, null, 2));
-}
-
 fsRoute.get("/recents", async (c) => {
-  const recents = await loadRecents();
-  return c.json({ recents });
+  // TODO(permissions): scope to the authenticated user instead of "".
+  return c.json({ recents: listOpenedProjects() });
 });
 
 fsRoute.post("/recents", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const p: string = body.path;
   if (!p) return c.json({ error: "path required" }, 400);
-  const recents = await loadRecents();
-  const filtered = recents.filter((r) => r.path !== p);
-  filtered.unshift({ path: p, lastUsed: Date.now() });
-  const trimmed = filtered.slice(0, 20);
-  await saveRecents(trimmed);
-  return c.json({ recents: trimmed });
+  recordOpenedProject(p);
+  return c.json({ recents: listOpenedProjects() });
 });
 
 fsRoute.delete("/recents", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const p: string = body.path;
-  const recents = await loadRecents();
-  await saveRecents(recents.filter((r) => r.path !== p));
+  if (p) removeOpenedProject(p);
   return c.json({ ok: true });
 });
 

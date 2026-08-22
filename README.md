@@ -121,7 +121,8 @@ npm run dev
 | `CC_WEBUI_HOST` | 服务 bind 的 host；默认 IPv4 loopback。想放 LAN 用 `0.0.0.0` | `127.0.0.1` |
 | `CC_WEBUI_CWD` | claude 的默认工作目录（UI 里也能切） | `process.cwd()` |
 | `CC_WEBUI_UPLOAD_DIR` | 文件上传落盘目录 | `os.tmpdir()/cc-webui-uploads` |
-| `CC_WEBUI_SESSION_INDEX` | WebUI 自己维护的 provider-aware session index（目前用于 Codex 历史） | `~/.cc-webui/sessions.json` |
+| `CC_WEBUI_SESSION_INDEX` | 旧 Codex 会话索引文件路径，现仅用于首次启动时一次性导入进 SQLite | `~/.cc-webui/sessions.json` |
+| `CC_WEBUI_DB` | SQLite 数据库路径（索引与关系：最近项目 / 飞书绑定 / 群聊索引 / Codex 会话索引） | `~/.cc-webui/cc-webui.db` |
 | `CC_WEBUI_GROUPS_DIR` | 多 agent 群聊数据目录（`<gid>/config.json` + `transcript.jsonl` + `index.json`） | `~/.cc-webui/groups` |
 | `CC_WEBUI_GROUPS_ENABLED` | 是否启用**多 agent 群聊**（一个 turn 里多个 agent 接话）。未开启时网页群聊入口不出现、`/api/groups` 不挂载；飞书和网页单聊不受影响 | 关闭 |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |

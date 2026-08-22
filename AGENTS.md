@@ -25,7 +25,7 @@ npm install
 npm run dev        # 开发：vite 前端 :8787（HMR）+ api :8788，vite 把 /api 代理到 8788
 npm start          # 生产：vite build 后单端口 :8787 同时托管 dist/ 和 /api/*（NODE_ENV=production）
 npm run typecheck  # tsc --noEmit（提交前必过）
-npm test           # tsx --test "server/**/*.test.ts"（10 个测试文件，纯 assert 脚本风格）
+npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯 assert 脚本风格）
 ```
 
 - 端口：`PORT`（默认 8787）、`CC_WEBUI_HOST`（默认 `127.0.0.1`，放 LAN 用 `0.0.0.0`）。
@@ -148,17 +148,34 @@ npm test           # tsx --test "server/**/*.test.ts"（10 个测试文件，纯
 
 ## 数据与存储布局
 
+> **规则**：**DB 存索引与关系，文件存内容与 append-only 真相。**
+
 ```
-~/.claude/projects/<slug>/*.jsonl   # 原生 Claude 会话（cc-webui 只读，用于恢复/历史）
+~/.claude/projects/<slug>/*.jsonl   # 原生 Claude 会话。Claude Code CLI 自己的存储，
+                                    # 和你终端里的 claude 共用同一棵树，cc-webui 只读
+~/.codex/sessions/                  # 同理，Codex 自己的
 ~/.cc-webui/
-├── sessions.json                   # provider-aware 会话索引（目前主要给 Codex 历史）
-└── groups/
-    ├── index.json                  # 群聊索引（侧栏/搜索）
-    └── <gid>/
-        ├── config.json             # 群配置
-        └── transcript.jsonl        # canonical 群聊记录（append-only）
+├── cc-webui.db                      # SQLite（server/db.ts）：
+│                                    #   opened_projects  取代 recents.json
+│                                    #   feishu_bindings  取代 feishu/bindings.json
+│                                    #   groups_index     取代 groups/index.json
+│                                    #   codex_sessions / codex_turns  取代 sessions.json
+├── *.json.migrated                  # 迁移前的原文件，保留备查（不再被读取）
+└── groups/<gid>/
+    ├── config.json                  # 群配置
+    ├── runtime.json                 # per-agent native session id
+    └── transcript.jsonl             # canonical 群聊记录（append-only，**留在文件里**）
 ```
-路径可用 `CC_WEBUI_SESSION_INDEX` / `CC_WEBUI_GROUPS_DIR` 覆盖。
+
+- **为什么上 SQLite**：每个 JSON 存储都是"整文件读-改-写"，两个写者并发就丢更新
+  （旧 `upsertIndexRow` 是典型）。单用户时罕见，多用户后是常态。
+- **为什么 transcript 不进 DB**：append-only jsonl 对它是真的合适（一事件一 append、
+  不重写、写一半崩了也不烂），而且它是唯一的 canonical 真相，搬它风险最大收益最小。
+- 只有 `server/db.ts` 碰 SQLite 驱动（现为内置 `node:sqlite`，实验性 API），
+  换成 `better-sqlite3` 只改那一个文件。
+- 路径覆盖：`CC_WEBUI_DB` / `CC_WEBUI_GROUPS_DIR` / `CC_WEBUI_SESSION_INDEX`
+  （后者现在只用于一次性导入）/ `CC_WEBUI_CLAUDE_PROJECTS_DIR`。
+  **写测试时凡是碰索引的都要设 `CC_WEBUI_DB`**，否则会读写你的真实库。
 
 ## 已知问题 / 粗糙边缘（handoff 重点）
 

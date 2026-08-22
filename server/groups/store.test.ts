@@ -5,7 +5,11 @@ import os from "node:os";
 
 const tmp = path.join(os.tmpdir(), `cc-webui-groups-test-${Date.now()}`);
 process.env.CC_WEBUI_GROUPS_DIR = tmp;
+// The group index moved into SQLite, so this must be redirected too — without
+// it the index assertions below read (and write) the developer's real database.
+process.env.CC_WEBUI_DB = path.join(tmp, "test.db");
 
+const { closeDb } = await import("../db.ts");
 const {
   appendEntry,
   readAll,
@@ -161,5 +165,7 @@ try {
 
   console.log("store tests passed");
 } finally {
+  closeDb();
+  delete process.env.CC_WEBUI_DB;
   await fs.rm(tmp, { recursive: true, force: true });
 }

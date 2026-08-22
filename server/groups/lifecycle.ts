@@ -1,4 +1,4 @@
-import { newGroupId, readIndex, upsertIndexRow } from "./store.ts";
+import { newGroupId, updateIndexMeta, upsertIndexRow } from "./store.ts";
 import {
   defaultConfig,
   readConfig,
@@ -68,18 +68,15 @@ export async function relocateGroup(
   for (const p of cfg.participants) {
     await clearAgentSessionId(gid, p.id);
   }
-  const idx = await readIndex();
-  const oldRow = idx.groups.find((g) => g.id === gid);
-  await upsertIndexRow({
-    id: cfg.id,
+  // lastTs / lastSnippet are preserved by the UPDATE itself rather than being
+  // read out and copied back — that read-then-write was the losing half of the
+  // old index.json race.
+  await updateIndexMeta(gid, {
     title: cfg.title,
     cwd: cfg.cwd,
-    lastTs: oldRow?.lastTs ?? Date.now(),
     participantSummary: cfg.participants
       .map((p) => (p.id === "claude" ? "Claude" : "Codex"))
       .join(" · "),
-    lastSnippet: oldRow?.lastSnippet ?? "",
-    inFlight: oldRow?.inFlight ?? false,
   });
   return cfg;
 }

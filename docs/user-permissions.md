@@ -51,24 +51,46 @@
 
 ## 数据模型(全部是新增状态)
 
-现有六个存储 grep `userId|owner|email` **零命中**——"谁拥有什么"完全是新的。
+现有存储 grep `userId|owner|email` **零命中**——"谁拥有什么"完全是新的。
 
+**已经不是 JSON 文件了**:SQLite 迁移(`server/db.ts`)已先行落地,`opened_projects` /
+`feishu_bindings` / `groups_index` / `codex_sessions`+`codex_turns` 都已是表。
+本模块只需在同一个库里**追加迁移**:
+
+```sql
+-- 追加为 MIGRATIONS[1]
+CREATE TABLE users (
+  id            TEXT PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,      -- node:crypto scrypt
+  salt          TEXT NOT NULL,
+  role          TEXT NOT NULL,      -- 'admin' | 'user'
+  created_at    INTEGER NOT NULL
+);
+CREATE TABLE allowed_paths (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pattern TEXT NOT NULL,            -- glob，交给 path.matchesGlob
+  PRIMARY KEY (user_id, pattern)
+);
+CREATE TABLE ownership (
+  resource_id TEXT PRIMARY KEY,     -- Claude sessionId / Codex threadId / gid，都是 UUID 不会撞
+  kind        TEXT NOT NULL,        -- 'claude' | 'codex' | 'group'
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  INTEGER NOT NULL
+);
+CREATE TABLE feishu_senders (
+  open_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+);
 ```
-~/.cc-webui/
-├── users.json            {users:[{id,username,passwordHash,salt,role,allowedPaths[],createdAt}]}
-├── ownership.json        {[resourceId]: {userId, kind:"claude"|"codex"|"group", ts}}
-├── opened-projects.json  {records:[{userId, path, lastUsed}]}     ← 取代共享的 recents.json
-└── feishu/
-    └── sender-map.json   {[openId]: userId}
-```
 
-- `role`:`"admin" | "user"`。
-- `allowedPaths`:glob 数组,如 `["/Users/x/code/**", "/Users/x/scratch/*"]`。空数组 = 什么都不能开。
-- `ownership.json` 用**一张表覆盖三种资源**:Claude sessionId / Codex threadId / gid 都是 UUID,不会撞。
-- **签名密钥**:`~/.cc-webui/cookie-secret`(首启生成),不进 env,不进 git。
-
-现有存储**不加 owner 列**,归属统一放在 `ownership.json`——因为 `~/.claude/projects/*.jsonl` 是
-Claude Code CLI 自己的格式,我们不该往里写字段(它和用户自己终端里的会话共用同一棵树)。
+- `opened_projects.user_id` 已经存在(现在填 `''` 表示无主),本模块只需开始写真实 user id。
+  它是 `TEXT NOT NULL DEFAULT ''` 而不是 nullable,正是因为 SQLite 在 UNIQUE 索引里把 NULL
+  当彼此不同,可空的 owner 会静默放进重复行。
+- **签名密钥**:`~/.cc-webui/cookie-secret`(首启生成),不进 env,不进 git,不进 DB。
+- 会话**内容**仍不进 DB:`~/.claude/projects/*.jsonl` 是 Claude Code CLI 自己的格式
+  (和用户终端里的会话共用同一棵树),`<gid>/transcript.jsonl` 是 append-only canonical 真相。
+  归属信息放 `ownership` 表,不往那些文件里写字段。
 
 ## 授权模型
 
@@ -170,12 +192,13 @@ scopeToUser(user, list)                // 服务端强制过滤,不接受调用�
 
 ## 迁移
 
-1. 首启读 `CC_WEBUI_ADMIN=user:pass` → 建管理员(scrypt 哈希)→ 日志提示可以移除该变量。
-2. 生成 `~/.cc-webui/cookie-secret`。
-3. 扫描现有 Claude 会话 / Codex 会话 / 群,全部在 `ownership.json` 里记为**首个管理员所有**(决策 15)。
-4. `recents.json` 整份迁进 `opened-projects.json`,归首个管理员。
-5. 管理员的 `allowedPaths` 默认 `["**"]`(全开);普通用户默认 `[]`(全关,由管理员显式配)。
-6. **先建好管理员再开放端口**——在建号之前,任何能访问端口的人都能把自己变成管理员。
+1. 追加 `MIGRATIONS[1]`(上面那批表)。
+2. 首启读 `CC_WEBUI_ADMIN=user:pass` → 建管理员(scrypt 哈希)→ 日志提示可以移除该变量。
+3. 生成 `~/.cc-webui/cookie-secret`。
+4. 扫描现有 Claude 会话 / Codex 会话 / 群,全部在 `ownership` 表里记为**首个管理员所有**(决策 15)。
+5. 把 `opened_projects` 里 `user_id = ''` 的行改归首个管理员。
+6. 管理员的 `allowed_paths` 默认 `["**"]`(全开);普通用户默认 `[]`(全关,由管理员显式配)。
+7. **先建好管理员再开放端口**——在建号之前,任何能访问端口的人都能把自己变成管理员。
 
 ## 留了什么后路
 
