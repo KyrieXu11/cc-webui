@@ -1,0 +1,48 @@
+server/bash-tasks.ts
+  s_58b7404ce04904::t_ba6984088137f5 3-4,36-47,64-67,72-73,103,122,131-135,145-148,159-161,247-252,261-265
+server/chat.ts
+  s_58b7404ce04904::t_182374499e2133 514
+  s_58b7404ce04904::t_91b0565e92ea90 10,856-858,870-873,879-881
+server/fs.ts
+  s_58b7404ce04904::t_91b0565e92ea90 2-4,215,222-224,230
+  s_58b7404ce04904::t_5b8aaf452eb038 201-211
+server/groups/claude-runner.ts
+  s_58b7404ce04904::t_182374499e2133 3,161-164
+server/feishu/card-action.ts
+  s_58b7404ce04904::t_182374499e2133 52-54,56
+  s_58b7404ce04904::t_e0cc86df9738a4 7,16,19,55
+server/feishu/ws.ts
+  s_58b7404ce04904::t_e0cc86df9738a4 53
+server/auth/policy.test.ts
+  s_58b7404ce04904::t_d38530ebfefd3c 249-365
+server/auth/scope.ts
+  s_58b7404ce04904::t_cb8abcee9c6042 1-40
+server/codex-chat.ts
+  s_58b7404ce04904::t_91b0565e92ea90 34,495-498
+server/permission.ts
+  s_58b7404ce04904::t_182374499e2133 2,7-15,32-33,60-61,74-79,82-83,87-93,127-131
+server/sessions.ts
+  s_58b7404ce04904::t_91b0565e92ea90 2-3,45-49,52
+server/groups.ts
+  s_58b7404ce04904::t_91b0565e92ea90 4,64,67-69,271,273-279
+docs/user-permissions.md
+  s_58b7404ce04904::t_58bccee595edd4 178-184,214-226
+server/auth/policy.ts
+  s_58b7404ce04904::t_a47ad31bbe0651 153-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "c3e0ef2ed65a04de66c94743bfa4d3bc19150684",
+  "prompts": {},
+  "sessions": {
+    "s_58b7404ce04904": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "efe0b87b-c0fe-4dd2-8af0-d8534e03f095",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
