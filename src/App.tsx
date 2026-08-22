@@ -40,6 +40,7 @@ import { addRecent, getHome, readFile } from "./lib/fs";
 import { isImageFile, isTextFile, rawFileUrl } from "./lib/filepreview";
 import { getSessionMessages, type SessionSummary } from "./lib/sessions";
 import { sendPermission } from "./lib/permission";
+import { useAuth } from "./AuthGate";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -210,7 +211,12 @@ export default function App() {
   const [currentGroupIdRaw, setCurrentGroupId] = useState<string | null>(null);
   // Group chat is an opt-in server feature (CC_WEBUI_GROUPS_ENABLED). Starts
   // false so nothing group-shaped renders before /api/meta answers.
-  const [groupsFeature, setGroupsFeature] = useState(false);
+  const [groupsServerFeature, setGroupsServerFeature] = useState(false);
+  // ...and it is admin-only, because a group is Claude + Codex by definition
+  // and a plain user may not select Codex at all (docs/user-permissions.md,
+  // decisions 14 and 16).
+  const { isAdmin } = useAuth();
+  const groupsFeature = groupsServerFeature && isAdmin;
   // Every read of the current group goes through the flag, so a stale stored
   // group id can never surface a hidden feature.
   const currentGroupId = groupsFeature ? currentGroupIdRaw : null;
@@ -350,7 +356,7 @@ export default function App() {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
-        setGroupsFeature(data.features?.groups === true);
+        setGroupsServerFeature(data.features?.groups === true);
       })
       .catch(() => {});
     return () => {
