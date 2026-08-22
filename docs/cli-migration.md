@@ -1,0 +1,465 @@
+# CLI 驱动迁移 — 决策记录与接手指南
+
+> **给接手的 agent**：这份文档记录一次设计评审的**全部结论 + 已核实的事实**。
+> 事实部分是实测出来的（跑过命令、读过 `node_modules` 源码），**不要重新调研**，直接用。
+> 如果你发现某条事实和现实不符，改这份文档并注明日期，不要默默绕过。
+>
+> 定稿日期：2026-08-22 · 未实施（除「已完成」一节）
+> 相关：架构总览见 [`../AGENTS.md`](../AGENTS.md)，飞书见 [`./feishu.md`](./feishu.md)。
+> ⚠️ 不要参照 `docs/superpowers/`——那是设计期文档，AGENTS.md 已列出它与实现的漂移。
+
+## 目标
+
+1. **群聊变成环境变量可开关**（✅ 已完成，见下）
+2. **扔掉 `@anthropic-ai/claude-agent-sdk` 和 `@openai/codex-sdk`，自己驱动 CLI 子进程**（未实施）
+
+## 已完成：群聊开关
+
+`CC_WEBUI_GROUPS_ENABLED`（默认关）。语义、执行点、为什么不在 `validateConfig` 层面拦，
+全部记在 **AGENTS.md 的「3. 会话引擎」一节**，这里不重复。相关文件：`server/features.ts`、
+`server/groups/orchestrator.ts`（`capToSoloWhenGroupsDisabled`）、`server/groups/group-flag.test.ts`。
+
+---
+
+## 决策表
+
+| # | 决策 | 理由 |
+|---|---|---|
+| 1 | 群聊开关的动机是**产品聚焦**（设计不成熟先收敛），不是收安全面 | 决定了边界取最窄的那个 |
+| 2 | 换 CLI 的动机是**版本跟随**（吃本机 CLI 的新能力）+ **实时拿模型列表** | 见「模型」一节，事实已证实版本确实落后 |
+| 3 | **先做开关，再迁 CLI** | 两件事互相独立（飞书继续跑 → runner 仍是活代码，开关不缩小迁移面积），开关小且是当下想要的 |
+| 4 | 开关**默认关** | 单用户自托管，没有"老用户无感升级"包袱；忘配的机器自动处在最小面 |
+| 5 | executor 代码**写在 cc-webui 里，不抽 npm 包** | 只有一个消费者，抽包会在只见过一个用例时冻死接口。跨项目该复用的是**设计**，不是代码 |
+| 6 | 开关管的是「**2 participant**」能力，不是引擎 | 飞书 p2p 是 1-participant 会话，跑在同一个引擎上，不能一起关 |
+| 7 | flag 关闭时网页群聊入口**彻底不出现**；flag 经 `/api/meta` 运行时下发 | 编译期 flag 会让 `npm run dev` 改一次就得重启 vite |
+| 8 | ~~SDK 落后哪个能力~~ | **已被事实取代**：不是缺能力，是版本钉子（见下） |
+| 9 | 模型：Claude 用**家族别名**；Codex 读 `models_cache.json`**读不到则回退硬编码**；`XHIGH_CLAUDE_MODELS` **继续手维护** | CLI 完全不校验 `--effort`，当不了裁判 |
+| 10 | **两个 SDK 都扔掉，自己写驱动** | 用户明确决定。注意：`pathToClaudeCodeExecutable` / `codexPathOverride` 是 SDK 的 option，本方案不用 SDK，故与它们无关 |
+| 11 | 二进制定位：`CC_WEBUI_CLAUDE_BIN` / `CC_WEBUI_CODEX_BIN`，**为空则从 PATH 解析** | 版本跟随默认开 |
+| 12 | 开关只在 turn 层面截断，**config 和 transcript 一行不改** | 改 `validateConfig` 会让已存 2-agent 群 `readConfig` 直接抛，并搞挂绑到它们的飞书 chat |
+| 14 | Codex 驱动用 **`--experimental-json`**，不用文档化的 `--json` | 事件形状与现在完全相同 → `processor.ts` 的 Codex 分支零改动。启动日志记下用的是哪个 flag，哪天它没了好定位 |
+| 15 | 重写时**顺手修 mode 语义**：`default` 接上真实审批、`dontAsk` 修正反向 | 详见「已知的坑 · mode 语义」 |
+| 16 | 三个进程内 MCP → **迁到已有的 HTTP MCP 路由**（`mcp-bash-route.ts`） | **不要选 stdio 子进程**，原因见「MCP」一节——(a)/(c) 不等价 |
+| 17 | `sessions.ts` 的三个 SDK 函数 → **自己写 jsonl 读取器** | `server/session-store.ts` 已有读 Codex native jsonl 的同类实现可照抄 |
+
+---
+
+## 已核实的事实（别重新调研）
+
+### 1. 两个 SDK 本来就是 CLI 子进程包装器
+
+这条推翻了"换成 CLI 驱动"的朴素理解：**现在就已经在跑 CLI 了**，只是跑的是 SDK 钉住的旧版本。
+所以这次迁移不是 SDK→CLI，是**重新实现驱动层**。
+
+| | 机制 | 版本 |
+|---|---|---|
+| `@anthropic-ai/claude-agent-sdk` | `sdk.mjs:15` `spawn`；二进制来自 8 个平台 optionalDependencies；`sdk.mjs:117` 解析路径 | `manifest.json` 钉 **2.1.201**；darwin-arm64 的 `claude` = 231,708,784 字节 |
+| `@openai/codex-sdk` | `dist/index.js:137` import spawn，`:250` spawn，`:174` argv = `["exec","--experimental-json", …]`；prompt 走 stdin；输出 readline 读 JSONL；`:289-292` 非零退出抛错 | 依赖 `@openai/codex@**0.142.5**` |
+
+本机实际安装：`claude` **2.1.239**、`codex-cli` **0.144.1**。两边都比 SDK 新。
+
+**SDK 在 argv 之上加了什么**：Claude 侧是一套**双向控制协议**（见下）+ 进程内 MCP 桥接 + 类型化事件
++ session 记账；Codex 侧几乎只有行分帧、`JSON.parse`、thread-id 跟踪和类型（约 250 行透明包装）。
+
+### 2. CLI 能力
+
+`claude` —— 需要的 flag 全都有：
+`-p/--print`、`--output-format text|json|stream-json`、`--input-format text|stream-json`、
+`--include-partial-messages`、`--resume [id]`、`-c/--continue`、`--fork-session`、`--session-id <uuid>`、
+`--model`、`--effort`、`--permission-mode`（`acceptEdits|auto|bypassPermissions|manual|dontAsk|plan`）、
+`--mcp-config`、`--strict-mcp-config`、`--allowed-tools`/`--disallowed-tools`、`--tools`、
+`--append-system-prompt`、`--system-prompt`、`--max-budget-usd`、`--include-hook-events`、
+`--replay-user-messages`、`--settings`。
+
+⚠️ **`--permission-prompt-tool` 不在 `--help` 里但真实可用**（实测 exit 0）。传 `stdio` 是**哨兵值**
+而非工具名——SDK 的逻辑是：设了 `canUseTool` 就 push 字面量 `"stdio"`。
+
+`codex exec` —— `--json`、`resume`、`-s/--sandbox {read-only,workspace-write,danger-full-access}`、
+`-m/--model`、`-c/--config k=v`、`--output-schema`、`-o/--output-last-message`、`-C/--cd`、
+`--add-dir`、`--skip-git-repo-check`、`--ephemeral`、`-i/--image`。
+⚠️ `-a/--ask-for-approval` **只在顶层 TUI 上有，`codex exec` 上没有**。
+⚠️ `codex exec` **没有 partial-message / delta 相关 flag**，Codex 侧增量事件未验证。
+
+### 3. 控制协议（**无文档、无版本协商**）
+
+权限卡和进程内 MCP 都跑在这上面。前提：`--input-format stream-json`。
+
+子类型全集：`initialize`、`can_use_tool`、`hook_callback`、`mcp_message`、`interrupt`、
+`set_permission_mode`、`mcp_set_servers`。
+
+**权限（`can_use_tool`）线格式**——CLI 写 stdout：
+
+```json
+{"type":"control_request","request_id":"…","request":{"subtype":"can_use_tool","tool_name":"…","input":{…},"permission_suggestions":…,"blocked_path":…}}
+```
+
+host 写 stdin（**CLI 在此期间真的阻塞，无上限**）：
+
+```json
+{"type":"control_response","response":{"subtype":"success","request_id":"…","response":{"behavior":"allow","updatedInput":{…}}}}
+```
+
+deny 用 `{"behavior":"deny","message":"…"}`。这正是 cc-webui 权限卡需要的语义。
+
+**进程内 MCP**：`createSdkMcpServer` 返回 `{type:"sdk",name,instance}`；通过 `initialize` 的
+`sdkMcpServers:[names]` 和 `mcp_set_servers` 声明；之后每条 JSON-RPC 消息双向隧道成
+`control_request{subtype:"mcp_message", server_name, message}`。**CLI 没有 in-process 的 flag，
+只有这个隧道。** 本方案不重实现它（见 Q16）。
+
+⚠️ **版本偏移完全无防护**：`claudeCodeVersion` 在 `sdk.mjs` 里出现 **0 次**，没有 `versionCheck` /
+`MIN_CLI` / `protocol_version`，`initialize` 载荷里只有 feature 字段。所以哪天 CLI 改了这套协议，
+不会有任何警告，症状会是权限卡或 MCP 静默失效。**驱动层务必在启动日志打印
+`claude --version` / `codex --version`**，出问题第一眼能定位。
+
+### 4. 流式保真度：`stream-json` == `query()` 吐的东西
+
+实测捕获（`claude -p --output-format stream-json --include-partial-messages --verbose`）产出：
+
+- `system/{init,status,thinking_tokens,hook_started,hook_response}`
+- `stream_event/{message_start, content_block_start, content_block_delta(text_delta|thinking_delta|signature_delta|input_json_delta), content_block_stop, message_delta, message_stop}`
+- `assistant/{text,thinking,tool_use}`、`user/{tool_result}`、`rate_limit_event`
+- `result/success`（`usage`、`modelUsage`、`total_cost_usd`、`stop_reason`、`terminal_reason`、`permission_denials`）
+
+`src/lib/processor.ts` 读的每个字段都在，**没找到任何"SDK 有而 stream-json 没有"的事件**。
+`processor.ts` 里 SDK 侧独有的三个是 cc-webui 自己合成的，不是模型事件：
+`permission_request`、`permission_resolved`（`:106`、`:129`）、`wakeup_turn_started`（`:93`）。
+Codex 分支（`:63-88` 的 `thread.started` / `turn.failed` / `item.*`）本来就是原始 JSONL 直传。
+
+**结论：事件映射层基本不用改。** 唯一改动是 `permission_request` / `permission_resolved` 的来源
+从 `canUseTool` 回调换成 `control_request` 帧。
+
+### 5. 模型
+
+**Claude 家族别名可用，且会 server-side 解析成当前版本**（8 个全部实测）：
+
+| 别名 | 实际跑的 |
+|---|---|
+| `default` | `claude-opus-5[1m]` |
+| `fable` | `claude-fable-5` |
+| `opus` / `opus[1m]` | `claude-opus-5` / `claude-opus-5[1m]` |
+| `sonnet` / `sonnet[1m]` | `claude-sonnet-5` / `claude-sonnet-5[1m]` |
+| `opusplan` | `claude-sonnet-5` |
+| `haiku` | `claude-haiku-4-5-20251001` |
+
+**这是别名方案最强的论据**：`src/lib/settings.ts:82-120` 现在钉的是 `claude-opus-4-8` /
+`claude-sonnet-4-6`，而 `opus`/`sonnet` 已经解析到 **opus-5 / sonnet-5**——硬编码列表**已经落后一代**。
+用别名就自动跟随了。
+
+顺带：`DEFAULT_SETTINGS.model = "sonnet"` 在别名方案下**本来就是合法的**。AGENTS.md 里
+「默认模型 sonnet 不是合法 id → 静默改写成 fable-5」那条 bug，根源就是当初从别名改成了钉版本 id，
+改回别名即自动消失，不需要单独修。
+
+⚠️ 不带前缀的日期 id **会失败**：`sonnet-4-6` → 404。
+
+**`--effort` CLI 完全不校验**——`haiku`+`xhigh`、`sonnet`+`max`、甚至 `bogustier` 这种瞎写的档位
+全部静默通过。所以 `settings.ts:186-196` 的 `XHIGH_CLAUDE_MODELS` **必须继续手维护**。
+
+**Codex 没有别名，只能精确 id**（实测 `codex`/`mini`/`gpt-5`/`gpt-5-codex`/`sonnet` 全失败，
+只有 `gpt-5.5` 跑通）。但机器上有 **`~/.codex/models_cache.json`**（296KB，每模型 38 个字段，
+含 `supported_reasoning_levels` / `visibility` / `context_window` / `supported_in_api`），
+已列出 `gpt-5.6-sol` / `-terra` / `-luna`，在仓库当前的 `gpt-5.5` 天花板之上。
+⚠️ **它是服务端拉的缓存，会坏**——调研时这台机器上它就是坏的（是从一条泄漏的 stderr
+`codex_models_manager::cache: failed to load models cache: missing field base_instructions` 发现的），
+schema 是 Codex 内部的，`client_version` 0.148.0 还和安装的 0.144.1 不一致。**所以要回退路径。**
+
+**两个 CLI 都无法枚举模型**：`claude models` 会被当成 prompt 真跑一轮；`codex models` →
+`Error: stdin is not a terminal`；非法值的报错也不列出合法集。`~/.claude/` 下和 SDK 包里
+**没有** 带 capability 元数据的 Claude 模型清单（`sdk.d.ts` 只有一个不完整、非权威的 id union，
+连 `claude-sonnet-4-6` / `claude-haiku-4-5` 都缺）。
+
+---
+
+## 工作清单
+
+### 要替换的 SDK 调用点
+
+**`@anthropic-ai/claude-agent-sdk`**
+
+| API | 调用点 | 迁移 |
+|---|---|---|
+| `query()` | `server/chat.ts:426`、`server/groups/claude-runner.ts:60`、**`cli/subagent-mcp/index.ts:77`**（别漏这个独立小工具） | spawn + stream-json 解析 |
+| `createSdkMcpServer()` / `tool()` | `server/bash-mcp.ts:470`、`server/schedule-mcp.ts:98`、`server/feishu/lark-mcp.ts:210`（共 **9** 处 `tool()`） | 迁到 HTTP 传输，见下 |
+| `listSessions` / `getSessionMessages` / `deleteSession` | `server/sessions.ts:27,63,78` | 自己写 jsonl 读取器（Q17=a） |
+| 类型 `McpSdkServerConfigWithInstance` | `bash-mcp.ts:4`、`schedule-mcp.ts:4`、`lark-mcp.ts:7`、`groups/runner-types.ts:1`、`groups/orchestrator.ts:84,219` | 自己声明 |
+| 类型 `PermissionUpdate` | `shared/permission-flow.ts:1` | 自己声明 |
+
+`query()` 用到的 option（11 个）：`resume`、`cwd`、`model`、`permissionMode`、`effort`、
+`includePartialMessages`、`mcpServers`、`disallowedTools`、`systemPrompt{type:"preset",preset:"claude_code",append}`、
+`canUseTool`，外加 `cli/subagent-mcp` 的 `allowedTools`。迭代器侧只用了 `.return?.()`
+（`chat.ts:539`、`claude-runner.ts:180`）——对应子进程的 kill。
+`canUseTool` 回调消费 `suggestions,title,displayName,description,toolUseID,signal`（`chat.ts:464-491`），
+返回 `{behavior:"allow",updatedInput[,updatedPermissions]}`（`chat.ts:519-523`）。
+
+**`@openai/codex-sdk`**：`new Codex({config,env})`（`codex-chat.ts:366`、`groups/codex-runner.ts:117`）、
+`resumeThread`/`startThread`/`runStreamed({signal})`（`codex-chat.ts:382-385`、`codex-runner.ts:139-143`）。
+threadOptions 6 个：`model`、`workingDirectory`、`skipGitRepoCheck`、`sandboxMode`、`approvalPolicy`、
+`modelReasoningEffort`。注意 `codex-runner.ts` 没 import 类型，`:135`/`:142` 有 `as any`。
+
+### MCP：为什么必须选 HTTP，不能选 stdio 子进程
+
+评审时以为「HTTP 路由」和「stdio 子进程」等价。**不等价**——那三个 MCP server 有两个是
+**进程内有状态**的：
+
+- `server/bash-mcp.ts` 持有模块级任务注册表，而 `server/bash-tasks.ts` 的 `/api/bash/tasks` SSE
+  面板**直接读同进程的它**（`subscribeListChanges`、`subscribeTaskOutput`、`subscribeForegroundEvents`、
+  `listBackgroundTasks`、`getBackgroundTaskById`、`killBackgroundTaskById`、`relabelTasksSessionId`）。
+  挪进子进程 → 后台任务面板直接瞎。
+- `server/feishu/lark-mcp.ts` 是**每 turn 现造**的（`handler.ts:564`），绑定当轮那个飞书 chat。
+  子进程拿不到这个绑定。
+
+而 `server/mcp-bash-route.ts` 用 **bearer token 携带 per-turn 上下文**
+（`registerCodexMcpContext` / `getCodexMcpContext`，`codex-mcp-context.ts:18,45`），
+**服务端仍在同一个进程里**——所以它只是换传输，模块状态全部保留。这也正是它今天能给
+Codex / 飞书用的原因。
+
+顺带收益：这一步把 AGENTS.md 那条「两套 Bash MCP，改 bash 行为两边都要看」**合并成一套**。
+代价是 bash 工具多一跳 localhost，单机可忽略。
+
+⚠️ 迁之前先修 `mcp-bash-route.ts:362-388` 的泄漏：`/bash` 和 `/lark` **每个 HTTP 请求**都 new 一个
+`McpServer` + transport 且都不 close。现在只有 Codex/飞书在用，迁完 Claude 也走这条，泄漏会放大。
+
+---
+
+## 已知的坑
+
+### lvshu 已经付过学费的三个（不处理会原样继承）
+
+1. **"API Error" 是以一条合成的 `assistant` 消息到达的**，不是协议错误。不拦就直接变成回答给用户。
+   lvshu 为此开了整个 `claude_apierror.go`（156 行）。
+2. **`result.terminal_reason == "api_error"` 会置 `is_error`，但 `subtype` 仍是 `"success"`**
+   （`lvshu/.../claude.go:270-274`）。只看 `subtype` 会把失败当成功。
+3. **result 事件里的原因要盖过进程退出码**，且超时和主动取消必须分开
+   （`claude.go:319-336`：`DeadlineExceeded`→timeout、`Canceled`→aborted）。
+
+（lvshu 那个 10MB `scanner.Buffer`（`claude.go:220-221`）是 Go 独有问题——Node 的 `readline`
+没有行长上限，这条不用抄。）
+
+另外 `system/thinking_tokens` 是 lvshu 在代码里标注为「唯一的跨模型 is-it-thinking 信号，且无文档」。
+
+### mode 语义（Q15=a：重写时修）
+
+`server/codex-chat.ts:187-198` 和 `server/groups/codex-runner.ts:44-51` 都把 4 个 mode 塌成
+`{sandboxMode:"workspace-write", approvalPolicy:"never"}`：
+
+- **`default`**：UI 上写着「每次弹权限」，实际从不问，且有 workspace 写权限。
+  `codex-chat.ts` 里**根本没有权限卡代码**。
+- **`dontAsk`**：飞书 `/mode` 帮助文案（`server/feishu/parse.ts:66`）写的是「不询问，未预批一律拒」，
+  实际是**无审批全写**——语义反了。`handler.ts:67` 的 `MODE_ALIASES` 真的接受 `dontask`/`deny`。
+
+修 `default` 和 `dontAsk` 这两个说谎的；`auto`/`acceptEdits` 保持现状。
+另外 `validateConfig`（`groups/config.ts:39-81`）既不校验 `mode` 也不校验 `model`，任意字符串
+都能进 config 并直达 SDK/CLI——顺手加上。
+
+### 别再重复的死 flag
+
+仓库里有一个 `FEISHU_USE_WEBHOOK`：`.env.example` 和 `docs/feishu.md` 都写了，`config.ts` 的
+`transportMode()` **零调用方**，webhook 端点固定 404。新增 flag 时别再造一个这样的。
+
+---
+
+## 参考实现：lvshu（Go，生产在跑）
+
+`/Users/xuqiang/code/ts/lvshu/server/internal/agent/` —— **不用 SDK，直接驱动 `claude` CLI**。
+Go 代码不能直接搬，**设计可以**。索引：
+
+| 关注点 | 位置 |
+|---|---|
+| 定位二进制 / 起进程 | `claude.go:34` `exec.LookPath`、`:54` `exec.CommandContext`、`:74/:79` pipes、`:87` Start |
+| argv 构造（交互模式） | `claude.go:104-112`：`-p --output-format stream-json --input-format stream-json --verbose --include-partial-messages --strict-mcp-config --permission-prompt-tool stdio --permission-mode default --tools default` |
+| argv 构造（一次性模式） | `claude.go:120-125`：prompt 走位置参数、无 `--input-format`、`--disallowedTools AskUserQuestion` |
+| 解析结构（`RawMessage` 懒解码） | `claude.go:391-420`（`claudeEvent`）、`:444-461`、`:475-494` |
+| 跳过无法解析的行 | `claude.go:224` |
+| 控制协议应答 | `claude.go:566-591` `answerClaudeControl` |
+| 权限策略（路径牢笼，**不是问人**） | `claude.go:578-613` |
+| MCP（真 stdio 传输 + 自动 `--allowedTools`） | `claude.go:145`、`:150-175`、`:164`；`agent.go:46-52` |
+| `--resume` + session id 采集 | `claude.go:129`、`:226-228` |
+| provider 中立抽象 | `agent.go:16-19` `Backend`、`:60-63` `Session`、`:67-118` `Message`/`MessageType`、`:150-160` `Result`/`RunStatus`/`FailureKind` |
+
+⚠️ **lvshu 没验证 cc-webui 特有的两件事**：它的权限阻塞是路径牢笼、**从没等过一个真人**；
+它的 MCP 是 stdio 子进程、**没有进程内等价物**。另外它的 "provider 中立" 只有一个实现——
+`agent.go:190` `SupportedTypes = []string{"claude"}`，**没有 Codex backend**，而
+`LVSHU_EXECUTOR=mock` 换的是更上层的 `service.AgentRuntime`，不是 `agent.Backend`。
+所以那层抽象是**有依据的设计意图，不是经过两个实现验证的接缝**。
+
+值得抄的设计：两模式 argv 构造器、扁平事件结构 + 懒解码、跳过坏行、"result 原因盖过退出码"、
+超时/取消分离、合成 API 错误拦截、`control_response` 信封、`FailureKind` 重试分类。
+Node 侧对应物：`child_process.spawn`、`readline.createInterface`、`AbortSignal`（codex-sdk 的
+`dist/index.js:250` 就是这么做的）、async generator 代替 channel。
+**没有 npm 库做那套控制协议**——`can_use_tool` 和 `mcp_message` 的分帧得手写。
+
+---
+
+## 落地顺序与接口（已定）
+
+**18. 先做 Claude 侧**，抽成一个 **executor**（不是 runner——两个词的区分见 AGENTS.md）。
+Codex 侧随后。
+
+**19. 接口参考 lvshu 的 `Backend` / `Session`**。但注意：**cc-webui 现有的 `RunnerEvent`
+（`server/groups/runner-types.ts:16-33`）已经是那个结构了**——
+
+| lvshu | cc-webui 现状 |
+|---|---|
+| `Session.Messages` 流 | `{kind:"raw", payload:unknown}` |
+| `Session.Result`（恰好一个终态） | `{kind:"ended", ok, error, events, sessionId, sessionNotFound}` |
+| `FailureKind: transient` | `sessionNotFound`（同一个想法的特化版，触发一次重试） |
+| `RunStatus` 五态 | ❌ 只有 `ok: boolean` |
+| `FailureKind` 三态 | ❌ 只有那一个布尔 |
+
+所以这一步是**把已有的泛化**，不是新造一层规范化事件。具体见下面两条。
+
+**20. stream 的元素保持 raw stream-json 帧**（`payload: unknown`），**不引入 lvshu 的
+`Message`/`MessageType`**。理由：stream-json 就是 SDK 原本吐的东西（已实测，见「流式保真度」），
+而 cc-webui 的 raw 帧是**客户端和服务端用同一个函数折叠**成 `ChatEvent` 的
+（`runner-types.ts:6-14` 有说明）。照搬 lvshu 的 `Message` 会变成
+`stream-json → Message → ChatEvent` 两层映射——lvshu 需要那一层是因为它没有 `ChatEvent`。
+
+**21. 权限回调**：executor 接口收一个 **`canUseTool` 形状的 async 回调**，
+executor 内部负责 `control_request` ↔ 回调 ↔ `control_response` 的分帧。
+这样两个调用方（`chat.ts` 的权限卡、`claude-runner.ts` 的 group 权限卡）逻辑都不用改，
+只是产出方换了。
+⚠️ **lvshu 在这一点上帮不上忙**——它的权限策略是路径牢笼（`claude.go:578-613`），
+从不等一个真人；它的人在环走的是完全另一套机制（`tool_deferred` + 环境变量 + server hook）。
+
+**22. 目录 = `server/executors/`**（不放 `server/shared/`：那里只有一个横切工具
+`permission-flow.ts`，而 executor 是有多文件的子系统；且 `server/shared/` 这名字在 plan 里
+曾想用而没落地，见 AGENTS.md 漂移表）。
+
+**23. `ended` 全套照搬 lvshu**：`RunStatus` + `FailureKind` 三态都上。
+唯一省掉的是 lvshu 的第五态 `deferred`——那个状态存在正是因为 lvshu **不阻塞等人**
+（走 `tool_deferred` + 环境变量 + hook），而 cc-webui 靠控制协议**中途真阻塞**，永远不会 defer。
+
+### 已落地（**未接线**——`chat.ts` / `claude-runner.ts` 仍在用 SDK）
+
+| 文件 | 内容 |
+|---|---|
+| `server/executors/types.ts` | 中立契约：`Executor` / `ExecOptions` / `ExecFrame` / `ExecResult` / `PermissionAsk` / `McpServerSpec` |
+| `server/executors/permission-types.ts` | `PermissionUpdate` 等从 SDK `sdk.d.ts` 原样转录到本地（扔 SDK 后仍有效，它们描述的是 **CLI 的**线上词汇） |
+| `server/executors/claude-executor.ts` | Claude 实现：argv 构造、readline 分帧、控制协议收发、终态分类、合成 API 错误拦截 |
+| `server/executors/contract.test.ts` | 契约测试：两个 stub 证明 claude/codex 都能实现同一接口；两个 option 字面量证明现有调用点每个参数都表达得出来 |
+| `server/executors/claude-executor.test.ts` | 纯函数单测，含用**真实捕获载荷**写的回归用例 |
+
+### 实测通过（真 CLI 2.1.239）
+
+| 场景 | 结果 |
+|---|---|
+| 普通一轮 | `completed`，`session_id` 采集到 |
+| **控制协议 / 权限卡** | `onPermissionAsk` 收到 `Write`，拒绝后模型改试 `Bash`、又收到一次；**两次都被遵守，文件没被创建** |
+| resume | 上一轮记的数字下一轮能答出来，上下文延续 |
+| 坏 resume handle | `sessionNotFound: true` + `failureKind: transient` |
+| 主动取消 | `status: "aborted"`（**不是** `failed`） |
+| **HTTP MCP 往返** | `--mcp-config` 指向 `mcp-bash-route.ts` + bearer token → `mcp__bash__run` 真的执行、结果回来；`autoAllow` 正确短路权限询问。**决策 #16 的承重假设实测成立** |
+
+### 实现时踩到并修掉的三个真 bug（猜不出来，只能实测）
+
+1. **`--input-format stream-json` 下进程跑完不退出。** 保持 stdin 打开是控制协议的需要，但 CLI
+   会一直等更多输入 → 回答早就流完了却撞超时。修法：`result` 事件就是"本轮结束"的信号，
+   此时关 stdin（语义上正好：控制请求只可能发生在轮次进行中），另加 5s 宽限 kill 兜底，
+   否则长驻服务每轮泄漏一个子进程。
+2. **stale session 的原因在 `result.errors`（数组），不是 `result.error`（字符串）。**
+   实测载荷 `{"type":"result","subtype":"error_during_execution","is_error":true,
+   "errors":["No conversation found with session ID: …"]}`。只读单数字段就拿不到任何原因，
+   于是一个**可自愈**的 stale session 被静默降级成 `permanent`。stderr 也带同一句，已作兜底。
+3. **坏 handle 不能回传。** 原本把已死的 handle 原样放进 `sessionHandle`，调用方一持久化，
+   下一轮又 resume 同一个死 session，自愈永不收敛。（SDK 时代的 runner 特意清掉过，
+   见 `server/groups/claude-runner.ts:234`。）
+
+设计时发现的一个洞（已补进接口）：**两个 CLI 收图片的方式根本不同**——Claude 是 base64
+内联进 prompt 的 content block（`chat.ts:392-404`），Codex 必须**落成磁盘临时文件**再用
+`-i/--image` 传路径、跑完还要清理（`codex-chat.ts:210+`）。所以中立层只有
+`images?: ImageAttachment[]`，两边各自翻译，临时目录的生命周期由 executor 在 generator 的
+finally 里自己管。
+
+## 已接线（Claude 侧完成）
+
+`server/chat.ts`（网页单聊）和 `server/groups/claude-runner.ts`（群聊 / 飞书）都已改为
+`claudeExecutor.exec()`。**服务端已完全不 import SDK**（只剩 `cli/subagent-mcp/index.ts`）。
+
+### 连带完成的前置改造
+
+| 改动 | 为什么 |
+|---|---|
+| `codex-mcp-context.ts` → **`mcp-context.ts`**，`registerMcpSessionContext` 等中立命名 | Claude 也用它了，留 `Codex` 前缀就是命名谎言 |
+| context 新增 `onForegroundEvent` / `wakeupSlot` | 前台 bash 事件要打进本轮 SSE；`schedule` MCP 需要 wakeup 槽 |
+| `mcp-bash-route.ts` 新增 **`/schedule`** 端点 | 原来的 `schedule` MCP 建在 SDK 的 `createSdkMcpServer` 上，扔 SDK 就必须有传输版 |
+| `getCodexMcpUrl` → **`getMcpRouteUrl`**，`McpRouteName` 加 `"schedule"` | 同上，不再是 Codex 专用 |
+| **删掉** `server/schedule-mcp.ts`、`server/feishu/lark-mcp.ts`；`bash-mcp.ts` 删 `createBashMcpServer` | 三个进程内 MCP 构造器全部零调用方 |
+| `RunnerCtx.extraMcpServers` 及 orchestrator / handler 的透传全部删除 | 飞书原来给 Claude 和 Codex 各注入一份 lark（进程内 + HTTP）；现在两者都走 HTTP，**AGENTS.md 那条「两套 Bash MCP」真的合并成一套了** |
+| 新增 **`server/claude-sessions.ts`** 替代 SDK 的 `listSessions` / `getSessionMessages` / `deleteSession` | 决策 #17。CLI 没有对应命令 |
+| `shared/permission-flow.ts` 的 `PermissionUpdate` 改用本地声明 | 最后一个 type-only SDK 依赖 |
+
+### 修掉的泄漏，以及为什么不能用缓存
+
+`mcp-bash-route.ts` 原来每个 HTTP 请求 new 一个 `McpServer` + transport 且从不 close。
+先试了「按 token 缓存复用」——**实测直接失败**：
+`Error: Stateless transport cannot be reused across requests. Create a new transport per request.`
+所以 per-request 是强制的，泄漏只能靠**响应流结束后再 close**（`TransformStream` 的 `flush`）。
+已实测 MCP 往返仍然工作。
+
+### 实测通过（真 CLI，隔离进程，绝不启动整个 server）
+
+| 路径 | 场景 | 结果 |
+|---|---|---|
+| `/api/chat` | 普通轮 | `PONG`，SSE 事件类型齐全，`done` |
+| `/api/chat` | bash 经 HTTP MCP | `mcp__bash__run` 调用成功，返回 `CHAT_MCP_OK` |
+| `/api/chat` | `default` 模式权限卡 | 卡片带 `toolUseId` 弹出 → `/api/permission` 批准 → 命令执行 |
+| 群聊引擎 | 1-participant 轮 | 转录里 `GROUP_PONG` |
+| 群聊引擎 | bash 经 HTTP MCP | `GROUP_MCP_OK`，工具时间线正常持久化 |
+| 群聊引擎 | session 持久化 | runtime.json 里有 claude session id |
+| `claude-sessions.ts` | **对 SDK 差分测试** | 12 个会话：`summary` 12/12、`customTitle` 12/12、`firstPrompt` 11/12（那一个是测试期间正在被追加写入的活会话）；33 条消息**规范化后 100% 相同**（仅键插入顺序不同） |
+
+### 差分测试挖出来的隐性契约（这些猜不出来）
+
+1. **`summary` / `customTitle` 来自 `type: "ai-title"` 的行**（`{aiTitle, sessionId, type}`）。
+   CLI 每轮追加一条、内容相同，所以**取最后一条**。没有它才退回首个 prompt。
+2. **SDK 隐藏了两类 user 行**：`isMeta: true`（caveat / skill 前言 / 注入上下文），以及
+   **斜杠命令回显**（正文以 `<command-message>` / `<command-name>` / `<local-command-*>` 开头）。
+   不过滤的话历史里会出现一坨 XML，看起来像用户自己打的。
+3. **`<task-notification>` / `<system-reminder>` 这类系统注入的 user 轮 SDK 是保留在历史里的**，
+   但**不能**当成 `firstPrompt`（那会污染侧栏标签和搜索索引）。
+4. 消息字段 `parentToolUseId` → `parent_tool_use_id`、`sessionId` → `session_id`（前端要 snake_case）。
+5. **project 目录 slug = `cwd.replace(/[^A-Za-z0-9-]/g, "-")`**，对着磁盘上 706 个真实目录验过
+   705 命中（唯一例外是目录名带额外后缀的会话，不是规则问题）。
+   ⚠️ **有损、不可逆**（中文全变横线）——只能 cwd→slug 单向用；要真 cwd 就从文件里读。
+
+### 一个既有 bug：先保留、再单独修（已修）
+
+群聊的 bash MCP **从来没收到过 cwd**（`claude-runner.ts` 建 `createBashMcpServer({getSessionId})`
+时就没传），所以 `mcp__bash__run` 一直在 server 的 cwd 里执行，而 Claude 自己的文件工具拿的是
+`config.cwd`——agent 读一棵树、shell 进另一棵树，而且完全静默。
+
+迁移时**故意原样保留**，因为在换驱动的同一个改动里顺手"修正"行为，会让任何回归都无法归因。
+迁移验证通过后单独改掉（`registerMcpSessionContext` 加 `cwd: config.cwd`），并实测确认：
+群聊里跑 `pwd` 现在报的是群的 cwd，不再是 cc-webui。
+
+## 已落地：模型改用家族别名（决策 #9 的 Claude 半边）
+
+`src/lib/settings.ts` 的 `CLAUDE_MODEL_OPTIONS` 从钉版本改成四个别名
+**`opus` / `fable` / `sonnet` / `haiku`**，`DEFAULT_SETTINGS.model = "opus"`。
+经真实服务端逐个实测：`opus`→**claude-opus-5**、`fable`→claude-fable-5、
+`sonnet`→**claude-sonnet-5**、`haiku`→claude-haiku-4-5-20251001。
+
+同时统一了另外三份注册表：`server/groups/config.ts` 的 `defaultParticipant`、
+`server/feishu/handler.ts` 的 `MODEL_ALIASES`（改成对同一批 id 的透传，不再自己钉版本——
+`/model haiku` 曾因此写进一个网页选择器匹配不上的 id）、`GroupConfigDialog` 的兜底值、
+以及 `cli/subagent-mcp` 的 enum。
+
+`CLAUDE_LEGACY_ALIAS` **方向反转**：以前是「别名 → 钉死 id」，现在是「旧钉死 id → 别名」。
+方向很关键——原来的方向正是存量 `"sonnet"` 匹配不上任何选项、被静默改写成列表第一项的成因。
+
+`XHIGH_CLAUDE_MODELS` 保持手维护（现在键是别名，不用再随版本编辑）。**CLI 完全不校验
+`--effort`**（`haiku --effort xhigh` 甚至 `--effort bogustier` 都静默通过），所以它当不了裁判。
+
+## 下一步
+
+1. **Codex executor** —— 接口已经在 `server/executors/types.ts`，照 `claude-executor.ts` 写第二个实现。
+2. ~~`cli/subagent-mcp/index.ts`~~ —— **已迁移**，改用同一个 executor（typecheck 过，端到端未测）。
+3. Codex executor 做完就能从 `package.json` 删 `@anthropic-ai/claude-agent-sdk`——
+   **代码里已经零 import**，只剩 `package.json` 这一条依赖声明和它带的 ~231MB 二进制。
+
+## 明确没定的
+
+- **`ended` 的新字段怎么灌回上层**：`orchestrator.ts` 和 `chat.ts` 现在按 `ok: boolean` 处理错误。
+  `status` / `failureKind` 到位后要不要真的按 `aborted` / `timeout` 分开呈现（例如用户取消不显示
+  成红色错误）。
+- **Codex 侧增量事件**：`codex exec` 没有 partial-message flag，Codex 的流式粒度未验证。
+  （Codex 排在 Claude 之后，到时再验。）

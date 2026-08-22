@@ -1,9 +1,12 @@
 #!/usr/bin/env -S npx tsx
-// Stdio MCP server that exposes Claude (via @anthropic-ai/claude-agent-sdk) as
-// a subagent for any MCP-aware host — primarily Codex CLI. Spawned on demand
-// by the host (no long-running process). Communicates over stdin/stdout
-// JSON-RPC. Independent of the cc-webui web server: only shares the repo's
-// node_modules for dependencies.
+// Stdio MCP server that exposes Claude as a subagent for any MCP-aware host —
+// primarily Codex CLI. Spawned on demand by the host (no long-running process).
+// Communicates over stdin/stdout JSON-RPC.
+//
+// Drives the `claude` CLI through the shared executor in server/executors/,
+// which is the repo's single copy of that logic (see docs/cli-migration.md,
+// decision #5: no separate package). That is the only thing this tool borrows
+// from the web server — it starts no HTTP listener and reads none of its state.
 //
 // Wire it into Codex by adding to ~/.codex/config.toml:
 //
@@ -12,16 +15,16 @@
 //   args    = ["tsx", "/Users/xuqiang/code/cc-webui/cli/subagent-mcp/index.ts"]
 //   default_tools_approval_mode = "approve"
 //
-// Auth: the Claude SDK spawns the `claude` binary, which uses ~/.claude/
+// Auth: the executor spawns the `claude` binary, which uses ~/.claude/
 // credentials (Claude Code's OAuth login). No env vars needed if you've run
-// `claude login` once.
+// `claude login` once. Set CC_WEBUI_CLAUDE_BIN to pin a specific binary.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { claudeExecutor } from "../../server/executors/claude-executor.ts";
 import { z } from "zod";
 
-const DEFAULT_MODEL = "claude-opus-4-7";
+const DEFAULT_MODEL = "opus";
 const DEFAULT_PERMISSION_MODE = "acceptEdits";
 
 const server = new McpServer({
@@ -49,7 +52,7 @@ server.registerTool(
         .optional()
         .describe("Working directory for Claude. Defaults to the host's cwd (where Codex was launched)."),
       model: z
-        .enum(["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"])
+        .enum(["opus", "fable", "sonnet", "haiku"])
         .optional()
         .describe(`Default: ${DEFAULT_MODEL}.`),
       permission_mode: z
@@ -74,38 +77,52 @@ server.registerTool(
     const model = args.model ?? DEFAULT_MODEL;
     const permissionMode = args.permission_mode ?? DEFAULT_PERMISSION_MODE;
 
-    const response = query({
+    // The host may cancel mid-run; the executor takes the signal directly, so
+    // no iterator-.return() dance is needed.
+    const abort = new AbortController();
+    const onHostAbort = () => abort.abort();
+    extra.signal?.addEventListener("abort", onHostAbort, { once: true });
+    if (extra.signal?.aborted) abort.abort();
+
+    const frames = claudeExecutor.exec({
       prompt: args.prompt,
-      options: {
-        cwd,
-        model,
-        permissionMode,
-        allowedTools: args.allowed_tools,
-        systemPrompt: { type: "preset", preset: "claude_code" },
-        // Subagent runs autonomously — no UI to ask. Auto-allow every tool;
-        // the parent host (Codex) is responsible for high-level approval.
-        canUseTool: async (_toolName, input) => ({
-          behavior: "allow",
-          updatedInput: input,
-        }),
-      },
+      cwd,
+      signal: abort.signal,
+      model,
+      mode: permissionMode,
+      allowedTools: args.allowed_tools,
+      // Subagent runs autonomously — no UI to ask. Auto-allow every tool; the
+      // parent host (Codex) is responsible for high-level approval. Supplying a
+      // handler at all is what puts the CLI on the stdio permission protocol,
+      // so tool use is never silently refused.
+      onPermissionAsk: async ({ input }) => ({
+        behavior: "allow" as const,
+        updatedInput: input,
+      }),
     });
 
     let finalText = "";
     let toolUses = 0;
     const trace: string[] = [];
+    let failure: string | undefined;
 
     try {
-      for await (const msg of response as AsyncIterable<unknown>) {
-        if (extra.signal?.aborted) {
-          await (response as { return?: () => Promise<unknown> }).return?.();
+      for await (const frame of frames) {
+        if (frame.kind === "ended") {
+          const r = frame.result;
+          // A cancel or a max_turns break is not a failure worth reporting as
+          // an error — whatever text Claude produced so far still stands.
+          if (r.status !== "completed" && r.status !== "aborted") {
+            failure = r.error ?? r.status;
+          }
           break;
         }
-        const m = msg as {
+        const m = frame.payload as {
           type?: string;
           message?: { content?: Array<{ type?: string; text?: string; name?: string; input?: unknown }> };
         };
         if (m.type === "assistant" && m.message?.content) {
+          let stop = false;
           for (const block of m.message.content) {
             if (block.type === "text" && block.text) {
               finalText = block.text;
@@ -115,17 +132,28 @@ server.registerTool(
               const argSummary = JSON.stringify(block.input ?? {}).slice(0, 80);
               trace.push(`${block.name ?? "?"}(${argSummary})`);
               if (args.max_turns && toolUses >= args.max_turns) {
-                await (response as { return?: () => Promise<unknown> }).return?.();
+                stop = true;
                 break;
               }
             }
           }
+          // Leaving the loop runs the generator's cleanup, which kills the CLI.
+          if (stop) break;
         }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
         content: [{ type: "text", text: `Claude subagent failed: ${message}` }],
+        isError: true,
+      };
+    } finally {
+      extra.signal?.removeEventListener("abort", onHostAbort);
+    }
+
+    if (failure) {
+      return {
+        content: [{ type: "text", text: `Claude subagent failed: ${failure}` }],
         isError: true,
       };
     }

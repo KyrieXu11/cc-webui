@@ -22,6 +22,7 @@ interface Props {
   onOpenGroup: (gid: string) => void;
   onCreateGroup: () => void;
   groupsRefreshKey?: number;
+  groupsEnabled?: boolean;
 }
 
 type ProjectGroup = {
@@ -39,6 +40,7 @@ export default function HomeView({
   onOpenGroup,
   onCreateGroup,
   groupsRefreshKey,
+  groupsEnabled = false,
 }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [chatGroups, setChatGroups] = useState<GroupIndexRow[]>([]);
@@ -72,6 +74,11 @@ export default function HomeView({
   }, []);
 
   useEffect(() => {
+    // /api/groups isn't mounted when the feature is off — skip the 404.
+    if (!groupsEnabled) {
+      setChatGroups([]);
+      return;
+    }
     let cancelled = false;
     listGroups()
       .then((rows) => {
@@ -81,7 +88,7 @@ export default function HomeView({
     return () => {
       cancelled = true;
     };
-  }, [groupsRefreshKey]);
+  }, [groupsRefreshKey, groupsEnabled]);
 
   const removeGroup = async (gid: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -224,7 +231,7 @@ export default function HomeView({
           </h2>
           <div className="flex items-center gap-2">
             <ProviderPicker value={provider} onChange={onProviderChange} />
-            {chatGroups.length === 0 && (
+            {groupsEnabled && chatGroups.length === 0 && (
               <button
                 onClick={onCreateGroup}
                 className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"

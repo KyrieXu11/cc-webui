@@ -1,7 +1,6 @@
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentId } from "./store.ts";
 import type { ChatEvent } from "../../src/lib/types.ts";
-import type { CodexLarkContext } from "../codex-mcp-context.ts";
+import type { LarkMcpContext } from "../mcp-context.ts";
 
 // All runner output flows as raw SDK events that the orchestrator
 // forwards to the client SSE channel verbatim — the frontend's
@@ -44,18 +43,14 @@ export type RunnerCtx = {
   // passes it to the SDK as `resume:` and only sends the catchup
   // prompt (peer replies + new user message) instead of full history.
   resumeSessionId?: string;
-  // Per-turn in-process MCP servers contributed by the caller (e.g. the
-  // Feishu adapter injects a `lark` MCP holding chatId + LarkChannel so
-  // Claude can send files back to the IM chat that initiated the turn).
-  // Merged with built-in mcpServers in the runner; tools under these
-  // namespaces are auto-allowed (they don't touch the user's filesystem).
-  // Values are SDK-wrapped via `createSdkMcpServer`, NOT raw McpServer
-  // instances — the SDK only accepts McpServerConfig shapes.
-  extraMcpServers?: Record<string, McpSdkServerConfigWithInstance>;
-  // Codex consumes MCP servers over HTTP rather than in-process SDK
-  // instances. Adapter-supplied context (currently Feishu/Lark send tools)
-  // is stored behind the same bearer token used by the Codex MCP routes.
+  // Adapter-supplied MCP context (currently Feishu/Lark send tools), stored
+  // behind the per-turn bearer token the HTTP MCP routes authenticate with.
+  //
+  // Both providers consume it the same way now. Claude used to additionally
+  // receive an in-process SDK server (`extraMcpServers`); that path went away
+  // with the SDK, which is what collapsed AGENTS.md's "two MCP stacks" into
+  // one.
   codexMcp?: {
-    lark?: CodexLarkContext;
+    lark?: LarkMcpContext;
   };
 };

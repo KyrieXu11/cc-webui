@@ -105,7 +105,7 @@ export function defaultParticipant(id: AgentId): Participant {
   if (id === "claude") {
     return {
       id: "claude",
-      model: "claude-opus-4-8",
+      model: "opus",
       mode: "default",
       effort: "xhigh",
       systemPrompt: "",

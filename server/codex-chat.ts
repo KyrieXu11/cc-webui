@@ -17,18 +17,19 @@ import { appendCodexTurn } from "./session-store.ts";
 import {
   createCodexMcpConfig,
   createCodexMcpEnv,
-  getCodexMcpUrl,
+  getMcpRouteUrl,
 } from "./codex-mcp-config.ts";
 import {
-  registerCodexMcpContext,
-  unregisterCodexMcpContext,
-  updateCodexMcpSession,
-} from "./codex-mcp-context.ts";
+  registerMcpSessionContext,
+  unregisterMcpSessionContext,
+  updateMcpSession,
+} from "./mcp-context.ts";
 import {
   relabelTasksSessionId,
   resolveTaskSessionId,
   subscribeForegroundEvents,
 } from "./bash-mcp.ts";
+import { isCodexModelMismatchNotice } from "./codex-events.ts";
 
 const codexChat = new Hono();
 const KEEPALIVE_MS = 15_000;
@@ -342,7 +343,7 @@ codexChat.post("/chat", async (c) => {
     let taskSessionId = threadId ?? clientTurnId ?? `codex-turn-${reqId}`;
     const turnEvents: unknown[] = [];
     try {
-      registerCodexMcpContext({
+      registerMcpSessionContext({
         token: mcpToken,
         sessionId: taskSessionId,
         cwd,
@@ -363,7 +364,7 @@ codexChat.post("/chat", async (c) => {
       });
 
       const codex = new Codex({
-        config: createCodexMcpConfig(getCodexMcpUrl()),
+        config: createCodexMcpConfig(getMcpRouteUrl()),
         env: createCodexMcpEnv(mcpToken),
       });
       const { input, cleanup } = await createCodexInput(prompt, rawImages);
@@ -387,6 +388,9 @@ codexChat.post("/chat", async (c) => {
       let eventCount = 0;
       for await (const ev of events) {
         if (entry.cancelRequested) break;
+        // Drop the benign model-mismatch advisory (see codex-events.ts) so it
+        // doesn't surface as a "[错误] …" message or land in the saved session.
+        if (isCodexModelMismatchNotice(ev)) continue;
         eventCount++;
         if (eventCount <= 20 || eventCount % 50 === 0) {
           console.log(`[codex ${reqId}] event #${eventCount} ${ev.type} @${elapsed()}`);
@@ -394,7 +398,7 @@ codexChat.post("/chat", async (c) => {
         if (ev.type === "thread.started") {
           const previousTaskSessionId = taskSessionId;
           taskSessionId = ev.thread_id;
-          updateCodexMcpSession(mcpToken, ev.thread_id);
+          updateMcpSession(mcpToken, ev.thread_id);
           if (previousTaskSessionId !== ev.thread_id) {
             relabelTasksSessionId(previousTaskSessionId, ev.thread_id);
           }
@@ -446,7 +450,7 @@ codexChat.post("/chat", async (c) => {
         await cleanupInput().catch(() => {});
       }
       unsubscribeForeground?.();
-      unregisterCodexMcpContext(mcpToken);
+      unregisterMcpSessionContext(mcpToken);
       for (const sub of [...entry.subscribers]) sub.close();
       removeEntryIfSelf(entry);
     }

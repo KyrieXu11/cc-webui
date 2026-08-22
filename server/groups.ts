@@ -20,7 +20,7 @@ import {
   validateConfig,
   type GroupConfig,
 } from "./groups/config.ts";
-import { createGroup } from "./groups/lifecycle.ts";
+import { createGroup, clearSessionsForModelChanges } from "./groups/lifecycle.ts";
 import {
   startTurn,
   stopTurn,
@@ -117,6 +117,10 @@ groups.patch("/:gid/config", async (c) => {
   };
   validateConfig(merged);
   await writeConfig(merged);
+  // A model change invalidates the resumed native session (it was recorded
+  // under the old model). Forget it so the next turn starts fresh; otherwise
+  // Codex leaks a "recorded with model X but resuming with Y" advisory.
+  await clearSessionsForModelChanges(gid, old.participants, merged.participants);
   return c.json({ ok: true });
 });
 

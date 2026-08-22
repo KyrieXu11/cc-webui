@@ -83,3 +83,24 @@ export async function relocateGroup(
   });
   return cfg;
 }
+
+// When a participant's model changes, its persisted native session (Claude
+// session id / Codex thread id) was recorded under the OLD model. Resuming it
+// under the new model mis-routes and, for Codex, makes the CLI emit a
+// "recorded with model X but resuming with Y" advisory. Clear the id for each
+// participant whose model changed so the next turn starts a fresh session under
+// the new model — canonical history is re-fed via buildPrompt, so nothing is
+// lost except the (now-invalid) prompt cache. Mode/effort changes don't affect
+// the recorded model, so they don't clear the session.
+export async function clearSessionsForModelChanges(
+  gid: string,
+  before: Participant[],
+  after: Participant[],
+): Promise<void> {
+  for (const next of after) {
+    const prev = before.find((p) => p.id === next.id);
+    if (prev && prev.model !== next.model) {
+      await clearAgentSessionId(gid, next.id);
+    }
+  }
+}

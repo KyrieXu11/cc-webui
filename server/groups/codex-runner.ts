@@ -6,14 +6,15 @@ import { randomUUID } from "node:crypto";
 import {
   createCodexMcpConfig,
   createCodexMcpEnv,
-  getCodexMcpUrl,
+  getMcpRouteUrl,
 } from "../codex-mcp-config.ts";
 import {
-  registerCodexMcpContext,
-  updateCodexMcpSession,
-  unregisterCodexMcpContext,
-} from "../codex-mcp-context.ts";
+  registerMcpSessionContext,
+  updateMcpSession,
+  unregisterMcpSessionContext,
+} from "../mcp-context.ts";
 import { systemPromptFor } from "./input-builder.ts";
+import { isCodexModelMismatchNotice } from "../codex-events.ts";
 import type { GroupConfig, Participant } from "./config.ts";
 import type { ImageAttachment } from "./store.ts";
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
@@ -76,7 +77,7 @@ export async function* runCodex(args: {
   const fullPrompt = `[系统指引]\n${groupSystemPrompt}\n\n${prompt}`;
 
   const mcpToken = randomUUID();
-  registerCodexMcpContext({
+  registerMcpSessionContext({
     token: mcpToken,
     sessionId: scope,
     cwd: config.cwd,
@@ -89,7 +90,7 @@ export async function* runCodex(args: {
     if (cleanedUp) return;
     cleanedUp = true;
     await fs.rm(tmpDir, { recursive: true, force: true });
-    unregisterCodexMcpContext(mcpToken);
+    unregisterMcpSessionContext(mcpToken);
   };
 
   let events: ChatEvent[] = [];
@@ -115,9 +116,9 @@ export async function* runCodex(args: {
 
     const codex = new Codex({
       config: createCodexMcpConfig({
-        bashUrl: getCodexMcpUrl(process.env, "bash"),
+        bashUrl: getMcpRouteUrl(process.env, "bash"),
         larkUrl: ctx.codexMcp?.lark
-          ? getCodexMcpUrl(process.env, "lark")
+          ? getMcpRouteUrl(process.env, "lark")
           : undefined,
       }),
       env: createCodexMcpEnv(mcpToken),
@@ -145,9 +146,14 @@ export async function* runCodex(args: {
     for await (const ev of stream.events) {
       const anyEv = ev as any;
 
+      // Drop the benign "recorded with model X but resuming with Y" advisory
+      // so it never leaks into the chat card / transcript. The turn proceeds
+      // under the requested model regardless.
+      if (isCodexModelMismatchNotice(anyEv)) continue;
+
       // Re-key MCP context to the real thread id once Codex emits it.
       if (anyEv.type === "thread.started" && anyEv.thread_id) {
-        updateCodexMcpSession(mcpToken, anyEv.thread_id);
+        updateMcpSession(mcpToken, anyEv.thread_id);
         capturedThreadId = anyEv.thread_id;
       }
 

@@ -18,7 +18,6 @@ import {
 import type { ImageAttachment, AgentId } from "../groups/store.ts";
 import { bridgeTurn } from "./bridge.ts";
 import { getBinding, removeBinding, setBinding } from "./binding.ts";
-import { createLarkMcpServer } from "./lark-mcp.ts";
 import { fetchQuotedContext } from "./quote.ts";
 import {
   defaultCwd,
@@ -31,14 +30,15 @@ import {
 } from "./parse.ts";
 
 const MODEL_ALIASES: Record<BotConfig["agentId"], Record<string, string>> = {
+  // The CLI already resolves family aliases to the current version, so these
+  // map onto the same four ids src/lib/settings.ts offers rather than pinning
+  // versions here — that duplication is what let `/model haiku` set an id the
+  // web selector could not match.
   claude: {
-    opus: "claude-opus-4-8", // bare alias tracks the latest Opus
-    "opus4.8": "claude-opus-4-8",
-    "opus-4.8": "claude-opus-4-8",
-    "opus4.7": "claude-opus-4-7",
-    "opus-4.7": "claude-opus-4-7",
-    sonnet: "claude-sonnet-4-6",
-    haiku: "claude-haiku-4-5-20251001",
+    opus: "opus",
+    fable: "fable",
+    sonnet: "sonnet",
+    haiku: "haiku",
   },
   codex: {
     codex: "gpt-5.5",
@@ -302,6 +302,7 @@ export async function handleNormalizedMessage(
         await reply(channel, messageId, `🤖 当前模型: ${participant.model}`);
         return;
       }
+      const prevModel = participant.model;
       participant.model = resolveModelName(bot.agentId, cmd.name);
       ctx.cfg.updatedAt = Date.now();
       try {
@@ -309,6 +310,12 @@ export async function handleNormalizedMessage(
       } catch (err) {
         await reply(channel, messageId, `❌ 切换失败: ${errMsg(err)}`);
         return;
+      }
+      // Drop the resumed session recorded under the old model so the next turn
+      // starts fresh under the new one (otherwise Codex resume mis-routes and
+      // leaks a "recorded with model X but resuming with Y" advisory).
+      if (prevModel !== participant.model) {
+        await clearAgentSessionId(ctx.gid, bot.agentId);
       }
       await reply(channel, messageId, `✅ 模型已切到 ${participant.model}`);
       return;
@@ -550,14 +557,11 @@ export async function handleNormalizedMessage(
         }
       }
 
-      // Per-turn MCP server/context bound to this chat so the active agent can
-      // push files / images back to Feishu under the bot's identity (no OAuth
-      // required). Claude consumes the in-process SDK server; Codex consumes
-      // the HTTP MCP route backed by codexMcp.lark.
-      const larkMcp = createLarkMcpServer({
-        channel,
-        defaultChatId: chatId,
-      });
+      // Per-turn MCP context bound to this chat so the active agent can push
+      // files / images back to Feishu under the bot's identity (no OAuth
+      // required). Both Claude and Codex now reach it through the HTTP MCP
+      // route; the in-process SDK server this used to build for Claude went
+      // away with the SDK.
 
       let result;
       try {
@@ -566,7 +570,6 @@ export async function handleNormalizedMessage(
           text: textWithQuote,
           images,
           recipients: [bot.agentId],
-          extraMcpServers: { lark: larkMcp },
           codexMcp: { lark: { channel, defaultChatId: chatId } },
         });
       } catch (err) {

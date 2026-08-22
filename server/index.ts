@@ -12,12 +12,18 @@ import { bashTasksRoute } from "./bash-tasks.ts";
 import { mcpBashRoute } from "./mcp-bash-route.ts";
 import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
+import { groupsEnabled } from "./features.ts";
 
 const app = new Hono();
 
 app.route("/api", chat);
 app.route("/api/codex", codexChat);
-app.route("/api/groups", groups);
+// Group chat is opt-in (CC_WEBUI_GROUPS_ENABLED). The web group UI is the only
+// consumer of this route — Feishu drives the session engine through direct
+// imports — so leaving it unmounted removes the whole web group surface.
+if (groupsEnabled()) {
+  app.route("/api/groups", groups);
+}
 app.route("/api/fs", fsRoute);
 app.route("/api/sessions", sessionsRoute);
 app.route("/api/upload", uploadRoute);
@@ -52,4 +58,9 @@ serve({ fetch: app.fetch, port, hostname: host }, (info) => {
     ? `http://${host}:${info.port}`
     : `http://${host}:${info.port} (api only; web on vite http://${host}:${viteDevPort})`;
   console.log(`[cc-webui] ${isProd ? "serving" : "api"} at ${url}`);
+  console.log(
+    groupsEnabled()
+      ? "[cc-webui] groups: enabled"
+      : "[cc-webui] groups: disabled (set CC_WEBUI_GROUPS_ENABLED=1 to enable)",
+  );
 });

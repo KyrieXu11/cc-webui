@@ -207,7 +207,13 @@ export default function App() {
     Array<{ fgId: string; command: string }>
   >([]);
   const [attachRetryNonce, setAttachRetryNonce] = useState(0);
-  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  const [currentGroupIdRaw, setCurrentGroupId] = useState<string | null>(null);
+  // Group chat is an opt-in server feature (CC_WEBUI_GROUPS_ENABLED). Starts
+  // false so nothing group-shaped renders before /api/meta answers.
+  const [groupsFeature, setGroupsFeature] = useState(false);
+  // Every read of the current group goes through the flag, so a stale stored
+  // group id can never surface a hidden feature.
+  const currentGroupId = groupsFeature ? currentGroupIdRaw : null;
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [groupsRefreshKey, setGroupsRefreshKey] = useState(0);
 
@@ -335,6 +341,22 @@ export default function App() {
       /* ignore */
     }
   }, [projectCwd, sessionId, settings.agentProvider]);
+
+  // Server feature flags. Separate from the cwd-scoped meta fetch below
+  // because the home view has no project yet and still needs the flag.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/meta")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setGroupsFeature(data.features?.groups === true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!projectCwd) return;
@@ -685,6 +707,9 @@ export default function App() {
   // Persist currentGroupId across refresh
   useEffect(() => {
     if (!didRestore.current) return;
+    // With groups disabled currentGroupId is forced to null, so persisting
+    // here would delete a perfectly good stored id. Leave it untouched.
+    if (!groupsFeature) return;
     try {
       if (currentGroupId) {
         localStorage.setItem("cc-webui:lastGroup", currentGroupId);
@@ -694,7 +719,7 @@ export default function App() {
     } catch {
       /* ignore */
     }
-  }, [currentGroupId]);
+  }, [currentGroupId, groupsFeature]);
 
   // Restore last open group on first load (skipped if a project is restoring)
   useEffect(() => {
@@ -1129,6 +1154,7 @@ export default function App() {
             onOpenGroup={openGroup}
             onCreateGroup={() => setNewGroupOpen(true)}
             groupsRefreshKey={groupsRefreshKey}
+            groupsEnabled={groupsFeature}
           />
         )}
       </div>
@@ -1173,7 +1199,7 @@ export default function App() {
           }}
         />
       )}
-      {newGroupOpen && (
+      {groupsFeature && newGroupOpen && (
         <GroupConfigDialog
           mode={{
             kind: "create",

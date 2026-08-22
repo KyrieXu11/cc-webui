@@ -3,7 +3,7 @@ import {
   CODEX_MCP_TOKEN_ENV,
   createCodexMcpConfig,
   createCodexMcpEnv,
-  getCodexMcpUrl,
+  getMcpRouteUrl,
 } from "./codex-mcp-config.ts";
 
 const url = "http://127.0.0.1:8788/api/mcp/bash";
@@ -53,26 +53,26 @@ assert.deepEqual(
 );
 
 assert.equal(
-  getCodexMcpUrl({ PORT: "8799" }),
+  getMcpRouteUrl({ PORT: "8799" }),
   "http://127.0.0.1:8799/api/mcp/bash"
 );
 assert.equal(
-  getCodexMcpUrl({ PORT: "8799" }, "lark"),
+  getMcpRouteUrl({ PORT: "8799" }, "lark"),
   "http://127.0.0.1:8799/api/mcp/lark"
 );
 assert.equal(
-  getCodexMcpUrl({ CC_WEBUI_MCP_URL: "http://localhost:9999/custom" }),
+  getMcpRouteUrl({ CC_WEBUI_MCP_URL: "http://localhost:9999/custom" }),
   "http://localhost:9999/custom"
 );
 assert.equal(
-  getCodexMcpUrl(
+  getMcpRouteUrl(
     { CC_WEBUI_MCP_URL: "http://localhost:9999/api/mcp/bash" },
     "lark",
   ),
   "http://localhost:9999/api/mcp/lark",
 );
 assert.equal(
-  getCodexMcpUrl(
+  getMcpRouteUrl(
     { CC_WEBUI_LARK_MCP_URL: "http://localhost:9999/lark-custom" },
     "lark",
   ),

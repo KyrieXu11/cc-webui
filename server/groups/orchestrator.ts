@@ -20,7 +20,8 @@ import {
   type ImageAttachment,
 } from "./store.ts";
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
-import type { CodexLarkContext } from "../codex-mcp-context.ts";
+import type { LarkMcpContext } from "../mcp-context.ts";
+import { groupsEnabled } from "../features.ts";
 
 // ============================================================
 // Group turn state + in-flight registry
@@ -76,21 +77,30 @@ export type StartTurnInput = {
   recipients?: ("claude" | "codex" | "all")[];
   quote?: { agent: AgentId; text: string };
   // Adapter-supplied MCP servers (e.g. Feishu adapter injects a `lark`
-  // MCP bound to the originating chat). Each agent's runner merges these
-  // with its own built-in MCP servers and auto-allows their tools.
-  // Values must be SDK-wrapped (createSdkMcpServer), not raw McpServer.
-  extraMcpServers?: Record<
-    string,
-    import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance
-  >;
+  // MCP bound to the originating chat). Both providers consume it through the
+  // HTTP MCP routes; the in-process SDK variant went away with the SDK.
   codexMcp?: {
-    lark?: CodexLarkContext;
+    lark?: LarkMcpContext;
   };
 };
 
 export type StartTurnResult = {
   turn: InFlightGroupTurn;
 };
+
+// Group chat — more than one agent answering inside a single turn — is gated
+// behind CC_WEBUI_GROUPS_ENABLED. With the flag off we leave every stored
+// config and transcript untouched and simply run the first recipient, so an
+// existing 2-participant group still opens and still answers, just solo.
+//
+// Enforcing this in validateConfig instead would make every stored 2-agent
+// group throw on read, which would also break any Feishu chat bound to one.
+export function capToSoloWhenGroupsDisabled(
+  recipients: AgentId[],
+  enabled: boolean,
+): AgentId[] {
+  return enabled ? recipients : recipients.slice(0, 1);
+}
 
 export async function startTurn(
   input: StartTurnInput,
@@ -102,11 +112,14 @@ export async function startTurn(
 
   const config = await readConfig(gid);
   const requestedRecipients = input.recipients ?? ["all"];
-  const expanded: AgentId[] = requestedRecipients.includes("all")
-    ? config.pipeline
-    : (requestedRecipients as AgentId[]).filter(
-        (r): r is AgentId => r === "claude" || r === "codex",
-      );
+  const expanded: AgentId[] = capToSoloWhenGroupsDisabled(
+    requestedRecipients.includes("all")
+      ? config.pipeline
+      : (requestedRecipients as AgentId[]).filter(
+          (r): r is AgentId => r === "claude" || r === "codex",
+        ),
+    groupsEnabled(),
+  );
   if (expanded.length === 0) {
     throw new Error("no recipients");
   }
@@ -165,7 +178,6 @@ export async function startTurn(
     expanded,
     text: input.text,
     images: input.images ?? [],
-    extraMcpServers: input.extraMcpServers,
     codexMcp: input.codexMcp,
   })
     .catch((err) => {
@@ -214,15 +226,11 @@ async function runPipeline(args: {
   expanded: AgentId[];
   text: string;
   images: ImageAttachment[];
-  extraMcpServers?: Record<
-    string,
-    import("@anthropic-ai/claude-agent-sdk").McpSdkServerConfigWithInstance
-  >;
   codexMcp?: {
-    lark?: CodexLarkContext;
+    lark?: LarkMcpContext;
   };
 }): Promise<void> {
-  const { turn, config, expanded, text, images, extraMcpServers, codexMcp } =
+  const { turn, config, expanded, text, images, codexMcp } =
     args;
   let pipelineOk = true;
 
@@ -276,7 +284,6 @@ async function runPipeline(args: {
       agentId,
       signal: turn.abort.signal,
       resumeSessionId: resume,
-      extraMcpServers,
       codexMcp,
       emitPermission: (payload) => {
         // Fan out as agent_event so the client's applySDKMessage folds it

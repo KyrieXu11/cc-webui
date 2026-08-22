@@ -23,7 +23,7 @@ const defaultParticipant = (id: "claude" | "codex"): GroupParticipant => {
   const opts = modelOptionsForProvider(provider);
   const model =
     id === "claude"
-      ? opts.find((m) => m.id.includes("opus"))?.id ?? opts[0]?.id ?? "claude-opus-4-8"
+      ? opts.find((m) => m.id.includes("opus"))?.id ?? opts[0]?.id ?? "opus"
       : opts[0]?.id ?? "gpt-5.5";
   return {
     id,
@@ -322,9 +322,10 @@ export default function GroupConfigDialog({ mode, onClose }: Props) {
             <section>
               <SectionLabel>提示</SectionLabel>
               <p className="text-[12px] text-subtle leading-relaxed">
-                改完后下一轮立即生效；正在生成的轮不会被打断。改 model
-                / mode 不会重置已存在的 native session id（仍走 resume 拿
-                cache），换 model 后下一轮 SDK 会按新 model 跑。
+                改完后下一轮立即生效；正在生成的轮不会被打断。改 mode / effort
+                会沿用已存在的 native session（走 resume 拿 cache）；换 model
+                会重置该 agent 的 session，下一轮以新 model 起新会话（历史照常
+                回放，仅丢一次 prompt cache）。
               </p>
             </section>
           )}

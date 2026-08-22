@@ -1,8 +1,3 @@
-import {
-  createSdkMcpServer,
-  tool,
-  type McpSdkServerConfigWithInstance,
-} from "@anthropic-ai/claude-agent-sdk";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -397,82 +392,6 @@ export function listBackgroundTasksForTool(
   };
 }
 
-export function createBashMcpServer(
-  opts: Options
-): McpSdkServerConfigWithInstance {
-  const runTool = tool(
-    "run",
-    "Execute a bash command in the project working directory. " +
-      "Output combines stdout and stderr. Non-zero exit codes are returned as errors. " +
-      "Set run_in_background=true to launch asynchronously — you'll get a bashTaskId " +
-      "which can be polled with mcp__bash__output or terminated with mcp__bash__kill.",
-    {
-      command: z.string().describe("The bash command to execute"),
-      timeout: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_TIMEOUT_MS)
-        .optional()
-        .describe(
-          `Optional timeout in ms for foreground runs (max ${MAX_TIMEOUT_MS})`
-        ),
-      description: z
-        .string()
-        .optional()
-        .describe(
-          "Short description (5-10 words) of what this command does, in active voice"
-        ),
-      run_in_background: z
-        .boolean()
-        .optional()
-        .describe(
-          "If true, spawn without waiting; returns a bashTaskId for polling via mcp__bash__output."
-        ),
-    },
-    async (args, extra) => {
-      const signal: AbortSignal | undefined = (extra as any)?.signal;
-      return runBashTool(args, opts, signal);
-    }
-  );
-
-  const outputTool = tool(
-    "output",
-    "Retrieve new stdout/stderr output from a background bash task since the last poll, " +
-      "plus the task's current status and exit code (if finished). " +
-      "Output is returned incrementally — each call only returns bytes appended since the previous call.",
-    {
-      bash_id: z
-        .string()
-        .describe("The bashTaskId returned by run with run_in_background=true"),
-    },
-    async (args) => readBackgroundOutput(args.bash_id)
-  );
-
-  const killTool = tool(
-    "kill",
-    "Kill a running background bash task by its bashTaskId (sends SIGKILL).",
-    {
-      bash_id: z
-        .string()
-        .describe("The bashTaskId returned by run with run_in_background=true"),
-    },
-    async (args) => killBackground(args.bash_id)
-  );
-
-  const listTool = tool(
-    "list",
-    "List background bash tasks for this conversation, including task id, status, exit code and command.",
-    {},
-    async () => listBackgroundTasksForTool(opts.getSessionId?.())
-  );
-
-  return createSdkMcpServer({
-    name: "bash",
-    version: "0.2.0",
-    tools: [runTool, outputTool, killTool, listTool],
-  });
-}
 
 function runForeground(
   command: string,

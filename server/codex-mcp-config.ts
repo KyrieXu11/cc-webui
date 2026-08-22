@@ -8,16 +8,18 @@ type CodexConfigValue =
   | { [key: string]: CodexConfigValue };
 type CodexConfigObject = { [key: string]: CodexConfigValue };
 
-export type CodexMcpServerName = "bash" | "lark";
+// Named for the HTTP MCP routes in server/mcp-bash-route.ts. Not Codex-only
+// any more — the CLI-driven Claude executor reaches the same routes.
+export type McpRouteName = "bash" | "lark" | "schedule";
 
-export function getCodexMcpUrl(
+export function getMcpRouteUrl(
   env: Partial<
     Pick<
       NodeJS.ProcessEnv,
       "CC_WEBUI_MCP_URL" | "CC_WEBUI_LARK_MCP_URL" | "PORT"
     >
   > = process.env,
-  server: CodexMcpServerName = "bash"
+  server: McpRouteName = "bash"
 ): string {
   const explicit =
     server === "lark"

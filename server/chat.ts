@@ -2,13 +2,19 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "./permission.ts";
-import { createBashMcpServer, relabelTasksSessionId } from "./bash-mcp.ts";
-import { createScheduleMcpServer } from "./schedule-mcp.ts";
+import { relabelTasksSessionId } from "./bash-mcp.ts";
+import { claudeExecutor } from "./executors/claude-executor.ts";
+import type { ExecResult } from "./executors/types.ts";
+import { getMcpRouteUrl } from "./codex-mcp-config.ts";
+import {
+  registerMcpSessionContext,
+  unregisterMcpSessionContext,
+  updateMcpSession,
+} from "./mcp-context.ts";
 import {
   createWakeupSlot,
   type WakeupRequest,
@@ -386,64 +392,73 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
     );
   }
 
-  // Detached SDK run — lives past the HTTP request's lifetime.
+  // Detached CLI run — lives past the HTTP request's lifetime.
+  let mcpTokenToRelease: string | undefined;
   (async () => {
     try {
-      const queryPrompt =
-        opts.images.length > 0
-          ? (async function* () {
-              const content: any[] = [];
-              if (opts.prompt.trim()) content.push({ type: "text", text: opts.prompt });
-              for (const img of opts.images) {
-                content.push({
-                  type: "image",
-                  source: {
-                    type: "base64",
-                    media_type: img.mediaType,
-                    data: img.data,
-                  },
-                });
-              }
-              yield {
-                type: "user" as const,
-                message: { role: "user" as const, content },
-                parent_tool_use_id: null,
-              };
-            })()
-          : opts.prompt;
-
-      const bashMcp = createBashMcpServer({
+      // MCP over HTTP. The SDK's in-process ("sdk") MCP transport goes away
+      // with the SDK, so bash + schedule move onto the HTTP routes that Codex
+      // and Feishu already use. Those routes run in THIS process, so the only
+      // real change is a loopback hop: the bash task registry that
+      // /api/bash/tasks streams, and the wakeup slot the timer reads, are still
+      // the very same objects. A per-turn bearer token carries this turn's
+      // context (cwd, live session id, SSE fanout, wakeup slot).
+      const mcpToken = randomUUID();
+      mcpTokenToRelease = mcpToken;
+      registerMcpSessionContext({
+        token: mcpToken,
+        sessionId: currentSessionId ?? "",
         cwd: opts.cwd,
-        getSessionId: () => currentSessionId,
-        // Pipe foreground lifecycle events into the chat SSE fanout so
-        // connected clients can track which fgId is currently pending (Ctrl+B
-        // detaches the most recent).
         onForegroundEvent: fanout,
+        wakeupSlot,
       });
 
-      const scheduleMcp = createScheduleMcpServer({ slot: wakeupSlot });
+      // The CLI takes a real AbortSignal, so cancelling is no longer the
+      // iterator-.return() workaround the SDK forced.
+      const abort = new AbortController();
+      entry.cancelIterator = async () => {
+        abort.abort();
+      };
 
-      const response = query({
-        prompt: queryPrompt as any,
-        options: {
-          resume: opts.sessionId,
-          cwd: opts.cwd,
-          model: opts.model,
-          permissionMode: opts.permissionMode,
-          effort: opts.effort,
-          includePartialMessages: true,
-          mcpServers: { bash: bashMcp, schedule: scheduleMcp },
-          // ScheduleWakeup: the CLI ships a built-in wakeup tool, but its
-          // timers live inside the CLI process and die with the turn. Keep
-          // it disabled so the model only uses mcp__schedule__wakeup, whose
-          // timers the server owns (survive across turns, cancellable).
-          disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
-          systemPrompt: {
-            type: "preset",
-            preset: "claude_code",
-            append: SYSTEM_PROMPT_APPEND,
+      const frames = claudeExecutor.exec({
+        prompt: opts.prompt,
+        images: opts.images,
+        cwd: opts.cwd ?? process.cwd(),
+        signal: abort.signal,
+        model: opts.model,
+        effort: opts.effort,
+        mode: opts.permissionMode,
+        resume: opts.sessionId,
+        // ScheduleWakeup: the CLI ships a built-in wakeup tool, but its
+        // timers live inside the CLI process and die with the turn. Keep
+        // it disabled so the model only uses mcp__schedule__wakeup, whose
+        // timers the server owns (survive across turns, cancellable).
+        disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
+        appendSystemPrompt: SYSTEM_PROMPT_APPEND,
+        mcpServers: [
+          {
+            name: "bash",
+            url: getMcpRouteUrl(process.env, "bash"),
+            bearerToken: mcpToken,
           },
-          canUseTool: async (toolName, input, permOpts) => {
+          {
+            name: "schedule",
+            url: getMcpRouteUrl(process.env, "schedule"),
+            bearerToken: mcpToken,
+          },
+        ],
+        // Same decision logic as the SDK-era canUseTool — only the parameter
+        // shape changed, so permission cards behave identically.
+        onPermissionAsk: async ({
+          toolName,
+          input,
+          suggestions,
+          displayName,
+          description,
+          title,
+          toolUseId,
+          signal,
+        }) => {
             if (
               toolName === MCP_BASH_OUTPUT ||
               toolName === MCP_BASH_KILL ||
@@ -461,7 +476,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
               return { behavior: "allow", updatedInput: input };
             }
             const permissionSuggestions = sessionPermissionSuggestions(
-              permOpts.suggestions
+              suggestions
             );
             const id = randomUUID();
             const displayTool =
@@ -475,20 +490,20 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
                 id,
                 tool: displayTool,
                 input,
-                title: permOpts.title,
-                displayName: permOpts.displayName,
-                description: permOpts.description,
+                title: title,
+                displayName: displayName,
+                description: description,
                 hasSessionPermissionSuggestions:
                   permissionSuggestions.length > 0,
                 // Carry the SDK's toolUseID so the client can match the card
                 // to the corresponding step (`s-<toolUseID>`) and know when
                 // the step is actually executing vs waiting on approval.
-                toolUseId: permOpts.toolUseID,
+                toolUseId: toolUseId,
               })
             );
             let decision: Awaited<ReturnType<typeof awaitPermission>>;
             try {
-              decision = await awaitPermission(id, permOpts.signal);
+              decision = await awaitPermission(id, signal);
             } catch (err) {
               fanout(
                 "permission_resolved",
@@ -527,25 +542,21 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
               return { behavior: "allow", updatedInput: input };
             }
             return decision;
-          },
         },
       });
 
-      // Give the cancel route a way to terminate the iterator early. SDK's
-      // query() doesn't accept an external AbortSignal, so calling .return()
-      // on the async iterator is the only handle.
-      entry.cancelIterator = async () => {
-        try {
-          await (response as any).return?.();
-        } catch {
-          /* iterator may throw on return — ignore */
-        }
-      };
-
+      let ended: ExecResult | null = null;
       let msgCount = 0;
       let currentStreamMessageId: string | undefined;
-      for await (const msg of response) {
+      for await (const frame of frames) {
+        if (frame.kind === "ended") {
+          ended = frame.result;
+          break;
+        }
         if (entry.cancelRequested) break;
+        // `payload` is the CLI's own stream-json frame — byte-for-byte what the
+        // SDK used to yield, which is why everything below is unchanged.
+        const msg = frame.payload;
         msgCount++;
         const tag =
           (msg as any).type +
@@ -601,6 +612,10 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           activeChats.set(emittedId, entry);
           entry.sessionId = emittedId;
           currentSessionId = emittedId;
+          // The HTTP bash tool reads the session id off the token context, so
+          // it has to follow the rename too or background tasks get filed
+          // under the old id.
+          updateMcpSession(mcpToken, emittedId);
         }
 
         fanout(outboundMsg.type, JSON.stringify(outboundMsg));
@@ -613,8 +628,16 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       }
 
       console.log(
-        `[chat ${reqId}] ${entry.cancelRequested ? "cancelled" : "done"} msgs=${msgCount} in ${elapsed()}`
+        `[chat ${reqId}] ${entry.cancelRequested ? "cancelled" : (ended?.status ?? "done")}` +
+          ` msgs=${msgCount} in ${elapsed()}` +
+          (ended?.error ? ` error=${JSON.stringify(ended.error)}` : "")
       );
+      // A user cancel is not an error. `aborted` exists precisely because a
+      // killed child also exits non-zero, which an exit code alone cannot tell
+      // apart from a genuine failure.
+      if (ended && ended.status !== "completed" && ended.status !== "aborted") {
+        throw new Error(ended.error ?? `run ${ended.status}`);
+      }
       entry.status = "done";
 
       // Surface pending wakeup BEFORE the terminal `done` event so the UI can
@@ -650,6 +673,10 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       entry.errorMsg = message;
       fanout("error", JSON.stringify({ message }));
     } finally {
+      // Drop the per-turn MCP context: the token stops authenticating, and the
+      // HTTP routes' per-request servers have nothing left to resolve.
+      if (mcpTokenToRelease) unregisterMcpSessionContext(mcpTokenToRelease);
+
       // Close subscribers so their drain loops wake up and exit. The terminal
       // event ("done" / "error") has already been fanned out into their
       // queues; the drain loop is keyed off `!closed || queue.length > 0`.
