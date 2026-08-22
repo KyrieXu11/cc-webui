@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { groupsEnabled } from "./features.ts";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -124,12 +125,16 @@ metaRoute.get("/", async (c) => {
   const cwd = expandHome(c.req.query("cwd") || process.env.CC_WEBUI_CWD);
   const key = cwd ?? "__global__";
   const cached = cache.get(key);
+  // Feature flags are read fresh (not cached) — they're env lookups, and the
+  // frontend uses `features.groups` to decide whether the group-chat surface
+  // exists at all.
+  const features = { groups: groupsEnabled() };
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-    return c.json({ ...cached.scan, cached: true });
+    return c.json({ ...cached.scan, features, cached: true });
   }
   const scan = await scanClaudeCommands(cwd);
   cache.set(key, { ts: Date.now(), scan });
-  return c.json({ ...scan, cached: false });
+  return c.json({ ...scan, features, cached: false });
 });
 
 export { metaRoute };

@@ -1,7 +1,12 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "../permission.ts";
-import { createBashMcpServer } from "../bash-mcp.ts";
+import { claudeExecutor } from "../executors/claude-executor.ts";
+import type { McpServerSpec } from "../executors/types.ts";
+import { getMcpRouteUrl } from "../codex-mcp-config.ts";
+import {
+  registerMcpSessionContext,
+  unregisterMcpSessionContext,
+} from "../mcp-context.ts";
 import {
   getOrCreateAllowance,
   getOrCreateInputAllowance,
@@ -41,14 +46,41 @@ export async function* runClaude(args: {
   const allowance = getOrCreateAllowance(scope);
   const inputAllowance = getOrCreateInputAllowance(scope);
 
-  const bashMcp = createBashMcpServer({ getSessionId: () => scope });
+  // MCP over HTTP, same routes Codex and Feishu already use. A per-turn bearer
+  // token carries this turn's context.
+  //
+  // The Feishu adapter used to inject `lark` twice — an in-process SDK server
+  // for Claude and an HTTP context for Codex. Now both providers take the HTTP
+  // one, so ctx.extraMcpServers is gone along with the SDK.
+  const mcpToken = randomUUID();
+  registerMcpSessionContext({
+    token: mcpToken,
+    sessionId: scope,
+    // The group bash MCP never used to receive a cwd, so mcp__bash__run ran in
+    // the SERVER's cwd while Claude's own file tools got config.cwd — an agent
+    // reading one tree and shelling into another. Fixed here, deliberately as
+    // its own change rather than inside the driver swap.
+    cwd: config.cwd,
+    lark: ctx.codexMcp?.lark,
+  });
 
-  // String prompt or AsyncIterable for image-bearing user input. Resume
-  // (when present) keeps the SDK session warm so prompt cache stays hot
-  // across turns of the same group.
-  const queryPrompt = images.length
-    ? makeImagePrompt(prompt, images)
-    : prompt;
+  const mcpServers: McpServerSpec[] = [
+    {
+      name: "bash",
+      url: getMcpRouteUrl(process.env, "bash"),
+      bearerToken: mcpToken,
+    },
+  ];
+  if (ctx.codexMcp?.lark) {
+    mcpServers.push({
+      name: "lark",
+      url: getMcpRouteUrl(process.env, "lark"),
+      bearerToken: mcpToken,
+      // Adapter namespace: cc-webui-internal, so no card. Same policy the
+      // canUseTool callback used to apply by inspecting the namespace.
+      autoAllow: true,
+    });
+  }
 
   const groupSystemPrompt = systemPromptFor({ config, target: ctx.agentId });
   const systemPromptAppend = `${SYSTEM_PROMPT_APPEND_BASH}\n\n${groupSystemPrompt}`;
@@ -57,26 +89,33 @@ export async function* runClaude(args: {
   let capturedSessionId: string | undefined = ctx.resumeSessionId;
 
   try {
-    const response = query({
-      prompt: queryPrompt as any,
-      options: {
-        ...(ctx.resumeSessionId ? { resume: ctx.resumeSessionId } : {}),
-        cwd: config.cwd,
-        model: participant.model,
-        permissionMode: participant.mode ?? "default",
-        effort: participant.effort,
-        includePartialMessages: true,
-        mcpServers: { bash: bashMcp, ...(ctx.extraMcpServers ?? {}) },
-        // ScheduleWakeup additionally disabled: group turns are driven by
-        // the orchestrator's pipeline — a CLI-side wakeup would re-enter a
-        // session outside the orchestrator's control.
-        disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
-        systemPrompt: {
-          type: "preset",
-          preset: "claude_code",
-          append: systemPromptAppend,
-        },
-        canUseTool: async (toolName, input, permOpts) => {
+    const frames = claudeExecutor.exec({
+      prompt,
+      images,
+      cwd: config.cwd,
+      signal: ctx.signal,
+      model: participant.model,
+      effort: participant.effort,
+      mode: participant.mode ?? "default",
+      ...(ctx.resumeSessionId ? { resume: ctx.resumeSessionId } : {}),
+      // ScheduleWakeup additionally disabled: group turns are driven by
+      // the orchestrator's pipeline — a CLI-side wakeup would re-enter a
+      // session outside the orchestrator's control.
+      disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
+      appendSystemPrompt: systemPromptAppend,
+      mcpServers,
+      // Same decision logic as the SDK-era canUseTool; only the parameter
+      // shape changed.
+      onPermissionAsk: async ({
+        toolName,
+        input,
+        suggestions,
+        displayName,
+        description,
+        title,
+        toolUseId,
+        signal,
+      }) => {
           // Auto-allow our trusted MCP tools (mirrors single-chat behavior)
           if (
             toolName === MCP_BASH_OUTPUT ||
@@ -84,20 +123,6 @@ export async function* runClaude(args: {
             toolName === MCP_BASH_LIST
           ) {
             return { behavior: "allow", updatedInput: input };
-          }
-          // Adapter-injected MCP servers (e.g. Feishu's `lark` namespace)
-          // are cc-webui-internal — they don't touch the user's filesystem
-          // beyond what the adapter explicitly does, so we auto-allow them.
-          // Tool names are namespaced like `mcp__lark__send_file`.
-          if (
-            ctx.extraMcpServers &&
-            typeof toolName === "string" &&
-            toolName.startsWith("mcp__")
-          ) {
-            const ns = toolName.slice(5).split("__")[0];
-            if (ns && ns in ctx.extraMcpServers) {
-              return { behavior: "allow", updatedInput: input };
-            }
           }
           if (allowance.has(toolName)) {
             return { behavior: "allow", updatedInput: input };
@@ -107,7 +132,7 @@ export async function* runClaude(args: {
             return { behavior: "allow", updatedInput: input };
           }
           const permissionSuggestions = sessionPermissionSuggestions(
-            permOpts.suggestions,
+            suggestions,
           );
           const id = randomUUID();
           const displayTool =
@@ -117,12 +142,12 @@ export async function* runClaude(args: {
             id,
             tool: displayTool,
             input,
-            title: permOpts.title,
-            displayName: permOpts.displayName,
-            description: permOpts.description,
+            title: title,
+            displayName: displayName,
+            description: description,
             hasSessionPermissionSuggestions:
               permissionSuggestions.length > 0,
-            toolUseId: permOpts.toolUseID,
+            toolUseId: toolUseId,
           };
           // Fold into server-side events accumulator (so canonical jsonl
           // captures the card) AND emit through the raw SSE channel so
@@ -132,7 +157,7 @@ export async function* runClaude(args: {
           ctx.emitPermission(permPayload);
           let decision: Awaited<ReturnType<typeof awaitPermission>>;
           try {
-            decision = await awaitPermission(id, permOpts.signal);
+            decision = await awaitPermission(id, signal);
           } catch (err) {
             const resolvedPayload = {
               type: "permission_resolved",
@@ -171,20 +196,30 @@ export async function* runClaude(args: {
             return { behavior: "allow", updatedInput: input };
           }
           return decision;
-        },
       },
     });
 
-    // Wire abort so .return() drains the SDK iterator on signal abort.
-    const abortHandler = () => {
-      void (response as any).return?.().catch(() => {});
-    };
-    if (ctx.signal.aborted) abortHandler();
-    else ctx.signal.addEventListener("abort", abortHandler, { once: true });
-
-    let resultError: string | undefined;
-    let sessionNotFound = false;
-    for await (const msg of response) {
+    for await (const frame of frames) {
+      if (frame.kind === "ended") {
+        const r = frame.result;
+        const sessionId = r.sessionHandle ?? capturedSessionId;
+        if (r.status === "completed") {
+          yield { kind: "ended", ok: true, events, sessionId };
+        } else {
+          yield {
+            kind: "ended",
+            ok: false,
+            error: r.status === "aborted" ? "aborted" : (r.error ?? r.status),
+            events,
+            // The executor already withholds a handle it knows is dead, but be
+            // explicit: the orchestrator clears + retries on this flag.
+            sessionId: r.sessionNotFound ? undefined : sessionId,
+            sessionNotFound: r.sessionNotFound,
+          };
+        }
+        return;
+      }
+      const msg = frame.payload;
       yield { kind: "raw", payload: msg };
       // Fold via the same mapper the frontend uses, so persisted entries
       // and live UI render identically.
@@ -194,49 +229,11 @@ export async function* runClaude(args: {
       // Also pull session_id directly off any message that carries it.
       const sid = (msg as any).session_id;
       if (typeof sid === "string" && sid) capturedSessionId = sid;
-      if ((msg as any).type === "result") {
-        // A `result` can be terminal-but-failed and is NOT thrown — e.g.
-        // resuming a session id the SDK no longer has on disk yields
-        // subtype "error_during_execution" + is_error + errors:[...]. If we
-        // don't detect it here, the turn reports ok with zero content and
-        // the caller shows "(no content)".
-        const m = msg as any;
-        const isErr =
-          m.is_error === true ||
-          (typeof m.subtype === "string" && m.subtype !== "success");
-        if (isErr) {
-          const errs = Array.isArray(m.errors)
-            ? m.errors
-                .filter((e: unknown) => typeof e === "string")
-                .join("; ")
-            : "";
-          resultError =
-            errs ||
-            (typeof m.subtype === "string"
-              ? m.subtype
-              : "error_during_execution");
-          sessionNotFound = /no conversation found with session id/i.test(
-            errs,
-          );
-        }
-        break;
-      }
     }
 
-    if (resultError) {
-      yield {
-        kind: "ended",
-        ok: false,
-        error: resultError,
-        events,
-        // On a stale-resume failure the captured id is the dead one — don't
-        // hand it back for persistence; the orchestrator clears + retries.
-        sessionId: sessionNotFound ? undefined : capturedSessionId,
-        sessionNotFound,
-      };
-    } else {
-      yield { kind: "ended", ok: true, events, sessionId: capturedSessionId };
-    }
+    // The executor always emits `ended`; reaching here means the generator was
+    // torn down early (consumer stopped iterating).
+    yield { kind: "ended", ok: false, error: "runner ended without result", events, sessionId: capturedSessionId };
   } catch (err: unknown) {
     const aborted = ctx.signal.aborted;
     yield {
@@ -248,30 +245,7 @@ export async function* runClaude(args: {
       events,
       sessionId: capturedSessionId,
     };
+  } finally {
+    unregisterMcpSessionContext(mcpToken);
   }
-}
-
-// Image-bearing user input has to go through the AsyncIterable form
-// (SDK requirement) — yield a single SDKUserMessage with text + image
-// content blocks.
-async function* makeImagePrompt(
-  text: string,
-  images: ImageAttachment[],
-): AsyncIterable<unknown> {
-  const content: any[] = [{ type: "text", text }];
-  for (const img of images) {
-    content.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: img.mediaType,
-        data: img.data,
-      },
-    });
-  }
-  yield {
-    type: "user",
-    message: { role: "user", content },
-    parent_tool_use_id: null,
-  };
 }

@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import {
-  listSessions as listClaudeSessions,
-  getSessionMessages as getClaudeSessionMessages,
-  deleteSession as deleteClaudeSession,
-} from "@anthropic-ai/claude-agent-sdk";
+  listClaudeSessions,
+  getClaudeSessionMessages,
+  deleteClaudeSession,
+} from "./claude-sessions.ts";
 import {
   deleteCodexSession,
   getCodexSessionTurns,

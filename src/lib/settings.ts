@@ -26,7 +26,7 @@ const RECENTS_KEY = "cc-webui:cwd-recents";
 export const DEFAULT_SETTINGS: Settings = {
   cwd: "",
   agentProvider: "claude",
-  model: "sonnet",
+  model: "opus",
   permissionMode: "acceptEdits",
   effort: "medium",
   theme: "dark",
@@ -79,24 +79,39 @@ export const PROVIDER_OPTIONS: Array<{
   { id: "codex", label: "Codex", hint: "Codex SDK" },
 ];
 
+// Family aliases, NOT pinned version ids.
+//
+// The `claude` CLI resolves these server-side to whatever is current — verified
+// live: opus → claude-opus-5, fable → claude-fable-5, sonnet → claude-sonnet-5,
+// haiku → claude-haiku-4-5-20251001. Pinning versions here is what let this
+// list rot a whole generation behind (it still said opus-4.8 / sonnet-4.6 after
+// opus-5 / sonnet-5 shipped), so the labels deliberately carry no version
+// number either.
+//
+// Other aliases the CLI accepts, if ever wanted: `default`, `opusplan`,
+// `opus[1m]`, `sonnet[1m]` (the [1m] pair being the 1M-context variants).
 const CLAUDE_MODEL_OPTIONS: Array<{ id: string; label: string; hint: string }> =
   [
-    { id: "claude-fable-5", label: "claude-fable-5", hint: "Fable 5 · Mythos 级 · 最强" },
-    { id: "claude-opus-4-8", label: "claude-opus-4-8", hint: "Opus 4.8 · 旗舰 · 深度推理" },
-    { id: "claude-sonnet-4-6", label: "claude-sonnet-4-6", hint: "Sonnet 4.6 · 均衡" },
-    { id: "claude-haiku-4-5", label: "claude-haiku-4-5", hint: "Haiku 4.5 · 快 · 便宜" },
+    { id: "opus", label: "Opus", hint: "旗舰 · 深度推理 · 跟随最新" },
+    { id: "fable", label: "Fable", hint: "Mythos 级 · 最强 · 跟随最新" },
+    { id: "sonnet", label: "Sonnet", hint: "均衡 · 跟随最新" },
+    { id: "haiku", label: "Haiku", hint: "快 · 便宜 · 跟随最新" },
   ];
 
-// Legacy short aliases used in older saved data ("opus" → latest Opus),
-// kept so dropdown / label rendering doesn't show raw "opus" in places that
-// were saved before this rename. The Claude SDK accepts both forms; we
-// surface the canonical full name everywhere in the UI now. Bare aliases
-// track the latest model of each family (same policy as the Feishu bridge).
+// Pinned ids that older saved settings / group configs may still hold, mapped
+// forward onto the alias that supersedes them. Direction matters: this used to
+// run the other way (alias → pinned id), which is exactly how a stored "sonnet"
+// stopped matching any option and got silently rewritten to the first entry in
+// the list.
 const CLAUDE_LEGACY_ALIAS: Record<string, string> = {
-  opus: "claude-opus-4-8",
-  sonnet: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5",
-  fable: "claude-fable-5",
+  "claude-opus-4-7": "opus",
+  "claude-opus-4-8": "opus",
+  "claude-opus-5": "opus",
+  "claude-sonnet-4-6": "sonnet",
+  "claude-sonnet-5": "sonnet",
+  "claude-haiku-4-5": "haiku",
+  "claude-haiku-4-5-20251001": "haiku",
+  "claude-fable-5": "fable",
 };
 
 export function canonicalizeClaudeModel(id: string): string {
@@ -181,13 +196,11 @@ function isCodexModel(model: string): boolean {
   return CODEX_MODEL_OPTIONS.some((m) => m.id === model);
 }
 
-// Claude models whose effort selector exposes the xhigh tier
-// (top-tier reasoning models: Opus 4.7/4.8 and Fable 5).
-const XHIGH_CLAUDE_MODELS = new Set([
-  "claude-opus-4-7",
-  "claude-opus-4-8",
-  "claude-fable-5",
-]);
+// Which Claude families expose the xhigh effort tier. Hand-maintained on
+// purpose: the CLI validates `--effort` not at all — `haiku --effort xhigh` and
+// even `--effort bogustier` are accepted silently — so it cannot be the judge.
+// Aliases now, so this no longer needs editing when a version ships.
+const XHIGH_CLAUDE_MODELS = new Set(["opus", "fable"]);
 
 export function supportsXhighEffort(model: string): boolean {
   const canonical = canonicalizeClaudeModel(model);

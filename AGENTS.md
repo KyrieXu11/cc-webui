@@ -3,6 +3,10 @@
 > 这份文件写给**接手开发的人和 AI agent**。目标：快速看懂架构、跑起来、知道雷在哪。
 > 面向用户的功能说明在 [`README.md`](./README.md)，飞书接入在 [`docs/feishu.md`](./docs/feishu.md)，
 > 群聊的原始设计/计划在 [`docs/superpowers/`](./docs/superpowers/)（**注意已与实现有漂移，见文末**）。
+>
+> **要动 SDK / CLI 驱动这块，先读 [`docs/cli-migration.md`](./docs/cli-migration.md)**——那里有
+> 「扔掉两个 SDK、自己驱动 CLI」的全部决策 + **已实测的事实**（CLI flag 全集、无文档的控制协议线格式、
+> 模型别名解析结果、lvshu 参考实现索引）。别重跑那轮调研。
 
 ## 这是什么
 
@@ -21,7 +25,7 @@ npm install
 npm run dev        # 开发：vite 前端 :8787（HMR）+ api :8788，vite 把 /api 代理到 8788
 npm start          # 生产：vite build 后单端口 :8787 同时托管 dist/ 和 /api/*（NODE_ENV=production）
 npm run typecheck  # tsc --noEmit（提交前必过）
-npm test           # tsx --test "server/**/*.test.ts"（8 个测试文件，纯 assert 脚本风格）
+npm test           # tsx --test "server/**/*.test.ts"（10 个测试文件，纯 assert 脚本风格）
 ```
 
 - 端口：`PORT`（默认 8787）、`CC_WEBUI_HOST`（默认 `127.0.0.1`，放 LAN 用 `0.0.0.0`）。
@@ -81,6 +85,29 @@ npm test           # tsx --test "server/**/*.test.ts"（8 个测试文件，纯 
   allowance Set（scope = sessionId）；10 分钟无响应自动 deny。
 
 ### 3. 会话引擎：群聊 + 单 agent 会话（`server/groups/`）
+
+> **⚠️ 先分清四个词**，它们指的是不同东西，混用会让人改错地方：
+>
+> | 词 | 指什么 | 代码 |
+> |---|---|---|
+> | **会话引擎** | 1..2 participant 的引擎（transcript.jsonl / orchestrator / input-builder） | `server/groups/*` |
+> | **群聊** | 引擎上 **2 participant** 的会话——即"一个 turn 里多个 agent 接话" | `participants.length === 2` |
+> | **单 agent 会话** | 同一个引擎上 **1 participant** 的会话（飞书 p2p 就是这个） | `participants.length === 1` |
+> | **网页单聊** | 完全另一套代码：native session resume、无 transcript | `server/chat.ts` / `codex-chat.ts` |
+>
+> 另外为将来的 CLI 驱动工作预留区分：**runner**（`claude-runner.ts` / `codex-runner.ts`）指"跑 pipeline
+> 里一步、吐 `ChatEvent`"；**executor** 留给"驱动一个 CLI 子进程"那层。一个 runner 内部**用**一个
+> executor，两者不是同义词，别都叫 runner。
+
+- **`CC_WEBUI_GROUPS_ENABLED` 开关**（`server/features.ts`，**默认关**）：管的是**群聊**这个能力，
+  不是引擎。关闭时——`orchestrator.startTurn` 的收件人展开处经 `capToSoloWhenGroupsDisabled()` 截到
+  1 个（**config 和 transcript 一行不改**，已有 2-agent 群照样能开、只是单 agent 答）、`/api/groups`
+  不挂载（网页群聊是它唯一消费者，飞书走直接 import）、前端经 `/api/meta` 的 `features.groups` 让
+  群聊入口**彻底不出现**。飞书和网页单聊完全不受影响。
+  故意**不**在 `validateConfig` 层面禁 2 participant：那会让所有已存 2-agent 群 `readConfig` 直接抛，
+  并搞挂绑到它们的飞书 chat。开关是"功能不可用"，不是"数据不兼容"。
+  副作用（非安全控制）：关闭时 `groups.ts` 的 DELETE 路由不可达，那条 gid traversal 也就摸不到——
+  但**打开就回来**，别把它当防护。
 - **会话模型**：一个会话有 **1 或 2 个 agent**。2 个 = 群聊（Claude + Codex 协作）；1 个 = 单 agent
   会话（如飞书 p2p 私聊，只有一个 bot）。`gid` 是会话 id。（v1 上限 2 个。）
 - 独立于网页单聊。canonical 真相是 `~/.cc-webui/groups/<gid>/transcript.jsonl`（append-only），
@@ -138,11 +165,11 @@ npm test           # tsx --test "server/**/*.test.ts"（8 个测试文件，纯 
 以下是审计确认的**当前状态**，按影响排序。位置仅供起点，改前请复核。
 
 **单聊 Claude**
-- **[中] 默认模型 `"sonnet"` 不是合法选项 id** → 打开历史会话时被静默改写成 `claude-fable-5`。
-  `settings.ts` 里 `DEFAULT_SETTINGS.model="sonnet"`，但选项 id 是全名（`claude-sonnet-4-6` 等），
-  `App.openSession` 的 `options.some(id===cur.model)` 匹配失败 → fallback 到列表第一个（fable-5）。
-  首个真实用户很可能在没意识到的情况下用 fable-5 跑，账号无权限时直接报错。修法：把默认值改成
-  `claude-sonnet-4-6`，或在匹配前做一次别名规整。
+- **[已修] 默认模型不再是非法 id**。原来 `DEFAULT_SETTINGS.model="sonnet"` 而选项 id 是钉死的全名
+  （`claude-sonnet-4-6` 等），`App.openSession` 匹配失败 → 静默 fallback 到列表第一个（fable-5）。
+  现在选项本身就是**家族别名** `opus` / `fable` / `sonnet` / `haiku`（CLI 自己解析成当前版本，实测
+  opus→opus-5、sonnet→sonnet-5），默认 `opus` 是合法 id，改写路径消失。钉版本正是这份列表落后一整代
+  的原因，所以标签里也不再写版本号。详见 [`docs/cli-migration.md`](./docs/cli-migration.md)。
 - **[低] attach/重连路径吞掉真实错误**：`api.ts` 的 attach error 监听器丢弃 payload，前端只显示固定的
   「流式连接中断」。首屏和重连行为不一致。
 - **[低] 打开任意非 in-flight 会话会闪一下 busy**：`App` 同步 `setAttachedStreaming(true)` 后服务端
@@ -154,9 +181,13 @@ npm test           # tsx --test "server/**/*.test.ts"（8 个测试文件，纯 
   的首次调用必现（后续走 resume-catchup 路径不受影响）。单测没抓到是因为它喂的 transcript 不含 currentText。
 - **[中] `startTurn` 有 TOCTOU 竞态**：`activeGroupTurns.has(gid)` 检查和注册之间隔了个 `await readConfig`，
   两个并发 turn（网页 + 飞书，或两个 tab）可能都通过 → 同一 group 双开、`stopTurn` 只能停最后一个。
-- **[中] 改 participant 模型不清 resumed session，且文案自相矛盾**：`runtime.clearAgentSessionId` 注释说
-  「模型变更时用」，但唯一调用方是 cwd 变更（`relocateGroup`）；而 `GroupConfigDialog` 文案又说换模型会保留
-  session。换模型后会 `resume(oldSessionId, {model:newModel})`，可能 mis-route。需定一个语义并对齐三处。
+- **[已修] 改 participant 模型现在会清 resumed session**：换 model 后旧 native session/thread 是按旧
+  model 录的，resume 它会 mis-route，Codex 还会把「recorded with model X but resuming with Y」当 `error`
+  item 吐进聊天。语义已统一为**换 model → 起新会话**（mode/effort 不动 session）：`lifecycle.clearSessionsForModelChanges`
+  在 web PATCH（`groups.ts`）和飞书 `/model`（`handler.ts`）两处调用，`GroupConfigDialog` 文案已对齐。
+  历史上已错配的 thread（如 Jul 4 默认模型 `gpt-5.3-codex`→`gpt-5.5` 批量改 config 但没清 runtime.json
+  的那批）：`server/codex-events.ts` 的 `isCodexModelMismatchNotice` 会在 codex-runner / codex-chat 里把这条
+  advisory 静音（turn 仍按新 model 正常跑，advisory 纯装饰）。
 - **[设计] Codex 在群聊里从不弹权限卡**：`codex-runner.mapMode` 对所有 mode 都返回 `approvalPolicy:"never"`，
   mode 只改 sandbox。per-agent 权限归属其实只对 Claude 有意义，但配置面板对两者一视同仁，容易误导。
 

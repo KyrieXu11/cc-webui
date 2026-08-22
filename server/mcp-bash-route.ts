@@ -14,8 +14,9 @@ import {
 } from "./feishu/mentions.ts";
 import {
   extractBearerToken,
-  getCodexMcpContext,
-} from "./codex-mcp-context.ts";
+  getMcpSessionContext,
+} from "./mcp-context.ts";
+import { MAX_DELAY_S, MIN_DELAY_S } from "./wakeup.ts";
 import {
   MAX_TIMEOUT_MS,
   killBackground,
@@ -33,7 +34,7 @@ function createServerForToken(token: string): McpServer {
     version: "0.1.0",
   });
 
-  const getContext = () => getCodexMcpContext(token);
+  const getContext = () => getMcpSessionContext(token);
 
   server.registerTool(
     "run",
@@ -76,6 +77,10 @@ function createServerForToken(token: string): McpServer {
         {
           cwd: ctx.cwd,
           getSessionId: () => ctx.sessionId,
+          // Read off the context on every call, not captured once: the web
+          // path needs foreground lifecycle events in its own turn's SSE
+          // fanout, and only that path supplies a sink.
+          onForegroundEvent: ctx.onForegroundEvent,
         },
         extra.signal
       );
@@ -140,7 +145,7 @@ function createLarkServerForToken(token: string): McpServer {
     version: "0.1.0",
   });
 
-  const getLarkContext = () => getCodexMcpContext(token)?.lark;
+  const getLarkContext = () => getMcpSessionContext(token)?.lark;
 
   server.registerTool(
     "send_file",
@@ -355,36 +360,202 @@ function mcpError(message: string) {
   };
 }
 
+// HTTP twin of server/schedule-mcp.ts. Same tool names, descriptions and
+// return text — the in-process version is built on the Claude SDK's
+// createSdkMcpServer, which the CLI migration removes, so the wire-transport
+// version has to exist. Keep the two in sync until the SDK one is deleted.
+function createScheduleServerForToken(token: string): McpServer {
+  const server = new McpServer({ name: "cc-webui-schedule", version: "0.1.0" });
+  const getSlot = () => getMcpSessionContext(token)?.wakeupSlot;
+
+  server.registerTool(
+    "wakeup",
+    {
+      title: "Schedule Wakeup",
+      description:
+        "Schedule the conversation to automatically resume after a delay. " +
+        "When the current turn ends, the runtime sleeps for delaySeconds, then injects " +
+        "`prompt` as a synthetic user message that resumes this same session — there " +
+        "is no human in the loop, so the prompt must be self-contained and actionable. " +
+        "Use this when you started a long-running background command via " +
+        "mcp__bash__run (run_in_background=true) and want to come back later to check " +
+        "on it without the user having to manually type 'continue'. Only one wakeup can " +
+        "be pending per turn — calling again overwrites the previous request. Cancel " +
+        "with mcp__schedule__cancel_wakeup if no longer needed.",
+      inputSchema: {
+        delaySeconds: z
+          .number()
+          .describe(
+            `Delay in seconds before resuming. Clamped to [${MIN_DELAY_S}, ${MAX_DELAY_S}]. ` +
+              "Pick based on how long the background task realistically takes — do not " +
+              "default to short polling loops."
+          ),
+        prompt: z
+          .string()
+          .min(1)
+          .describe(
+            "Self-contained prompt injected as a user message when the wakeup fires. " +
+              "Be specific: e.g. 'Poll mcp__bash__output for bash_id=bg-abc12345 and " +
+              "report the results, then continue the analysis.'"
+          ),
+        reason: z
+          .string()
+          .optional()
+          .describe(
+            "Short rationale for the scheduling decision (shown in logs/UI). One sentence."
+          ),
+      },
+    },
+    async (args) => {
+      const slot = getSlot();
+      if (!slot) {
+        return {
+          content: [{ type: "text" as const, text: "MCP context expired." }],
+          isError: true,
+        };
+      }
+      const w = slot.set({
+        delaySeconds: args.delaySeconds,
+        prompt: args.prompt,
+        reason: args.reason ?? null,
+      });
+      const fireAt = new Date(w.scheduledAt + w.delaySeconds * 1000);
+      const hh = fireAt.getHours().toString().padStart(2, "0");
+      const mm = fireAt.getMinutes().toString().padStart(2, "0");
+      const ss = fireAt.getSeconds().toString().padStart(2, "0");
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Next wakeup scheduled for ${hh}:${mm}:${ss} (in ${w.delaySeconds}s, id=${w.id}).`,
+          },
+        ],
+        isError: false,
+      };
+    }
+  );
+
+  server.registerTool(
+    "cancel_wakeup",
+    {
+      title: "Cancel Wakeup",
+      description:
+        "Cancel the wakeup scheduled by mcp__schedule__wakeup in the current turn, if any. " +
+        "Has no effect on wakeups already fired.",
+      inputSchema: {},
+    },
+    async () => {
+      const slot = getSlot();
+      if (!slot) {
+        return {
+          content: [{ type: "text" as const, text: "MCP context expired." }],
+          isError: true,
+        };
+      }
+      const w = slot.clear();
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: w
+              ? `Cancelled pending wakeup (id=${w.id}, was set for ${w.delaySeconds}s).`
+              : "No pending wakeup to cancel.",
+          },
+        ],
+        isError: false,
+      };
+    }
+  );
+
+  return server;
+}
+
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-route.all("/bash", async (c) => {
-  const token = extractBearerToken(c.req.header("authorization"));
-  if (!getCodexMcpContext(token)) {
-    return c.json({ error: "unauthorized" }, 401);
+// A fresh McpServer + transport per HTTP request — the transport enforces it
+// ("Stateless transport cannot be reused across requests"), verified by trying
+// to cache one per token and watching every tool registration disappear.
+//
+// So the leak fix is disposal, not reuse: close the server once the response
+// body has been fully delivered. Previously nothing was ever closed, which was
+// a per-request leak — and it got worse once Claude started using these routes
+// too, not just Codex and Feishu.
+async function serveMcp(
+  raw: Request,
+  make: () => McpServer
+): Promise<Response> {
+  const transport = new WebStandardStreamableHTTPServerTransport();
+  const server = make();
+  await server.connect(transport);
+
+  const close = () => {
+    // Closing the server closes the transport it is connected to.
+    void Promise.resolve(server.close()).catch(() => {});
+  };
+
+  let res: Response;
+  try {
+    res = await transport.handleRequest(raw);
+  } catch (err) {
+    close();
+    throw err;
   }
 
-  const transport = new WebStandardStreamableHTTPServerTransport();
-  const server = createServerForToken(token!);
-  await server.connect(transport);
-  return transport.handleRequest(c.req.raw);
+  // A streaming (SSE) response stays open for the rest of the exchange, so
+  // disposal has to wait for the stream to finish rather than for this handler
+  // to return.
+  if (!res.body) {
+    close();
+    return res;
+  }
+  // `flush` fires when the upstream ends normally. If the client aborts the
+  // connection instead, the stream is cancelled and this never runs — the
+  // server is then simply unreferenced, which is the pre-fix behavior and the
+  // rarer path.
+  const onFlush = new TransformStream({
+    flush() {
+      close();
+    },
+  });
+  return new Response(res.body.pipeThrough(onFlush), {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
+}
+
+route.all("/bash", async (c) => {
+  const token = extractBearerToken(c.req.header("authorization"));
+  if (!getMcpSessionContext(token)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  return serveMcp(c.req.raw, () => createServerForToken(token!));
+});
+
+route.all("/schedule", async (c) => {
+  const token = extractBearerToken(c.req.header("authorization"));
+  const ctx = getMcpSessionContext(token);
+  if (!ctx) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  if (!ctx.wakeupSlot) {
+    return c.json({ error: "schedule context unavailable" }, 403);
+  }
+  return serveMcp(c.req.raw, () => createScheduleServerForToken(token!));
 });
 
 route.all("/lark", async (c) => {
   const token = extractBearerToken(c.req.header("authorization"));
-  const ctx = getCodexMcpContext(token);
+  const ctx = getMcpSessionContext(token);
   if (!ctx) {
     return c.json({ error: "unauthorized" }, 401);
   }
   if (!ctx.lark) {
     return c.json({ error: "lark context unavailable" }, 403);
   }
-
-  const transport = new WebStandardStreamableHTTPServerTransport();
-  const server = createLarkServerForToken(token!);
-  await server.connect(transport);
-  return transport.handleRequest(c.req.raw);
+  return serveMcp(c.req.raw, () => createLarkServerForToken(token!));
 });
 
 export { route as mcpBashRoute };

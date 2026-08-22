@@ -123,6 +123,7 @@ npm run dev
 | `CC_WEBUI_UPLOAD_DIR` | 文件上传落盘目录 | `os.tmpdir()/cc-webui-uploads` |
 | `CC_WEBUI_SESSION_INDEX` | WebUI 自己维护的 provider-aware session index（目前用于 Codex 历史） | `~/.cc-webui/sessions.json` |
 | `CC_WEBUI_GROUPS_DIR` | 多 agent 群聊数据目录（`<gid>/config.json` + `transcript.jsonl` + `index.json`） | `~/.cc-webui/groups` |
+| `CC_WEBUI_GROUPS_ENABLED` | 是否启用**多 agent 群聊**（一个 turn 里多个 agent 接话）。未开启时网页群聊入口不出现、`/api/groups` 不挂载；飞书和网页单聊不受影响 | 关闭 |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
 | `FEISHU_CLAUDE_APP_ID` / `_APP_SECRET` / `_ENCRYPT_KEY` / `_VERIFY_TOKEN` | 飞书 Claude 机器人凭据（详见下面「飞书机器人」一节） | 未设置则不启用 |

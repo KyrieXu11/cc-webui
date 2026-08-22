@@ -1,4 +1,4 @@
-import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
+import type { PermissionUpdate } from "../executors/permission-types.ts";
 
 // Per-scope allowance sets. A "scope" is an opaque string the caller picks:
 // single chat uses the SDK sessionId; group chat uses `${gid}:${agentId}`.

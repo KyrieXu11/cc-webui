@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import {
-  registerCodexMcpContext,
-  unregisterCodexMcpContext,
-} from "./codex-mcp-context.ts";
+  registerMcpSessionContext,
+  unregisterMcpSessionContext,
+} from "./mcp-context.ts";
 import { mcpBashRoute } from "./mcp-bash-route.ts";
 
 const app = new Hono();
@@ -18,7 +18,7 @@ const unauthorized = await app.request("/api/mcp/bash", {
 assert.equal(unauthorized.status, 401);
 
 const token = randomUUID();
-registerCodexMcpContext({
+registerMcpSessionContext({
   token,
   sessionId: "test-session",
   cwd: process.cwd(),
@@ -49,6 +49,6 @@ try {
     `expected 2xx initialize response, got ${initialized.status}`
   );
 } finally {
-  unregisterCodexMcpContext(token);
+  unregisterMcpSessionContext(token);
 }
 
