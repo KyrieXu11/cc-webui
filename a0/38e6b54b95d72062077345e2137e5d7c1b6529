@@ -1,0 +1,30 @@
+src/lib/auth.ts
+  s_58b7404ce04904::t_0d9d06bfa306f6 1-80
+src/components/LoginView.tsx
+  s_58b7404ce04904::t_0d9d06bfa306f6 1-81
+src/App.tsx
+  s_58b7404ce04904::t_ee9b234c4424d3 43,214-219,359
+src/AuthGate.tsx
+  s_58b7404ce04904::t_ee9b234c4424d3 1-88
+src/components/Sidebar.tsx
+  s_58b7404ce04904::t_ee9b234c4424d3 2,19,57-64,70-76
+  s_58b7404ce04904::t_99a9050376e3e2 77
+src/main.tsx
+  s_58b7404ce04904::t_ee9b234c4424d3 4,9-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "a038e6b54b95d72062077345e2137e5d7c1b6529",
+  "prompts": {},
+  "sessions": {
+    "s_58b7404ce04904": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "efe0b87b-c0fe-4dd2-8af0-d8534e03f095",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
