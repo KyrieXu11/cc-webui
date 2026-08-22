@@ -1,4 +1,5 @@
 import type { Theme } from "../lib/settings";
+import { useAuth } from "../AuthGate";
 
 interface Props {
   onToggleSidebar?: () => void;
@@ -15,6 +16,7 @@ export default function Sidebar({
   theme,
   onToggleTheme,
 }: Props) {
+  const { user, isAdmin, signOut } = useAuth();
   return (
     <aside className="flex flex-col items-center justify-between w-14 border-r border-line py-3 shrink-0">
       <div className="flex flex-col items-center gap-1">
@@ -52,10 +54,26 @@ export default function Sidebar({
         >
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
         </button>
+        <button
+          onClick={signOut}
+          aria-label="退出登录"
+          title={`${user.username}${isAdmin ? "（管理员）" : ""} — 退出登录`}
+          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+        >
+          <SignOutIcon />
+        </button>
       </div>
     </aside>
   );
 }
+
+const SignOutIcon = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+);
 
 const HelpIcon = () => (
   <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
