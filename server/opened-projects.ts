@@ -51,3 +51,19 @@ export function removeOpenedProject(path: string, userId = ""): void {
     .prepare("DELETE FROM opened_projects WHERE user_id = ? AND path = ?")
     .run(userId, path);
 }
+
+// Admin view: every user's opened projects. "" is the unowned bucket — rows
+// imported from the old shared recents.json, or created before the permissions
+// module existed.
+export function listAllOpenedProjects(limit = 500): Array<
+  OpenedProject & { userId: string }
+> {
+  return getDb()
+    .prepare(
+      `SELECT user_id AS userId, path, last_used AS lastUsed
+         FROM opened_projects
+        ORDER BY last_used DESC
+        LIMIT ?`,
+    )
+    .all(limit) as Array<OpenedProject & { userId: string }>;
+}

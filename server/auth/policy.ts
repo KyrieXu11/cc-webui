@@ -66,6 +66,18 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "POST /api/auth/logout": { auth: "public", note: "clearing a cookie needs no identity" },
   "GET /api/auth/me": { auth: "public", note: "returns {user:null} when anonymous" },
 
+  // ── admin management ──────────────────────────────────────────────────────
+  // No owns/paths specs: these routes are ABOUT users and mappings, not about
+  // a caller's own resources, and role === "admin" is the whole gate.
+  "GET /api/admin/users": { auth: "admin", note: "the admin surface" },
+  "POST /api/admin/users": { auth: "admin", note: "the admin surface" },
+  "PATCH /api/admin/users/:id": { auth: "admin", note: "the admin surface" },
+  "DELETE /api/admin/users/:id": { auth: "admin", note: "the admin surface" },
+  "POST /api/admin/claim-unowned": { auth: "admin", note: "the admin surface" },
+  "GET /api/admin/opened-projects": { auth: "admin", note: "the admin surface" },
+  "GET /api/admin/feishu-senders": { auth: "admin", note: "the admin surface" },
+  "PUT /api/admin/feishu-senders": { auth: "admin", note: "the admin surface" },
+
   // ── web single chat (Claude) ──────────────────────────────────────────────
   "POST /api/chat": { auth: "user", paths: [{ from: "body", key: "cwd", optional: true }] },
   "POST /api/chat/cancel": {

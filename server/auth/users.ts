@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb, transact } from "../db.ts";
 import { hashPassword, verifyPassword } from "./passwords.ts";
+import { claimUnowned } from "./ownership.ts";
 
 export type Role = "admin" | "user";
 
@@ -166,9 +167,13 @@ export function seedAdminFromEnv(raw = process.env.CC_WEBUI_ADMIN): User | null 
     role: "admin",
     allowedPaths: ["**"],
   });
+  // Decision 15: everything that predates accounts belongs to this admin.
+  const claimed = claimUnowned(user.id);
   console.log(
     `[cc-webui] auth: seeded admin "${username}" from CC_WEBUI_ADMIN ` +
-      "(the variable can be removed now)",
+      "(the variable can be removed now); claimed " +
+      `${claimed.projects} project(s), ${claimed.groups} group(s), ` +
+      `${claimed.codexSessions} codex session(s)`,
   );
   return user;
 }

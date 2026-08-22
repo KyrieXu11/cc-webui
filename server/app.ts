@@ -16,6 +16,7 @@ import { mcpBashRoute } from "./mcp-bash-route.ts";
 import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
 import { authRoutes } from "./auth-routes.ts";
+import { adminRoutes } from "./admin-routes.ts";
 import { groupsEnabled } from "./features.ts";
 import { authMiddleware } from "./auth/middleware.ts";
 
@@ -27,6 +28,7 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
   app.use("/*", authMiddleware());
 
   app.route("/api/auth", authRoutes);
+  app.route("/api/admin", adminRoutes);
   app.route("/api", chat);
   app.route("/api/codex", codexChat);
   // Group chat is opt-in. The web group UI is this route's only consumer —

@@ -189,6 +189,63 @@ try {
     assert.match((await res.json()).error, /malformed/);
   }
 
+  // ── admin surface is admin-only ──────────────────────────────────────────
+
+  assert.equal((await app.request("/api/admin/users")).status, 401, "anonymous");
+  assert.equal(
+    (await app.request("/api/admin/users", { headers: cookie(plain.id) })).status,
+    403,
+    "a plain user must not reach the admin API",
+  );
+  const adminList = await app.request("/api/admin/users", { headers: cookie(admin.id) });
+  assert.equal(adminList.status, 200);
+  assert.ok(
+    (await adminList.json()).users.some((u: { username: string }) => u.username === "alice"),
+  );
+
+  // The last admin cannot be demoted or deleted — there is no password reset
+  // channel here, so locking everyone out would be permanent.
+  const demote = await app.request(`/api/admin/users/${admin.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...cookie(admin.id) },
+    body: JSON.stringify({ role: "user" }),
+  });
+  assert.equal(demote.status, 409);
+  assert.match((await demote.json()).error, /last admin/);
+
+  const selfDelete = await app.request(`/api/admin/users/${admin.id}`, {
+    method: "DELETE",
+    headers: cookie(admin.id),
+  });
+  assert.equal(selfDelete.status, 409);
+  assert.match((await selfDelete.json()).error, /own account/);
+
+  // A new account is default-closed.
+  const created = await app.request("/api/admin/users", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...cookie(admin.id) },
+    body: JSON.stringify({ username: "carol", password: "pw" }),
+  });
+  assert.equal(created.status, 200);
+  const carolId = (await created.json()).user.id;
+  const carolRow = (await (
+    await app.request("/api/admin/users", { headers: cookie(admin.id) })
+  ).json()).users.find((u: { id: string }) => u.id === carolId);
+  assert.deepEqual(carolRow.allowedPaths, [], "new users may open nothing");
+  assert.equal(carolRow.role, "user");
+
+  // Duplicate usernames are refused rather than silently overwriting.
+  assert.equal(
+    (
+      await app.request("/api/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...cookie(admin.id) },
+        body: JSON.stringify({ username: "carol", password: "pw" }),
+      })
+    ).status,
+    409,
+  );
+
   // ── fail-closed: an unclassified route is refused, not waved through ─────
 
   const { Hono } = await import("hono");

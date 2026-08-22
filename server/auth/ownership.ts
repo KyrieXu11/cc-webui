@@ -4,7 +4,7 @@
 // because those files belong to the Claude and Codex CLIs — and the Claude tree
 // is shared with the user's own terminal sessions.
 
-import { getDb } from "../db.ts";
+import { getDb, transact } from "../db.ts";
 
 export type ResourceKind = "claude" | "codex" | "group";
 
@@ -70,4 +70,50 @@ export function relabelOwner(oldId: string, newId: string): void {
     .get(oldId) as { kind?: ResourceKind } | undefined;
   if (!kindRow?.kind) return;
   recordOwner(newId, kindRow.kind, owner);
+}
+
+// Claim everything that has no owner yet (decision 15: existing data belongs to
+// the first admin). Called once when that admin is seeded, and available as an
+// explicit admin action afterwards.
+//
+// Claude session files are deliberately NOT enumerated: an unowned resource is
+// already admin-visible (decision 10), so writing a row for each of the
+// hundreds of jsonl files under ~/.claude/projects would change nothing that
+// anyone can observe. Groups and Codex sessions are claimed because they are
+// already rows in this database — cheap, and it makes the admin page show real
+// counts instead of zero.
+export function claimUnowned(userId: string): {
+  projects: number;
+  groups: number;
+  codexSessions: number;
+} {
+  const db = getDb();
+  return transact(() => {
+    // The primary key is (user_id, path), so a path the admin already has must
+    // be replaced rather than inserted twice.
+    const projects = Number(
+      db
+        .prepare(
+          "UPDATE OR REPLACE opened_projects SET user_id = ? WHERE user_id = ''",
+        )
+        .run(userId).changes,
+    );
+
+    const claim = (table: string, idCol: string, kind: ResourceKind) => {
+      const rows = db
+        .prepare(
+          `SELECT ${idCol} AS id FROM ${table}
+            WHERE ${idCol} NOT IN (SELECT resource_id FROM ownership)`,
+        )
+        .all() as Array<{ id: string }>;
+      for (const r of rows) recordOwner(r.id, kind, userId);
+      return rows.length;
+    };
+
+    return {
+      projects,
+      groups: claim("groups_index", "gid", "group"),
+      codexSessions: claim("codex_sessions", "session_id", "codex"),
+    };
+  });
 }
