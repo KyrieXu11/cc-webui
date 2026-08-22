@@ -1,6 +1,6 @@
 import type * as lark from "@larksuiteoapi/node-sdk";
 import type { BotConfig } from "./config.ts";
-import { loadDotEnvOnce } from "./env.ts";
+import { loadDotEnvOnce } from "../env.ts";
 
 loadDotEnvOnce();
 

@@ -14,9 +14,13 @@ import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
 import { groupsEnabled } from "./features.ts";
 import { importLegacyJson } from "./import-legacy-json.ts";
+import { loadDotEnvOnce } from "./env.ts";
+import { authRoutes } from "./auth-routes.ts";
+import { countUsers, seedAdminFromEnv } from "./auth/users.ts";
 
 const app = new Hono();
 
+app.route("/api/auth", authRoutes);
 app.route("/api", chat);
 app.route("/api/codex", codexChat);
 // Group chat is opt-in (CC_WEBUI_GROUPS_ENABLED). The web group UI is the only
@@ -34,9 +38,16 @@ app.route("/api/bash/tasks", bashTasksRoute);
 app.route("/api/mcp", mcpBashRoute);
 app.route("/feishu", feishu);
 
+// .env first: it carries CC_WEBUI_ADMIN and the Feishu credentials, and
+// everything below reads config.
+loadDotEnvOnce();
+
 // Move the flat JSON stores into SQLite before anything serves a request, so
 // no handler can observe a half-migrated state.
 await importLegacyJson();
+
+// Seed the first admin if CC_WEBUI_ADMIN is set and that account is absent.
+seedAdminFromEnv();
 
 const isProd = process.env.NODE_ENV === "production";
 if (isProd) {
@@ -67,5 +78,15 @@ serve({ fetch: app.fetch, port, hostname: host }, (info) => {
     groupsEnabled()
       ? "[cc-webui] groups: enabled"
       : "[cc-webui] groups: disabled (set CC_WEBUI_GROUPS_ENABLED=1 to enable)",
+  );
+  // Authentication is not enforced yet — the primitives exist, the middleware
+  // that rejects anonymous requests lands with the route-by-route
+  // authorization pass. Say so plainly rather than letting the presence of a
+  // login endpoint imply the API is protected.
+  const users = countUsers();
+  console.log(
+    users === 0
+      ? "[cc-webui] auth: no users yet (set CC_WEBUI_ADMIN=user:pass to seed an admin) — API is OPEN"
+      : `[cc-webui] auth: ${users} user(s); enforcement NOT yet enabled — API is OPEN`,
   );
 });

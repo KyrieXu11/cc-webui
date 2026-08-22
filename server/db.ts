@@ -122,6 +122,47 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_codex_turns_session ON codex_turns(session_id, started_at);
   `,
+
+  // 2 — the user/permissions module. See docs/user-permissions.md; note the
+  // boundary stated there: the folder whitelist is a guardrail, NOT isolation,
+  // because the agent runs as this process's OS user with an unrestricted shell.
+  `
+  CREATE TABLE users (
+    id            TEXT    PRIMARY KEY,
+    username      TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,   -- node:crypto scrypt, hex
+    salt          TEXT    NOT NULL,
+    role          TEXT    NOT NULL CHECK (role IN ('admin', 'user')),
+    created_at    INTEGER NOT NULL
+  );
+
+  -- glob patterns fed to path.matchesGlob after realpath normalisation.
+  -- No rows for a user = that user may open nothing.
+  CREATE TABLE allowed_paths (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pattern TEXT NOT NULL,
+    PRIMARY KEY (user_id, pattern)
+  );
+
+  -- One table for all three resource kinds: Claude sessionId, Codex threadId
+  -- and gid are all UUIDs, so they cannot collide. Ownership lives here rather
+  -- than as a column on the session files, because those files belong to the
+  -- Claude/Codex CLIs (and are shared with the user's own terminal sessions).
+  CREATE TABLE ownership (
+    resource_id TEXT    PRIMARY KEY,
+    kind        TEXT    NOT NULL CHECK (kind IN ('claude', 'codex', 'group')),
+    user_id     TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX idx_ownership_user ON ownership(user_id, kind);
+
+  -- Feishu senders. An unmapped open_id is refused, which also closes the
+  -- documented "anyone in the group can @ the bot" hole.
+  CREATE TABLE feishu_senders (
+    open_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 let handle: Database | null = null;
