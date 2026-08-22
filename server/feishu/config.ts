@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentId } from "../groups/store.ts";
-import { loadDotEnvOnce } from "./env.ts";
+import { loadDotEnvOnce } from "../env.ts";
 
 loadDotEnvOnce();
 
