@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "./permission.ts";
+import { currentUser } from "./auth/middleware.ts";
+import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 import { relabelTasksSessionId } from "./bash-mcp.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
@@ -342,6 +344,11 @@ interface TurnOptions {
   effort: EffortLevel | undefined;
   source: "user" | "wakeup";
   wakeupReason?: string | null;
+  // Who this turn belongs to. Recorded against whatever session id the CLI
+  // hands back, so the caller can find their own conversation afterwards —
+  // without it every session is unowned and therefore invisible to its
+  // creator (admins would not notice: they bypass the check).
+  ownerId?: string;
 }
 
 function runChatTurn(opts: TurnOptions): InFlightChat {
@@ -612,6 +619,13 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           activeChats.set(emittedId, entry);
           entry.sessionId = emittedId;
           currentSessionId = emittedId;
+          if (opts.ownerId) {
+            // The CLI issues its own id on the first turn, so ownership is
+            // recorded here rather than up front, and the previous id (if any)
+            // is carried over.
+            recordOwner(emittedId, "claude", opts.ownerId);
+            relabelOwner(previousId ?? "", emittedId);
+          }
           // The HTTP bash tool reads the session id off the token context, so
           // it has to follow the rename too or background tasks get filed
           // under the old id.
@@ -782,6 +796,7 @@ chat.post("/chat", async (c) => {
     permissionMode,
     effort,
     source: "user",
+    ownerId: currentUser(c)?.id,
   });
 
   return streamSSEUnbuffered(c, async (stream) => {
