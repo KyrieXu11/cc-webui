@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { currentUser } from "./auth/middleware.ts";
+import { visibilityFor } from "./auth/scope.ts";
 import {
   listClaudeSessions,
   getClaudeSessionMessages,
@@ -40,8 +42,14 @@ sessionsRoute.get("/", async (c) => {
       provider === "codex" ? [] : listClaude({ limit, dir }),
       provider === "claude" ? [] : listCodexSessions({ limit, cwd: dir }),
     ]);
+    // Scoped: sessions live in shared trees (~/.claude/projects is even shared
+    // with the user's own terminal), so this filter is the only thing keeping
+    // one person's history out of another's list. Unowned sessions are
+    // admin-only (decision 10).
+    const visible = visibilityFor(currentUser(c)!);
     const sessions = groups
       .flat()
+      .filter((s) => visible(s.sessionId))
       .sort((a, b) => b.lastModified - a.lastModified)
       .slice(0, limit);
     return c.json({ sessions });

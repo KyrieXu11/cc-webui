@@ -1,8 +1,18 @@
 import { Hono } from "hono";
+import { currentUser } from "./auth/middleware.ts";
 
 type PendingEntry = {
   resolve: (decision: PermissionDecision) => void;
   reject: (err: Error) => void;
+  // Who is allowed to answer this card.
+  //
+  // The map is global and keyed only by a random id, so without this any
+  // authenticated user could resolve anyone else's permission prompt — and the
+  // Feishu card handler could resolve a prompt raised in a different chat.
+  ownerId?: string;
+  // For prompts raised inside a group turn: the gid. The Feishu card handler
+  // answers by gid, because a card click carries a chat, not a cc-webui user.
+  gid?: string;
 };
 
 export type PermissionDecision =
@@ -19,7 +29,8 @@ const PERMISSION_TIMEOUT_MS = Number(
 
 export function awaitPermission(
   id: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  scope: { ownerId?: string; gid?: string } = {}
 ): Promise<PermissionDecision> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -46,6 +57,8 @@ export function awaitPermission(
     const entry: PendingEntry = {
       resolve: (d) => settle(() => resolve(d)),
       reject: (e) => settle(() => reject(e)),
+      ownerId: scope.ownerId,
+      gid: scope.gid,
     };
     pending.set(id, entry);
 
@@ -58,12 +71,26 @@ export function awaitPermission(
   });
 }
 
+// `by` identifies the answerer. Omitting it entirely is only for internal
+// callers that have already established the right to answer.
+//
+// Returns false both for "no such prompt" and "not yours" — deliberately
+// indistinguishable, since the id space is the only thing protecting one user's
+// prompts from another's guesses.
 export function resolvePermission(
   id: string,
-  decision: PermissionDecision
+  decision: PermissionDecision,
+  by?: { userId?: string; isAdmin?: boolean; gid?: string }
 ): boolean {
   const entry = pending.get(id);
   if (!entry) return false;
+  if (by) {
+    const byUser =
+      by.isAdmin === true ||
+      (by.userId !== undefined && entry.ownerId === by.userId);
+    const byGid = by.gid !== undefined && entry.gid === by.gid;
+    if (!byUser && !byGid) return false;
+  }
   pending.delete(id);
   entry.resolve(decision);
   return true;
@@ -97,7 +124,11 @@ permissionRoute.post("/:id", async (c) => {
         : behavior === "allow_tool_session"
           ? { behavior: "allow_tool_session" }
         : { behavior: "deny", message: body.message || "user denied" };
-  const ok = resolvePermission(id, decision);
+  const me = currentUser(c);
+  const ok = resolvePermission(id, decision, {
+    userId: me?.id,
+    isAdmin: me?.role === "admin",
+  });
   return c.json({ ok });
 });
 

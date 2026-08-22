@@ -175,11 +175,13 @@ scopeToUser(user, list)                // 服务端强制过滤,不接受调用�
 
 这些是路由审计查出来的,不修的话权限模块建在沙子上:
 
-1. **`POST /api/permission/:id` 打的是一个全局 pending Map**(`permission.ts:14,100`),
-   没有 session 绑定、没有授权。`feishu/card-action.ts:51` 也打同一个 sink,且不检查卡属不属于那个
-   bot/chat/session。→ **用户 A 能批准用户 B 的权限卡。** 必须按拥有者收口。
-2. **bash 任务 id 是全局裸查**(`bash-tasks.ts:115/126/135`,以及 token-gated 的 MCP `output`/`kill`)。
-   → 即使持有合法的 per-turn token,也能读/杀**别的 turn** 的任务。只有 `list` 是按 session 过滤的。
+1. ~~`POST /api/permission/:id` 的全局 pending Map~~ —— **已修**。pending 条目现在记 `ownerId`
+   和 `gid`;HTTP 路由按调用者身份校验(管理员可代答,决策 11),而飞书的卡片点击**按 gid** 校验
+   ——一次点击带的是聊天而不是账号,所以只能回答本聊天绑定群里的卡。"未授权"和"没这个 id"
+   返回同一个 false,不泄露 id 空间。
+2. ~~bash 任务 id 全局裸查~~ —— **已修**。任务通过它的 session 归属:web 单聊是 session UUID,
+   群聊是 `gid:agentId`(取冒号前那段)。`:id/output|kill|stream` 不属于你就是 404;
+   列表 / stream / foreground / detach 全部按可见性过滤。无 session 的任务归不了属,只有管理员可见。
 3. **MCP bearer token 无 TTL**:`createdAt` 存了但从不检查(`mcp-context.ts:50`),无 IP 绑定、无重放防护;
    Codex 那条还会把它落进子进程环境变量。→ 至少加 TTL + turn 结束即失效(现在 `unregister` 已经做了后者)。
 4. **`DELETE /api/groups/:gid` 的 gid 未校验** → `fs.rm(groupDir(gid), {recursive,force})`,
@@ -208,6 +210,19 @@ scopeToUser(user, list)                // 服务端强制过滤,不接受调用�
   **Landlock 是 Linux LSM(kernel 5.13+),在 macOS 上不存在**,所以本机开发期一定是护栏形态。
   注意包住 **CLI 子进程**这一层就同时覆盖了 bash 和 CLI 内置的 Read/Write/Edit,比逐个工具加检查干净。
 - Codex 侧一旦有真审批通道(`codex exec` 支持 `--ask-for-approval`),决策 14 可以放开。
+
+## 实施进度
+
+| 阶段 | 状态 |
+|---|---|
+| 认证基础(users / scrypt / 签名 cookie / 白名单匹配 / identifyRequest) | ✅ |
+| 声明式路由授权 + 覆盖测试,强制已开启 | ✅ |
+| 登录页 + 前端身份门 + 角色门 | ✅ |
+| 管理页面(用户 / 白名单 / 打开记录 / 飞书成员 / 认领无主) | ✅ |
+| 10 条列表接口按 owner 过滤 | ✅ |
+| 上面 7 个既有洞里的 #1 #2 | ✅ |
+| 剩下 5 个既有洞(#3 MCP token 无 TTL、#4 gid 校验已由中间件覆盖、#5/#6 大小上限、#7 deleteClaudeSession 守卫) | 待做 |
+| 飞书 sender 映射的**执行**(表和管理页面已有,handler 还没读它) | 待做 |
 
 ## 明确不做的
 

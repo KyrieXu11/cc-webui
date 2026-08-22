@@ -7,6 +7,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "./permission.ts";
 import { currentUser } from "./auth/middleware.ts";
+import { visibilityFor } from "./auth/scope.ts";
 import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 import { relabelTasksSessionId } from "./bash-mcp.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
@@ -510,7 +511,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
             );
             let decision: Awaited<ReturnType<typeof awaitPermission>>;
             try {
-              decision = await awaitPermission(id, signal);
+              decision = await awaitPermission(id, signal, { ownerId: opts.ownerId });
             } catch (err) {
               fanout(
                 "permission_resolved",
@@ -852,7 +853,9 @@ chat.post("/chat/cancel", async (c) => {
 // subscribing via SSE.
 
 chat.get("/chat/inflight", (c) => {
-  const sessionIds = Array.from(activeChats.keys());
+  // Scoped: this used to hand every caller the id of every running session.
+  const visible = visibilityFor(currentUser(c)!);
+  const sessionIds = Array.from(activeChats.keys()).filter(visible);
   return c.json({ sessionIds });
 });
 
@@ -864,15 +867,18 @@ chat.get("/chat/inflight", (c) => {
 // show a countdown badge and offer a manual-cancel button.
 
 chat.get("/chat/wakeups", (c) => {
-  const wakeups = Array.from(wakeupTimers.values()).map((w) => ({
+  const visible = visibilityFor(currentUser(c)!);
+  const wakeups = Array.from(wakeupTimers.values())
+    .filter((w) => visible(w.sessionId))
+    .map((w) => ({
     sessionId: w.sessionId,
     id: w.request.id,
     delaySeconds: w.request.delaySeconds,
     scheduledAt: w.request.scheduledAt,
     firesAt: w.request.scheduledAt + w.request.delaySeconds * 1000,
-    reason: w.request.reason,
-    prompt: w.request.prompt,
-  }));
+      reason: w.request.reason,
+      prompt: w.request.prompt,
+    }));
   return c.json({ wakeups });
 });
 

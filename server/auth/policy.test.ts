@@ -246,6 +246,123 @@ try {
     409,
   );
 
+  // ── the handlerScoped declarations are not hollow ────────────────────────
+  //
+  // Every list endpoint marked handlerScoped in policy.ts used to return
+  // everything to everybody. These assertions are what makes that declaration
+  // mean something.
+
+  const { getDb: db2 } = await import("../db.ts");
+  const { recordOpenedProject } = await import("../opened-projects.ts");
+
+  // Two codex sessions, one per user.
+  db2()
+    .prepare("INSERT INTO codex_sessions(session_id, summary, last_modified) VALUES (?,?,?)")
+    .run("11111111-1111-4111-8111-111111111111", "alice thread", 10);
+  db2()
+    .prepare("INSERT INTO codex_sessions(session_id, summary, last_modified) VALUES (?,?,?)")
+    .run("22222222-2222-4222-8222-222222222222", "bob thread", 20);
+  recordOwner("11111111-1111-4111-8111-111111111111", "codex", plain.id);
+  const bob = createUser({ username: "bob", password: "x", role: "user" });
+  recordOwner("22222222-2222-4222-8222-222222222222", "codex", bob.id);
+
+  const sessionsFor = async (id: string) =>
+    (
+      await (
+        await app.request("/api/sessions?limit=50&provider=codex", {
+          headers: cookie(id),
+        })
+      ).json()
+    ).sessions.map((x: { sessionId: string }) => x.sessionId);
+
+  assert.deepEqual(await sessionsFor(plain.id), [
+    "11111111-1111-4111-8111-111111111111",
+  ]);
+  assert.deepEqual(await sessionsFor(bob.id), [
+    "22222222-2222-4222-8222-222222222222",
+  ]);
+  // The admin sees both (decision 11).
+  assert.equal((await sessionsFor(admin.id)).length, 2);
+
+  // Groups: realGid is the admin's, so neither plain user may list it.
+  const groupsFor = async (id: string) =>
+    (
+      await (await app.request("/api/groups", { headers: cookie(id) })).json()
+    ).groups.map((g: { id: string }) => g.id);
+  assert.deepEqual(await groupsFor(plain.id), []);
+  assert.ok((await groupsFor(admin.id)).includes(realGid));
+
+  // Recents are per-user, not one shared list.
+  recordOpenedProject("/alice/only", plain.id, 5);
+  recordOpenedProject("/bob/only", bob.id, 6);
+  const recentsFor = async (id: string) =>
+    (
+      await (await app.request("/api/fs/recents", { headers: cookie(id) })).json()
+    ).recents.map((r: { path: string }) => r.path);
+  assert.deepEqual(await recentsFor(plain.id), ["/alice/only"]);
+  assert.deepEqual(await recentsFor(bob.id), ["/bob/only"]);
+
+  // ── a permission prompt may only be answered by its owner ────────────────
+
+  const { awaitPermission, resolvePermission } = await import("../permission.ts");
+  const ac = new AbortController();
+  const pendingId = randomUUID();
+  const answered = awaitPermission(pendingId, ac.signal, { ownerId: plain.id });
+
+  // Another user cannot resolve it, and cannot tell "not mine" from "no such id".
+  assert.equal(resolvePermission(pendingId, { behavior: "allow" }, { userId: bob.id }), false);
+  assert.equal(
+    resolvePermission(randomUUID(), { behavior: "allow" }, { userId: plain.id }),
+    false,
+  );
+  // The owner can.
+  assert.equal(
+    resolvePermission(pendingId, { behavior: "allow" }, { userId: plain.id }),
+    true,
+  );
+  assert.deepEqual(await answered, { behavior: "allow" });
+
+  // Admins can answer anyone's, consistent with decision 11.
+  const adminId2 = randomUUID();
+  const answered2 = awaitPermission(adminId2, ac.signal, { ownerId: plain.id });
+  assert.equal(
+    resolvePermission(adminId2, { behavior: "deny", message: "no" }, {
+      userId: admin.id,
+      isAdmin: true,
+    }),
+    true,
+  );
+  assert.deepEqual(await answered2, { behavior: "deny", message: "no" });
+
+  // A group prompt is answerable by gid — that is how a Feishu card click,
+  // which carries a chat rather than an account, is authorised.
+  const gidPromptId = randomUUID();
+  const answered3 = awaitPermission(gidPromptId, ac.signal, { gid: "g-abc" });
+  assert.equal(
+    resolvePermission(gidPromptId, { behavior: "allow" }, { gid: "g-other" }),
+    false,
+    "a click in a different chat must not resolve it",
+  );
+  assert.equal(
+    resolvePermission(gidPromptId, { behavior: "allow" }, { gid: "g-abc" }),
+    true,
+  );
+  await answered3;
+
+  // ── bash tasks are attributed through their session ──────────────────────
+
+  const { canSeeTaskSession, taskSessionOwner } = await import("./scope.ts");
+  recordOwner("33333333-3333-4333-8333-333333333333", "claude", plain.id);
+  assert.equal(taskSessionOwner("33333333-3333-4333-8333-333333333333"), plain.id);
+  // Group scope is "gid:agentId", so ownership hangs off the part before ":".
+  recordOwner("g-owned", "group", bob.id);
+  assert.equal(taskSessionOwner("g-owned:claude"), bob.id);
+  assert.equal(canSeeTaskSession(bob, "g-owned:codex"), true);
+  assert.equal(canSeeTaskSession(plain, "g-owned:codex"), false);
+  // A task with no session cannot be attributed, so only admins see it.
+  assert.equal(canSeeTaskSession(plain, undefined), false);
+  assert.equal(canSeeTaskSession(admin, undefined), true);
+
   // ── fail-closed: an unclassified route is refused, not waved through ─────
 
   const { Hono } = await import("hono");

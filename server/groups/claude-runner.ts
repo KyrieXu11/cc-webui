@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "../permission.ts";
+import { ownerOf } from "../auth/ownership.ts";
 import { claudeExecutor } from "../executors/claude-executor.ts";
 import type { McpServerSpec } from "../executors/types.ts";
 import { getMcpRouteUrl } from "../codex-mcp-config.ts";
@@ -157,7 +158,10 @@ export async function* runClaude(args: {
           ctx.emitPermission(permPayload);
           let decision: Awaited<ReturnType<typeof awaitPermission>>;
           try {
-            decision = await awaitPermission(id, signal);
+            decision = await awaitPermission(id, signal, {
+              ownerId: ownerOf(ctx.gid) ?? undefined,
+              gid: ctx.gid,
+            });
           } catch (err) {
             const resolvedPayload = {
               type: "permission_resolved",
