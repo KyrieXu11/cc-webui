@@ -1,6 +1,12 @@
-// 取件台读侧的两道过滤。两条都是安全相关的，最容易在以后被改坏，所以钉住：
+// 取件台的两侧：读（列表的两道过滤）与写（保存的乐观锁）。都是最容易在以后被
+// 改坏的地方，所以钉住：
 //   ① 别人的会话列不出来（会话归属）
 //   ② 白名单外的路径不出现（agent 有 shell，registry 里真的会有这种行）
+//   ③ 版本过期的保存被拒，且原文件一个字节都不变
+//
+// ⚠️ 这里用假身份中间件顶替 authMiddleware，所以 **PUT 的路径白名单没被这个文件
+// 测到**——它是 policy 表声明（paths: body.path）+ 中间件执行的，覆盖由
+// policy.test.ts 保证「声明存在」。改动写侧时别以为这里替你把白名单也测了。
 import assert from "node:assert/strict";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
@@ -106,6 +112,73 @@ assert.deepEqual(noSession.paths, [], "没有 sessionId 就是空列表，不是
 
 const unknown = await get(alice, "cccccccc-cccc-cccc-cccc-cccccccccccc");
 assert.deepEqual(unknown.paths, [], "不存在的会话也是空列表");
+
+// ── PUT /content：乐观锁 ─────────────────────────────────────────────────────
+//
+// 这是整个取件台唯一会**写**用户文件的地方，而这块地没有 git 也没有回收站，
+// 所以「拒绝覆盖」这条路径必须钉死。
+
+const put = async (user: unknown, body: unknown) => {
+  const res = await appFor(user).request("/api/files/content", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+};
+
+const st0 = await fsp.stat(okFile);
+
+// 版本对得上 → 落盘。
+const okSave = await put(alice, {
+  path: okFile,
+  content: "第一版",
+  ifMatch: { mtimeMs: st0.mtimeMs, size: st0.size },
+});
+assert.equal(okSave.status, 200);
+assert.equal(await fsp.readFile(okFile, "utf8"), "第一版");
+
+// 拿**过期**的版本再存 → 409，且**文件内容一个字节都不许变**。
+const stale = await put(alice, {
+  path: okFile,
+  content: "不该写进去",
+  ifMatch: { mtimeMs: st0.mtimeMs, size: st0.size },
+});
+assert.equal(stale.status, 409);
+assert.equal(stale.body.error, "conflict");
+assert.equal(
+  await fsp.readFile(okFile, "utf8"),
+  "第一版",
+  "冲突时原文件必须保持 agent 那一版 —— 这是决策 11 的全部意义"
+);
+
+// 不带 ifMatch 直接存 → 428，不是「就当没锁」。
+const noMatch = await put(alice, { path: okFile, content: "裸写" });
+assert.equal(noMatch.status, 428);
+assert.equal(await fsp.readFile(okFile, "utf8"), "第一版");
+
+// size 也是一把锁：mtime 相同但大小变了（有些文件系统 mtime 粒度粗）也算冲突。
+const st1 = await fsp.stat(okFile);
+const sizeOnly = await put(alice, {
+  path: okFile,
+  content: "x",
+  ifMatch: { mtimeMs: st1.mtimeMs, size: st1.size + 1 },
+});
+assert.equal(sizeOnly.status, 409, "size 不匹配也拦");
+
+// 不存在的文件 → 404（取件台不负责创建）。
+const missing = await put(alice, {
+  path: path.join(mine, "nope.md"),
+  content: "x",
+  ifMatch: { mtimeMs: 1, size: 1 },
+});
+assert.equal(missing.status, 404);
+
+// 原子写：临时文件不许留在目录里（它会被 registry 的扫描当成产出）。
+const leftovers = (await fsp.readdir(mine)).filter((n) =>
+  n.includes("cc-webui-tmp")
+);
+assert.deepEqual(leftovers, [], "临时文件必须已经 rename 掉");
 
 closeDb();
 await fsp.rm(tmp, { recursive: true, force: true });

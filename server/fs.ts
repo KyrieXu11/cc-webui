@@ -171,6 +171,9 @@ fsRoute.get("/read", async (c) => {
         content,
         size: stat.size,
         truncated,
+        // 取件台的乐观锁用它：保存时带回来比对，变了就拒绝覆盖
+        // （docs/file-manager.md 决策 12）。
+        mtimeMs: stat.mtimeMs,
       });
     } finally {
       await handle.close();
