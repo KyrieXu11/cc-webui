@@ -62,6 +62,8 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
 | `/api/meta` | `meta.ts` | 目录扫描（列 `$HOME` 候选项目） |
 | `/api/bash/tasks` | `bash-tasks.ts` | 后台 bash 任务面板的 SSE |
 | `/api/mcp` | `mcp-bash-route.ts` | **HTTP 版** bash + lark MCP（bearer-token 网关）——只给 **Codex / 飞书** 用 |
+| `/api/files` | `files-routes.ts` + `session-files.ts` | **取件台**：列「本对话文件」、保存文本（乐观锁）、批量删除（真删+留痕）、上传到会话 cwd |
+| `/api/office` | `office.ts` | ONLYOFFICE：下发签名 EditorConfig（浏览器）+ 容器侧取文件/保存回调（**票据鉴权，无 cookie**） |
 | `/feishu` | `feishu/*` | 飞书机器人（见下） |
 
 其它：`bash-mcp.ts`（bash 任务注册表 + `runBashTool`，被上面那条 HTTP 路由消费）、`schedule-mcp.ts`（wakeup/定时）、
@@ -166,6 +168,8 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
 │                                    #   feishu_bindings  取代 feishu/bindings.json
 │                                    #   groups_index     取代 groups/index.json
 │                                    #   codex_sessions / codex_turns  取代 sessions.json
+│                                    #   session_files    「本对话文件」registry（取件台）
+│                                    #   file_deletions   删除留痕（**不是**通用审计日志）
 ├── *.json.migrated                  # 迁移前的原文件，保留备查（不再被读取）
 ├── workspaces/<username>/           # 用户工作区：建普通账号时发的一块空地。它既是
 │                                    #   白名单里的一条「系统条目」，也是一个装项目的
@@ -277,8 +281,16 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   但白名单是**护栏不是隔离**——agent 有 shell，能读写服务进程那个 OS 用户能碰的一切。
   给谁开账号 = 把这台机器交给谁。
 - 公开的路由只有：登录 / 登出 / `GET /api/auth/me` / 三条 `/api/mcp/*`（per-turn capability token）
-  / `/feishu/:bot/events`（固定 404）。**`/api/mcp/*` 拿到 token 就等于一个 shell**，
-  它的合法调用方只有本机 CLI 子进程，反代上应当直接拒掉。
+  / 两条 `/api/office/{download,callback}`（签名票据）/ `/feishu/:bot/events`（固定 404）。
+  **`/api/mcp/*` 拿到 token 就等于一个 shell**，它的合法调用方只有本机 CLI 子进程，
+  反代上应当直接拒掉。
+  两条 office 路由同理：调用方是本机的 DocumentServer 容器（走 `host.docker.internal`
+  到回环，**不经 nginx**），凭证是查询串里的签名票据、回调再验一次请求体 JWT。
+  **反代上应当和 `/api/mcp/*` 一样 404 掉。** 这张公开面清单被 `policy.test.ts` 钉住，
+  加公开路由必须显式改那条断言。
+  ⚠️ `/api/office/callback` **永远返回 HTTP 200 + `{"error":0}`**，哪怕票据无效——
+  返回别的会让容器反复重试并最终扣留文件，用户的修改就悬空了（律枢在生产上付过这个学费）。
+  别把它误读成「鉴权失效」。
 - 飞书路径：无 sender 白名单（群里任何人 @ 一下就能触发，且**这个 turn 跑在管理员身份下**）
   + lark 发送工具无审批 + 收件人任意（见「已知问题·安全·中」）。接入真实群前先处理。
 - 非图片上传落 `/tmp`，不在项目 cwd，Edit 改动不进仓库。

@@ -203,6 +203,8 @@ export default function App() {
   const [projectCwd, setProjectCwd] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // 服务端配了 ONLYOFFICE 才给 Office 编辑器，否则降级成浏览器打开/下载。
+  const [officeFeature, setOfficeFeature] = useState(false);
   const [home, setHome] = useState("");
   const [loadingSession, setLoadingSession] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
@@ -405,6 +407,7 @@ export default function App() {
       .then((data) => {
         if (cancelled || !data) return;
         setGroupsServerFeature(data.features?.groups === true);
+        setOfficeFeature(data.features?.office === true);
       })
       .catch(() => {});
     return () => {
@@ -1256,7 +1259,7 @@ export default function App() {
       </div>
       {/* 右侧格：App 层唯一一份。⚠️ 不要下沉到某个视图里去渲染——切走就卸载，
           而卸载会销毁编辑器（以后是 OnlyOffice iframe，律枢在那儿栽过）。 */}
-      <RightDock narrow={narrow} />
+      <RightDock narrow={narrow} officeEnabled={officeFeature} />
       {inProject && filesOpen && (
         <div className="flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:shadow-[0_0_60px_rgba(0,0,0,0.6)]">
           <FileExplorer
@@ -1277,11 +1280,6 @@ export default function App() {
           loading={preview.loading}
           error={preview.error}
           onClose={() => setPreview(null)}
-          onInsert={
-            preview.absPath
-              ? () => insertFile(preview.absPath, preview.relPath)
-              : undefined
-          }
         />
       )}
       {dialogOpen && (

@@ -167,8 +167,9 @@ export default function ProjectSidebar({
         <div className="flex-1 min-h-0">
           <FilesPanel
             sessionId={currentSessionId}
+            cwd={cwd}
             refreshKey={refreshKey}
-            onPreviewFile={onPreviewFile}
+            onOpenFile={onPreviewFile}
           />
         </div>
       ) : (

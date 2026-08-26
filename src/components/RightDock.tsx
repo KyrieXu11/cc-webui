@@ -13,7 +13,13 @@ import { onDockOpen, type DockFile } from "../lib/dock-bridge";
 // tab 是内存态，刷新即清（决策 15）：取件台的动作是「进去取件、改完出来」，
 // 持久化会引入「tab 指向的文件被 agent 删了/改名了」这类要维护的悬空状态。
 
-export default function RightDock({ narrow }: { narrow: boolean }) {
+export default function RightDock({
+  narrow,
+  officeEnabled,
+}: {
+  narrow: boolean;
+  officeEnabled?: boolean;
+}) {
   const [tabs, setTabs] = useState<DockFile[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [ratio, setRatio] = useState(0.52);
@@ -102,6 +108,7 @@ export default function RightDock({ narrow }: { narrow: boolean }) {
             <DockFileView
               path={t.path}
               name={t.name}
+              officeEnabled={officeEnabled}
               reloadToken={reloadTokens[t.path] ?? 0}
               onReload={() =>
                 setReloadTokens((m) => ({

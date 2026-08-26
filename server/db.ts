@@ -186,6 +186,26 @@ const MIGRATIONS: string[] = [
   CREATE INDEX idx_session_files_recent
     ON session_files(session_id, last_touched_ms DESC);
   `,
+
+  // 4 — 删除留痕。**这不是通用审计日志**：docs/user-permissions.md 的
+  // 「明确不做的」里写着「不做审计日志（决策 11 明确选了静默）」，那条不变。
+  // 这张表只记一件事——文件删除，因为取件台的删除是**真删、批量、无回收站**，
+  // 而这块地既没有 git 也没有快照。不留痕的话「谁删的」永远查不到。
+  //
+  // username 冗余存一份：账号可以被删掉，而这条记录的全部意义就是**事后**回答
+  // 「是谁」，那时候 join users 可能已经 join 不到了。
+  `
+  CREATE TABLE file_deletions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT    NOT NULL,
+    username   TEXT    NOT NULL,
+    session_id TEXT    NOT NULL DEFAULT '',
+    path       TEXT    NOT NULL,
+    size       INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER NOT NULL
+  );
+  CREATE INDEX idx_file_deletions_time ON file_deletions(deleted_at DESC);
+  `,
 ];
 
 let handle: Database | null = null;

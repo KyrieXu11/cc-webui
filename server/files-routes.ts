@@ -15,7 +15,11 @@ import { currentUser } from "./auth/middleware.ts";
 import { visibilityFor } from "./auth/scope.ts";
 import { getAllowedPaths } from "./auth/users.ts";
 import { assertCanOpen } from "./auth/paths.ts";
-import { listSessionFiles } from "./session-files.ts";
+import {
+  forgetSessionFiles,
+  listSessionFiles,
+  recordDeletion,
+} from "./session-files.ts";
 
 const filesRoute = new Hono();
 
@@ -126,5 +130,155 @@ filesRoute.put("/content", async (c) => {
   const after = await fsp.stat(target);
   return c.json({ ok: true, mtimeMs: after.mtimeMs, size: after.size });
 });
+
+// 批量删除。**真删，没有回收站**（决策 4 用户定的），所以两件事必须做到：
+//   ① 每个路径都过白名单 —— 见下面那段 ⚠️
+//   ② 每次删除都留痕 —— 账号可删、文件不可恢复，「谁删的」只能靠这张表回答
+//
+// ⚠️ 白名单为什么在处理器里查而不在 policy 表里声明：中间件的 valueFrom 只认
+// **字符串**字段（`typeof v === "string"`），而这里的 body.paths 是个数组，声明
+// `paths: [{from:"body", key:"paths"}]` 会静默取不到值 → 当成"没传" → 400，
+// 或者更糟：如果标成 optional 就等于**完全不检查**。所以这条路由在 policy 表里
+// 是 handlerScoped，检查在这里逐个做，一个都不能漏。
+filesRoute.post("/delete", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    paths?: unknown;
+    sessionId?: string;
+  };
+  const paths = Array.isArray(body.paths)
+    ? body.paths.filter((p): p is string => typeof p === "string" && !!p)
+    : [];
+  if (paths.length === 0) return c.json({ error: "paths 必填" }, 400);
+
+  const user = currentUser(c)!;
+  const patterns = getAllowedPaths(user.id);
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+
+  const deleted: string[] = [];
+  const failed: { path: string; error: string }[] = [];
+
+  for (const raw of paths) {
+    let target: string;
+    try {
+      // 用它返回的规范化路径删，而不是请求里那个字符串：白名单是对规范化后的
+      // 路径判定的，拿原字符串去 unlink 等于让 symlink 有机会指向别处。
+      target = await assertCanOpen(raw, patterns);
+    } catch {
+      failed.push({ path: raw, error: "不在你可访问的目录内" });
+      continue;
+    }
+    try {
+      const st = await fsp.stat(target);
+      if (!st.isFile()) {
+        // 目录删除不在 v1 范围内（docs/file-manager.md「v1 不做」），而且
+        // recursive 删目录是这个仓库出过事故的形状。
+        failed.push({ path: raw, error: "只能删文件" });
+        continue;
+      }
+      await fsp.unlink(target);
+      recordDeletion({
+        userId: user.id,
+        username: user.username,
+        sessionId,
+        path: target,
+        size: st.size,
+      });
+      console.log(
+        `[files] delete by=${user.username} session=${sessionId || "-"} path=${target}`
+      );
+      deleted.push(raw);
+    } catch (err) {
+      failed.push({
+        path: raw,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // registry 里的行跟着走，否则列表还会列着它，直到下一个 turn 的 prune。
+  //
+  // ⚠️ **原始路径和规范化路径都要删**：unlink 用的是 assertCanOpen 返回的
+  // 规范化路径（macOS 上 /var/… 会变成 /private/var/…），而 registry 里那行是
+  // scanTouched 按会话 cwd 走出来的形式——用户开的 cwd 是哪种写法就存哪种。
+  // 只删一种，另一种会一直留在列表里直到下一个 turn 的 prune。
+  if (sessionId && deleted.length > 0) {
+    const canonical = await Promise.all(
+      deleted.map((p) => assertCanOpen(p, patterns).catch(() => p))
+    );
+    forgetSessionFiles(sessionId, [...new Set([...deleted, ...canonical])]);
+  }
+  return c.json({ deleted, failed });
+});
+
+// 上传到「本文件夹」（决策 14）。
+//
+// ⚠️ 目标目录走 **query** 而不是 body：中间件的 valueFrom 读 body 用的是
+// c.req.json()，而这是 multipart —— JSON 解析失败就取不到值，白名单检查会退化成
+// 400 或（若标 optional）压根不查。放 query 里，`paths: [{from:"query",key:"dir"}]`
+// 就能照常执行。
+//
+// 与 Composer 那条上传（server/upload.ts，落 /tmp）**刻意不同**：那条是给 agent
+// 看的临时文件，故意不污染项目目录；这条是往取件台里放东西。两条并存，不合并。
+filesRoute.post("/upload", async (c) => {
+  const dir = c.req.query("dir");
+  if (!dir) return c.json({ error: "dir 必填" }, 400);
+  try {
+    const st = await fsp.stat(dir);
+    if (!st.isDirectory()) return c.json({ error: "dir 不是目录" }, 400);
+  } catch {
+    return c.json({ error: "目录不存在" }, 404);
+  }
+
+  const form = await c.req.parseBody({ all: true });
+  const raw = form["files"];
+  const list: File[] = [];
+  if (Array.isArray(raw)) {
+    for (const x of raw) if (x instanceof File) list.push(x);
+  } else if (raw instanceof File) {
+    list.push(raw);
+  }
+  if (list.length === 0) return c.json({ error: "没有文件" }, 400);
+
+  const saved: { path: string; name: string; size: number }[] = [];
+  for (const f of list) {
+    const safe = sanitizeName(f.name);
+    // 不覆盖同名文件：这块地没有版本控制，上传一个同名文件把 agent 的产出顶掉
+    // 是不可恢复的。加序号，让用户自己看着办。
+    let dest = path.join(dir, safe);
+    let n = 1;
+    while (await exists(dest)) {
+      const dot = safe.lastIndexOf(".");
+      const stem = dot > 0 ? safe.slice(0, dot) : safe;
+      const ext = dot > 0 ? safe.slice(dot) : "";
+      dest = path.join(dir, `${stem}-${n}${ext}`);
+      n++;
+    }
+    const buf = Buffer.from(await f.arrayBuffer());
+    await fsp.writeFile(dest, buf);
+    saved.push({ path: dest, name: path.basename(dest), size: buf.length });
+  }
+  return c.json({ files: saved });
+});
+
+// 文件名消毒：路径分隔符与控制字符一律换掉，且不许出现 ".." 这种整段。
+// 单位是**文件名**，不是路径——所以任何分隔符都是异常输入。
+function sanitizeName(name: string): string {
+  const flat = name
+    .replace(/[/\\]/g, "_")
+    .replace(/[\x00-\x1f]/g, "")
+    .trim()
+    .slice(0, 120);
+  if (!flat || flat === "." || flat === "..") return "file";
+  return flat;
+}
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await fsp.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export { filesRoute };

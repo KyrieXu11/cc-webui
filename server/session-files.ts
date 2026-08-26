@@ -197,3 +197,56 @@ export function relabelSessionFiles(oldId: string, newId: string): void {
     db.prepare("DELETE FROM session_files WHERE session_id = ?").run(oldId);
   });
 }
+
+// ─── 删除留痕 ────────────────────────────────────────────────────────────────
+//
+// 不是通用审计日志（那条在 docs/user-permissions.md 里明确不做）。只记删除，
+// 因为取件台的删除是真删、批量、无回收站。
+
+export function recordDeletion(row: {
+  userId: string;
+  username: string;
+  sessionId: string;
+  path: string;
+  size: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO file_deletions
+         (user_id, username, session_id, path, size, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      row.userId,
+      row.username,
+      row.sessionId,
+      row.path,
+      row.size,
+      Date.now()
+    );
+}
+
+export type DeletionRow = {
+  username: string;
+  path: string;
+  sessionId: string;
+  size: number;
+  deletedAt: number;
+};
+
+// 给以后的管理页面留的读口（现在没有调用方，但没有读口的留痕等于没有留痕）。
+export function listDeletions(limit = 200): DeletionRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT username, path, session_id, size, deleted_at
+         FROM file_deletions ORDER BY deleted_at DESC LIMIT ?`
+    )
+    .all(limit) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    username: String(r.username),
+    path: String(r.path),
+    sessionId: String(r.session_id),
+    size: Number(r.size),
+    deletedAt: Number(r.deleted_at),
+  }));
+}

@@ -166,6 +166,22 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "GET /api/files": { auth: "user", handlerScoped: true },
   // 写侧按路径查白名单（不是 handlerScoped：要查的就是请求里那个路径）。
   "PUT /api/files/content": { auth: "user", paths: [{ from: "body", key: "path" }] },
+  // paths 是**数组**，而 valueFrom 只认字符串字段 —— 声明 paths 会静默取不到值。
+  // 所以白名单在处理器里逐个查（files-routes.ts 那段 ⚠️ 写了原因）。
+  "POST /api/files/delete": { auth: "user", handlerScoped: true },
+  // 目标目录走 query：multipart body 用 c.req.json() 解析不出来。
+  "POST /api/files/upload": { auth: "user", paths: [{ from: "query", key: "dir" }] },
+
+  // ── ONLYOFFICE ────────────────────────────────────────────────────────────
+  // config 是浏览器要的，走正常登录 + 路径白名单。
+  "GET /api/office/config": { auth: "user", paths: [{ from: "query", key: "path" }] },
+  // 下面两条**由 DocumentServer 容器调用**：容器没有 cookie，也发不出
+  // Authorization 头，放在鉴权里会被 401 挡死。凭证是查询串里的**签名票据**
+  // （server/office.ts，票面自带路径与用途，HMAC 用 office JWT 密钥），回调还额外
+  // 验请求体里的 JWT。容器走 host.docker.internal 到本机环回，**不经 nginx**
+  // —— 所以反代那侧应当和 /api/mcp/* 一样把这两条直接 404 掉。
+  "GET /api/office/download": { auth: "public", note: "容器取文件，签名票据自证" },
+  "POST /api/office/callback": { auth: "public", note: "容器回调，票据 + 请求体 JWT 双验" },
   "GET /api/fs/recents": { auth: "user", handlerScoped: true },
   "POST /api/fs/recents": { auth: "user", paths: [{ from: "body", key: "path" }] },
   "DELETE /api/fs/recents": { auth: "user", paths: [{ from: "body", key: "path", optional: true }] },

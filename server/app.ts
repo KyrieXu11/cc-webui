@@ -8,6 +8,7 @@ import { chat } from "./chat.ts";
 import { codexChat } from "./codex-chat.ts";
 import { fsRoute } from "./fs.ts";
 import { filesRoute } from "./files-routes.ts";
+import { officeRoute } from "./office.ts";
 import { sessionsRoute } from "./sessions.ts";
 import { uploadRoute } from "./upload.ts";
 import { metaRoute } from "./meta.ts";
@@ -40,6 +41,7 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
   }
   app.route("/api/fs", fsRoute);
   app.route("/api/files", filesRoute);
+  app.route("/api/office", officeRoute);
   app.route("/api/sessions", sessionsRoute);
   app.route("/api/upload", uploadRoute);
   app.route("/api/permission", permissionRoute);

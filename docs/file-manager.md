@@ -28,7 +28,7 @@
 | 10 | 保存只认 `status=6`（forcesave） | 这块地没 git 没回收站，「看一眼手滑关窗」不该变成静默覆盖 |
 | 11 | **原路径永远是 agent 那份**；人的版本冲突时旁存 | 用户定的「以 agent 为主」；旁存保证人白改一小时不凭空消失 |
 | 12 | 文本保存＝乐观锁（`ifMatch` mtime+size） | 人写半小时的东西不能被静默覆盖，成本只是多带一个字段 |
-| 13 | 删除＝真删、批量、确认弹窗、进审计流 | 不做回收站的前提就是留痕；多用户+批量+真删，「谁删的」必须查得到 |
+| 13 | 删除＝真删、批量、确认弹窗、**留痕**（见下「更正：审计」） | 不做回收站的前提就是留痕；多用户+批量+真删，「谁删的」必须查得到 |
 | 14 | 上传新按钮落会话 cwd；Composer 那条**不动** | Composer 落 `/tmp` 是有意的（不污染项目目录），那是另一笔账 |
 | 15 | 打开的 tab ＝内存态，刷新即清 | 取件台是「进去取件、改完出来」，不欠「tab 指向的文件被删了」这类状态债 |
 | 16 | 列表刷新＝turn 结束自动刷 + 手动按钮，**不上 watcher** | 递归 watcher 在 launchd + macOS TCC 的雷区里（见 AGENTS.md） |
@@ -87,7 +87,7 @@ turn 开始时记 `turnStartMs`；turn 收尾扫一遍 cwd，**`mtime >= turnSta
 |---|---|---|
 | `GET /api/files?sessionId=` | 本对话文件列表 | 白名单外的行过滤掉 |
 | `PUT /api/files/content` | 保存文本 | 带 `ifMatch: {mtimeMs,size}`，不匹配回 409 |
-| `POST /api/files/delete` | 批量删除 | 真删 + 写审计 |
+| `POST /api/files/delete` | 批量删除 | 真删 + 写 `file_deletions`；⚠️ 白名单在处理器里逐个查（见下） |
 | `POST /api/files/upload` | 上传到会话 cwd | multipart |
 | `GET /api/office/config?path=` | 下发 EditorConfig | cookie 鉴权，JWT 签名 |
 | `GET /api/office/download?ticket=` | **容器**取文件 | 票据鉴权（容器没有 cookie） |
@@ -103,9 +103,13 @@ turn 开始时记 `turnStartMs`；turn 收尾扫一遍 cwd，**`mtime >= turnSta
 | 变量 | 方向 | 值 |
 |---|---|---|
 | `CC_WEBUI_OFFICE_URL` | 浏览器 → 容器 | `https://office.freeaitech.top:8443`（现成） |
-| `CC_WEBUI_OFFICE_INTERNAL_URL` | cc-webui → 容器（forcesave） | `http://127.0.0.1:8890`，**不走公网** |
 | `CC_WEBUI_SELF_INTERNAL_URL` | 容器 → cc-webui（取文件/回调） | `http://host.docker.internal:8789` |
 | `CC_WEBUI_OFFICE_JWT_SECRET` | 签名 | **必须与容器 `JWT_SECRET` 一致**，否则容器一律拒签 |
+
+（律枢还有第四条 `LVSHU_OFFICE_INTERNAL_URL`，用于**服务端主动**触发 forcesave。
+cc-webui **没有实现那条路**，所以也**没有**这个环境变量——现在的保存全部由用户在编辑器里
+点保存触发。别照着律枢把它加进配置文档：有文档有配置零调用方，就是 `FEISHU_USE_WEBHOOK`
+那个死 flag 的长相。）
 
 **`CC_WEBUI_OFFICE_URL` 留空 = Office 在线编辑整体关闭，前端回落只读预览。** 这是有意的降级
 路径，不是故障——容器是律枢那个栈的（固定 compose 项目名 `lvshu-office`，`./lvshu.sh stop`
@@ -133,6 +137,44 @@ src/lib/files.ts                      API 客户端
 
 `源码 / 渲染` 开关与今天做的预览合流：**渲染 = `Markdown.tsx`，源码 = CodeMirror（可编辑）**，
 一个开关两种形态，不做两套 UI。
+
+## 已实施（2026-08-26）
+
+阶段 1-5 全部落地，`npm test` 20/20、typecheck 干净、build 通过。**尚未在真浏览器里
+端到端验过**（生产实例当时没重启）。
+
+### 一处必须记下的更正：审计
+
+设计阶段我说「审计设施你已经有了」——**那是错的**。`docs/user-permissions.md` 的
+「明确不做的」里写着「不做审计日志（决策 11 明确选了静默）」，这个仓库里没有任何审计
+设施。用户当时是基于那个错误前提同意「删除进审计流」的。
+
+实际做法：**只为删除建一张 `file_deletions` 表**（迁移 4），不是通用审计日志——
+那条决策不动。理由是删除这件事的组合特别危险：真删 + 批量 + 无回收站 + 多用户 +
+这块地既没 git 也没快照。表里冗余存一份 username，因为账号可以被删掉，而这条记录的
+全部意义就是**事后**回答「是谁」。`listDeletions()` 是给以后的管理页面留的读口
+（现在无调用方，但没有读口的留痕等于没有留痕）。
+
+### 实现时才发现的几件事
+
+- **`valueFrom` 只认字符串**：中间件读 body 用 `c.req.json()` 且要求
+  `typeof v === "string"`。于是两处不能照抄「paths 声明」——批量删除的 `paths` 是
+  **数组**（声明了会静默取不到值 → 400，标 optional 更糟：等于完全不检查），
+  上传是 **multipart**（JSON 解析不出来）。前者改成在处理器里逐个 `assertCanOpen`
+  并在 policy 表里写明原因，后者把目标目录挪到 **query**。
+- **删除必须清 registry 的两种路径形式**：unlink 用的是 `assertCanOpen` 返回的规范化
+  路径（macOS 上 `/var/…` → `/private/var/…`），而 registry 里那行是按会话 cwd 的写法
+  存的。只清一种，另一种会一直留在列表里直到下一个 turn 的 prune。**这是测试抓出来的
+  真 bug，不是断言写错。**
+- **office 的乐观锁基准放在签名票据里**（`m` = 编辑会话开始时的 mtime）。最初写成
+  「最近 5 秒内被别人改过」的时间启发式，那种规则怎么调都是错的。另外要记住自己写过
+  什么，否则同一次编辑会话里的第二次 forcesave 会被自己判成冲突，从此每次保存都生成
+  一个新的旁存文件。
+- **公开面被 `policy.test.ts` 钉住**：加那两条 office 路由时它先红了一次，必须显式改
+  「the public surface must stay exactly this」那条断言。这是设计意图。
+- **刻意没有引入 server→容器 那条 URL**（服务端主动触发 forcesave 用的）：现在没有
+  调用方，而这个仓库已经有一个 `FEISHU_USE_WEBHOOK` 那样的死 flag（有文档、有配置、
+  零调用方），不再造第二个。
 
 ## 实施顺序（每阶段可独立验收）
 
