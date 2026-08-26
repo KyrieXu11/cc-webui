@@ -1,0 +1,191 @@
+src/components/AdminView.tsx
+  s_58b7404ce04904::t_8219c206003ccf 370-373
+  s_58b7404ce04904::t_4b78cdaa27fab0 173-176,194-204,214,219
+  s_58b7404ce04904::t_7b89bc317675b7 150,263-296,343-355,359-360
+server/mcp-context.ts
+  s_58b7404ce04904::t_53d411786ae280 22-28,45,54
+server/groups/runner-types.ts
+  s_58b7404ce04904::t_cd83b093c2341d 39-42
+src/components/Composer.tsx
+  s_58b7404ce04904::t_e45d5af11fac2e 47,299-302
+  s_58b7404ce04904::t_52e624ae86dc4e 6
+  s_58b7404ce04904::t_09b4aa70a5f937 160
+src/lib/thinking-words.ts
+  s_608e4f05a64aff::t_a33e434903e04e 24-34
+src/components/Markdown.tsx
+  s_608e4f05a64aff::t_47e274bbb1e2d7 1-118
+src/components/ThinkingRow.tsx
+  s_608e4f05a64aff::t_d53afeb559dda9 72-74
+  s_608e4f05a64aff::t_1b5e1844d82d63 1-71,75-115
+server/auth/paths.ts
+  s_58b7404ce04904::t_35b8121228f1f8 91-119,131
+  s_58b7404ce04904::t_b4fdeb37873a45 57-68
+  s_58b7404ce04904::t_7605b7125d88f1 142-147
+src/lib/useIsNarrow.ts
+  s_58b7404ce04904::t_8b75118515851d 1-26
+src/components/PermissionCard.tsx
+  s_58b7404ce04904::t_82bb4af7459227 76-79
+  s_58b7404ce04904::t_4c4078c647f2c4 3,14-18,68-75,80-85
+  s_58b7404ce04904::t_0ffc0f3c34d4f9 86
+src/index.css
+  s_58b7404ce04904::t_8b75118515851d 46-56,168-178
+src/components/Header.tsx
+  s_58b7404ce04904::t_af2aae81f100eb 71
+  s_58b7404ce04904::t_a87e126577c00d 7-8,27,41-53,77
+  s_58b7404ce04904::t_ffe3ccd06c5c46 60,64-65,70
+src/App.tsx
+  s_58b7404ce04904::t_5d86ca11d68c8a 33
+  s_58b7404ce04904::t_1cd02a3eec6030 1076-1080,1085-1086,1101,1125-1129,1131-1138,1147,1226-1239,1251,1255-1261
+  s_58b7404ce04904::t_73f2d411e54282 809-817
+  s_58b7404ce04904::t_af17f7bde35598 1081-1084
+  s_58b7404ce04904::t_bb5cb19efea629 1161
+  s_58b7404ce04904::t_7365f5982f15f3 303,305-312,1130
+  s_608e4f05a64aff::t_6a01e608e11cbc 161-167,1186
+  s_58b7404ce04904::t_ce04ba55c97b2c 47,197-199,292-301
+  s_58b7404ce04904::t_ac6c379fe07216 40
+  s_58b7404ce04904::t_4c4078c647f2c4 447-448,451
+  s_58b7404ce04904::t_7a27a66290c46d 196,200,279,281-286,289-291,302,304,1092,1096-1097
+  s_58b7404ce04904::t_2a9c1ecc34ddf0 36,793,805
+src/components/StepTimeline.tsx
+  s_608e4f05a64aff::t_b71df0e9ae5388 3,6-13,160,167-168,172,177,184,188-198
+server/auth/actor.ts
+  s_58b7404ce04904::t_6c94b416332e37 1-27
+server/executors/claude-executor.ts
+  s_608e4f05a64aff::t_1b99423e078830 73-83
+server/codex-chat.ts
+  s_58b7404ce04904::t_d6b22b4eb59ce8 353
+AGENTS.md
+  s_58b7404ce04904::t_22e73fdb03c5aa 67,81-84,142-144
+  s_58b7404ce04904::t_19090f59cdc7a6 145-148,242-248,282-283
+  s_608e4f05a64aff::t_4019755840dbc7 200-219
+  s_58b7404ce04904::t_76403280d0ad08 275-281,285-301
+  s_58b7404ce04904::t_b6929872dbcc8b 186-188
+  s_58b7404ce04904::t_d34dbd96adcacc 302-311
+  s_58b7404ce04904::t_de671859b0e293 170-172
+src/components/MessageList.tsx
+  s_608e4f05a64aff::t_6bd0b82d13d3a4 4,19,26-37,41-42,61-63,75,82-83,102,106,111
+  s_608e4f05a64aff::t_5c9bf7687edc40 38-40,85-86
+  s_58b7404ce04904::t_4c4078c647f2c4 51-52,152-153
+  s_608e4f05a64aff::t_e9dc7d9a3dc8cd 43
+src/lib/settings.ts
+  s_58b7404ce04904::t_2a9c1ecc34ddf0 230-243
+  s_58b7404ce04904::t_7a27a66290c46d 20-24,41-48,53-58
+  s_58b7404ce04904::t_1b2ee2cb5317ca 34-38
+server/groups/orchestrator.ts
+  s_58b7404ce04904::t_206c05b954c3a7 25
+  s_58b7404ce04904::t_cd83b093c2341d 287
+src/lib/processor.ts
+  s_608e4f05a64aff::t_cb010eda940e5f 565-568,582-590
+  s_608e4f05a64aff::t_c76a0c1b73d90e 206-208,214,248-254,257-261
+  s_608e4f05a64aff::t_deaa6baef1df3b 591
+server/auth/middleware.ts
+  s_58b7404ce04904::t_7c7f86c5300be2 151-156
+CLAUDE.md
+  s_58b7404ce04904::t_22e73fdb03c5aa 11
+server/executors/claude-executor.test.ts
+  s_608e4f05a64aff::t_fac1c3e37e8772 45,101-124
+  s_608e4f05a64aff::t_2d48b3b11daf2d 125
+src/lib/admin.ts
+  s_58b7404ce04904::t_ac5f30b9814e08 8-9,11,46-47,60-66
+src/components/AssistantText.tsx
+  s_608e4f05a64aff::t_13e40ed81f5100 1,15
+docs/cli-migration.md
+  s_608e4f05a64aff::t_6017e4e11ceb1b 131-163,286-313
+  s_608e4f05a64aff::t_0680b3f6155859 314
+server/auth/auth.test.ts
+  s_58b7404ce04904::t_6a3719c037b36a 9-10
+  s_58b7404ce04904::t_132591848d1d20 116-119,140
+  s_58b7404ce04904::t_3ce25fd03aa30d 120-137
+server/groups/claude-runner.ts
+  s_58b7404ce04904::t_206c05b954c3a7 60
+  s_58b7404ce04904::t_57fd3891e5ffd9 186-192
+server/fs.ts
+  s_58b7404ce04904::t_1208df3a11a2ec 4-6,8-9,252-271,283-287,292-300,302
+  s_58b7404ce04904::t_57194649218db1 282,301
+  s_58b7404ce04904::t_0f8081afac76c9 7,288-291
+  s_58b7404ce04904::t_0e6ca7d4c658de 57-98,114-115,217-228
+  s_58b7404ce04904::t_58faa4f3247c61 272
+src/lib/types.ts
+  s_608e4f05a64aff::t_5477f9b482d5fb 119-127
+docs/user-permissions.md
+  s_58b7404ce04904::t_03ac6ba65cf01d 163
+  s_58b7404ce04904::t_fb7aa50b30c81c 243-254,257-259,261-273
+  s_58b7404ce04904::t_d34dbd96adcacc 81-97
+  s_58b7404ce04904::t_9d3c6fed510b51 45-53,164-166,304-308
+  s_58b7404ce04904::t_7d0fe625580143 54-80
+  s_58b7404ce04904::t_e52ecff7b32f54 167
+server/permission.ts
+  s_58b7404ce04904::t_c5b40c090ad1e6 19-25,105-114,135,138
+server/chat.ts
+  s_58b7404ce04904::t_d6b22b4eb59ce8 419
+  s_58b7404ce04904::t_c5b40c090ad1e6 480-484,488,540-545
+src/lib/permission.ts
+  s_58b7404ce04904::t_c5b40c090ad1e6 6-8,13
+server/auth/users.ts
+  s_58b7404ce04904::t_66ec2f41183aaa 10,168-178,180-181
+  s_58b7404ce04904::t_f8907df65fcd7e 74-78
+src/components/AskUserQuestionCard.tsx
+  s_58b7404ce04904::t_681d1f77dc320e 1-203
+server/auth/workspaces.ts
+  s_58b7404ce04904::t_744ccb95821c4b 1-113
+server/mcp-bash-route.test.ts
+  s_58b7404ce04904::t_6f3b5859341879 146-150
+  s_58b7404ce04904::t_7d6f46cee9f1d4 3-5,7-22,27-43,52-130,132-145,151-158,160-161
+index.html
+  s_58b7404ce04904::t_ec0cc02a38ddc5 8-25
+src/components/HomeView.tsx
+  s_58b7404ce04904::t_d8c359da1d8d91 14,294-300,307
+  s_58b7404ce04904::t_af17f7bde35598 15,131,443-445,448-449
+  s_58b7404ce04904::t_bb5cb19efea629 129
+server/mcp-bash-route.ts
+  s_58b7404ce04904::t_f3da5586ce42e4 22,26,29-30,79-80,108-113,127-132,186-187,228-229,383-423
+  s_58b7404ce04904::t_316c144e58f732 424
+src/components/FilePreviewWindow.tsx
+  s_608e4f05a64aff::t_360034b92943b0 2,30-37,63-66,149-175,208-231,271-278
+  s_608e4f05a64aff::t_5a588aaa15c5e0 279
+server/admin-routes.ts
+  s_58b7404ce04904::t_db0b46ba23f679 25-36,59-71
+  s_58b7404ce04904::t_86e6000334c3d7 84-123,128,130-132,135
+  s_58b7404ce04904::t_98ff411763a447 154-163,168-171,173-189,191-192,194-200
+server/auth/policy.ts
+  s_58b7404ce04904::t_7c7f86c5300be2 37-43,89-92,116,118-119,132-135
+  s_58b7404ce04904::t_9c0b2f4f7895b8 109-115,117
+src/components/OpenProjectDialog.tsx
+  s_58b7404ce04904::t_f3de740c893bc9 3,13-19,28-31,44,138-150,208-209
+server/auth/policy.test.ts
+  s_58b7404ce04904::t_6a3719c037b36a 14-15,423,586
+  s_58b7404ce04904::t_62c55c56c415ce 23-24,420-422,424-441,444-453,465-472,478-491,493-522
+  s_58b7404ce04904::t_c38b87ae2eb6c2 442-443,454-464
+  s_58b7404ce04904::t_bcf4e2f0d86862 473-477
+  s_58b7404ce04904::t_1773252f17a4ce 524-562
+  s_58b7404ce04904::t_57fd3891e5ffd9 328-347
+  s_58b7404ce04904::t_d7ebc486c23151 397,406-419
+  s_58b7404ce04904::t_cf1086652dfedb 389-396,398-405,523
+  s_58b7404ce04904::t_0e537f4e2bc140 492
+server/groups/codex-runner.ts
+  s_58b7404ce04904::t_206c05b954c3a7 83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "79bb7ed16f2f8a5fc00a0fe586a033a408651b0d",
+  "prompts": {},
+  "sessions": {
+    "s_58b7404ce04904": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "efe0b87b-c0fe-4dd2-8af0-d8534e03f095",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
