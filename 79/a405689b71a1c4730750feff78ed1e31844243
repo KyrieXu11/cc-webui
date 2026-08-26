@@ -1,0 +1,47 @@
+server/auth/policy.ts
+  s_608e4f05a64aff::t_56c75b537bc3a3 167-168
+server/files-routes.test.ts
+  s_608e4f05a64aff::t_7783f9bae4b594 116-182
+  s_608e4f05a64aff::t_95a8a972efabb7 1-2,5-9
+src/components/files/TextEditor.tsx
+  s_608e4f05a64aff::t_107fea1365564c 1-19,21-38,40-88,90-144
+  s_608e4f05a64aff::t_46b01cda7d917a 20,39,89
+src/lib/files.ts
+  s_608e4f05a64aff::t_f35b97112825d6 49-107
+src/lib/dock-bridge.ts
+  s_608e4f05a64aff::t_6122edfb6be919 1-23
+src/components/RightDock.tsx
+  s_608e4f05a64aff::t_1bda7f6f549738 1-118
+server/files-routes.ts
+  s_608e4f05a64aff::t_afb2c907226fbe 22-24,115
+  s_608e4f05a64aff::t_56c75b537bc3a3 12,65-114,116-127
+  s_608e4f05a64aff::t_93da030571fe07 128-129
+package.json
+  s_608e4f05a64aff::t_afe311bd21d090 16-18,24
+src/components/Splitter.tsx
+  s_608e4f05a64aff::t_76385df9a1cca9 1-65
+src/components/files/DockFileView.tsx
+  s_608e4f05a64aff::t_272f9c352eed20 1-185
+server/fs.ts
+  s_608e4f05a64aff::t_7e089dd1a42d50 174-176
+package-lock.json
+  s_608e4f05a64aff::t_e6bf1a713810dd 12-14,20,508-658,1199-1282,2631-2645,2776-2781,5733-5738,6634-6639
+src/App.tsx
+  s_608e4f05a64aff::t_10f74c9dc252a2 6,49,1121,1257-1259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "79a405689b71a1c4730750feff78ed1e31844243",
+  "prompts": {},
+  "sessions": {
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
