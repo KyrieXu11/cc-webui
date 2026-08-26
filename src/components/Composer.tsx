@@ -3,6 +3,7 @@ import ModelSelector from "./ModelSelector";
 import ModeSelector from "./ModeSelector";
 import EffortSelector from "./EffortSelector";
 import SlashCommandMenu from "./SlashCommandMenu";
+import { useIsNarrow } from "../lib/useIsNarrow";
 import type { AgentProvider, EffortLevel, PermissionMode } from "../lib/settings";
 import { uploadFiles, formatSize, type UploadedFile } from "../lib/upload";
 
@@ -43,6 +44,7 @@ export default function Composer({
   onPickSlash,
   rightSlot,
 }: Props) {
+  const narrow = useIsNarrow();
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -155,7 +157,7 @@ export default function Composer({
   const canSend = !disabled && !uploading && (value.trim() || attachments.length > 0);
 
   return (
-    <div className="px-6 pb-5 pt-2">
+    <div className="px-6 pb-5 pt-2 max-md:px-3 max-md:pb-[calc(env(safe-area-inset-bottom)+10px)]">
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -294,7 +296,10 @@ export default function Composer({
           placeholder={
             dragOver
               ? "松开上传文件"
-              : "输入追问或补充说明…    ↵ 发送 · ⇧↵ 换行"
+              : narrow
+                // 手机上既没有 ⇧ 也没有独立的 ↵，这行提示只是占地方。
+                ? "输入追问或补充说明…"
+                : "输入追问或补充说明…    ↵ 发送 · ⇧↵ 换行"
           }
           rows={1}
           className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-[1.6] text-fg placeholder:text-subtle focus:outline-none"

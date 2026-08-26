@@ -70,6 +70,17 @@ export function buildClaudeArgs(opts: ExecOptions): string[] {
     "--include-partial-messages",
   ];
 
+  // ⚠️ The positional prompt goes HERE, before --allowedTools /
+  // --disallowedTools. Those two are variadic (`<tools...>` in --help), so
+  // commander greedily eats every following non-flag argument: with the prompt
+  // last, `--disallowedTools Bash,KillBash "say hi"` parses "say" and "hi" as
+  // deny rules and the CLI then dies with "Input must be provided either
+  // through stdin or as a prompt argument when using --print" (measured, CLI
+  // 2.1.246). Worse when a prompt word happens to BE a tool name: no error at
+  // all, the tool is just silently denied. Anything appended after this point
+  // must be a flag, never a positional.
+  if (!needsStdinProtocol(opts)) args.push(opts.prompt);
+
   if (needsStdinProtocol(opts)) {
     args.push("--input-format", "stream-json");
   }
@@ -106,10 +117,6 @@ export function buildClaudeArgs(opts: ExecOptions): string[] {
   if (opts.disallowedTools?.length) {
     args.push("--disallowedTools", opts.disallowedTools.join(","));
   }
-
-  // Positional prompt only in the no-stdin case; otherwise it goes over stdin
-  // as a stream-json user message (see writePrompt).
-  if (!needsStdinProtocol(opts)) args.push(opts.prompt);
 
   return args;
 }

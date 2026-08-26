@@ -36,6 +36,10 @@ export type RunnerCtx = {
   turnId: string;
   agentId: AgentId;
   signal: AbortSignal;
+  // Which cc-webui account this turn's MCP capability token acts as. Resolved
+  // once per turn by the orchestrator (server/auth/actor.ts) because a group
+  // turn can start without a request behind it — Feishu has no login.
+  ownerId?: string;
   // Fanout for permission lifecycle events; orchestrator wraps these with
   // {agent, turnId} when re-emitting on the group SSE channel.
   emitPermission: (payload: unknown) => void;

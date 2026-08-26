@@ -5,6 +5,24 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Web Code</title>
+    <script>
+      // 主题必须在 React 挂载前定好。登录页渲染在 App 之外，拿不到 App 里那个
+      // 设置 data-theme 的 effect，而 CSS 的缺省是暗色 —— 不在这里定，浅色系统
+      // 的用户会先看到一闪的黑屏，登录页更是从头黑到尾。
+      // 规则与 src/lib/settings.ts 的 loadSettings 一致：只有用户亲手切过
+      // （themeChosen）才认存下来的值，否则跟随系统。
+      (function () {
+        var t = "dark";
+        try {
+          if (window.matchMedia("(prefers-color-scheme: light)").matches) t = "light";
+          var s = JSON.parse(localStorage.getItem("cc-webui:settings") || "{}");
+          if (s.themeChosen && s.theme) t = s.theme;
+        } catch (e) {
+          /* 隐私模式下 localStorage 会抛，跟随系统即可 */
+        }
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

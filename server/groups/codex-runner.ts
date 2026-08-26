@@ -80,6 +80,7 @@ export async function* runCodex(args: {
   registerMcpSessionContext({
     token: mcpToken,
     sessionId: scope,
+    ownerId: ctx.ownerId,
     cwd: config.cwd,
     lark: ctx.codexMcp?.lark,
   });

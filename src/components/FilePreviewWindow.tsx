@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "./Markdown";
 
 interface Position {
   x: number;
@@ -26,6 +27,14 @@ interface Props {
 const MIN_WIDTH = 420;
 const MIN_HEIGHT = 260;
 
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
+
+function isMarkdownPath(p: string): boolean {
+  const name = p.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 && MARKDOWN_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
 function getInitial(): { position: Position; size: Size } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -51,6 +60,10 @@ export default function FilePreviewWindow({
   const initialRef = useRef(getInitial());
   const [position, setPosition] = useState<Position>(initialRef.current.position);
   const [size, setSize] = useState<Size>(initialRef.current.size);
+  // Markdown 默认渲染视图；源码视图保留行号，用来核对原文。
+  const isMarkdown = kind === "text" && isMarkdownPath(relPath);
+  const [rendered, setRendered] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const resizeRef = useRef<{
@@ -133,6 +146,33 @@ export default function FilePreviewWindow({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // 换文件时回到默认视图，并清掉上一次的「已复制」反馈。
+  useEffect(() => {
+    setRendered(true);
+    setCopied(false);
+  }, [absPath]);
+
+  const copyAll = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      // 非 https / 无剪贴板权限时的兜底：临时 textarea + execCommand。
+      const ta = document.createElement("textarea");
+      ta.value = content;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  }, [content]);
+
   const lines = kind === "text" ? content.split("\n") : [];
   const lineCount = lines.length;
   const lineNumWidth = String(lineCount).length;
@@ -165,6 +205,30 @@ export default function FilePreviewWindow({
               ? `${lineCount}行 · 截断`
               : `${lineCount}行`}
         </span>
+        {isMarkdown && (
+          <button
+            data-no-drag
+            onClick={() => setRendered((v) => !v)}
+            className="shrink-0 font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
+            title={rendered ? "看源码" : "看渲染结果"}
+          >
+            {rendered ? "源码" : "渲染"}
+          </button>
+        )}
+        {kind === "text" && !loading && !error && (
+          <button
+            data-no-drag
+            onClick={copyAll}
+            className={`shrink-0 font-mono text-[11px] border rounded px-2 py-0.5 transition-colors ${
+              copied
+                ? "text-green border-green/50"
+                : "text-muted hover:text-fg border-line hover:border-fg/30"
+            }`}
+            title={truncated ? "复制已加载的内容（文件被截断）" : "复制全文"}
+          >
+            {copied ? "已复制" : "复制"}
+          </button>
+        )}
         {onInsert && (
           <button
             data-no-drag
@@ -203,6 +267,15 @@ export default function FilePreviewWindow({
               className="max-w-full max-h-full object-contain"
               style={{ imageRendering: "auto" }}
             />
+          </div>
+        ) : isMarkdown && rendered ? (
+          <div className="px-4 py-3 text-[14px] leading-[1.75] text-fg md-body">
+            {truncated && (
+              <div className="pb-2 text-[11px] text-subtle italic font-mono">
+                仅显示前 256KB 内容
+              </div>
+            )}
+            <Markdown text={content} />
           </div>
         ) : (
           <div className="font-mono text-[12.5px] leading-[1.55] text-fg py-2">

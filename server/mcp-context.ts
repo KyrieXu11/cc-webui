@@ -19,6 +19,13 @@ export type LarkMcpContext = {
 interface McpSessionContext {
   token: string;
   sessionId: string;
+  // The cc-webui user this turn runs as. The MCP routes are authenticated by
+  // the token alone (they never see a login cookie), so without this the
+  // capability is unbounded by the account that triggered it — every tool call
+  // would carry the union of everyone's permissions. Resolved by the turn's
+  // starter: the logged-in caller for web turns, server/auth/actor.ts for the
+  // ones that begin outside a request (Feishu).
+  ownerId?: string;
   cwd?: string;
   lark?: LarkMcpContext;
   // Foreground bash lifecycle events are pushed into the owning turn's SSE
@@ -35,6 +42,7 @@ const contexts = new Map<string, McpSessionContext>();
 export function registerMcpSessionContext(opts: {
   token: string;
   sessionId: string;
+  ownerId?: string;
   cwd?: string;
   lark?: LarkMcpContext;
   onForegroundEvent?: (event: string, data: string) => void;
@@ -43,6 +51,7 @@ export function registerMcpSessionContext(opts: {
   contexts.set(opts.token, {
     token: opts.token,
     sessionId: opts.sessionId,
+    ownerId: opts.ownerId,
     cwd: opts.cwd,
     lark: opts.lark,
     onForegroundEvent: opts.onForegroundEvent,

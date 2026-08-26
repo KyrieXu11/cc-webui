@@ -42,7 +42,7 @@ try {
   assert.equal(needsStdinProtocol(base()), false);
   assert.ok(!plain.includes("--input-format"));
   assert.ok(!plain.includes("--permission-prompt-tool"));
-  assert.equal(plain.at(-1), "say hi", "prompt must be the last positional");
+  assert.ok(plain.includes("say hi"), "prompt must be passed positionally");
 
   // Either a permission handler OR images forces the stdin protocol.
   const withPerm = base({
@@ -97,6 +97,31 @@ try {
   );
   assert.ok(full.includes("--include-partial-messages"));
   assert.ok(full.includes("--verbose"));
+
+  // Regression: --allowedTools / --disallowedTools are VARIADIC (`<tools...>`),
+  // so a positional prompt after them is swallowed as extra tool names and the
+  // CLI exits with "Input must be provided…" (measured against 2.1.246). The
+  // prompt must therefore precede both.
+  const variadic = buildClaudeArgs(
+    base({
+      prompt: "say hi",
+      allowedTools: ["Read"],
+      disallowedTools: ["Bash"],
+    }),
+  );
+  const promptIdx = variadic.indexOf("say hi");
+  assert.ok(promptIdx >= 0, "prompt must still be positional");
+  for (const flag of ["--allowedTools", "--disallowedTools"]) {
+    assert.ok(
+      promptIdx < variadic.indexOf(flag),
+      `prompt must come before the variadic ${flag}`,
+    );
+  }
+  assert.equal(
+    variadic.at(-1),
+    "Bash",
+    "nothing positional may follow a variadic flag",
+  );
 
   // MCP config is inline JSON (--mcp-config takes files OR strings).
   const cfg = JSON.parse(

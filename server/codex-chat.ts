@@ -350,6 +350,7 @@ codexChat.post("/chat", async (c) => {
       registerMcpSessionContext({
         token: mcpToken,
         sessionId: taskSessionId,
+        ownerId,
         cwd,
       });
       unsubscribeForeground = subscribeForegroundEvents((event, data) => {

@@ -6,6 +6,8 @@ import os from "node:os";
 const tmp = path.join(os.tmpdir(), `cc-webui-auth-test-${Date.now()}`);
 process.env.CC_WEBUI_DB = path.join(tmp, "test.db");
 process.env.CC_WEBUI_COOKIE_SECRET_FILE = path.join(tmp, "cookie-secret");
+// Otherwise createUser() mkdirs into the developer's real ~/.cc-webui.
+process.env.CC_WEBUI_WORKSPACES_DIR = path.join(tmp, "workspaces");
 await fs.mkdir(tmp, { recursive: true });
 
 const { closeDb } = await import("../db.ts");
@@ -111,8 +113,31 @@ try {
   // A bare directory implies its subtree, so entries need not be written twice.
   assert.equal(matchesAnyPattern(real, [projects]), true);
   assert.equal(matchesAnyPattern(projects, [projects]), true);
+  // ...and so does a subtree pattern: "<dir>/**" has to authorise <dir>
+  // itself, or an admin who writes ~/code/** locks the user out of ~/code.
+  // path.matchesGlob says false there — it wants a segment after "**".
+  assert.equal(matchesAnyPattern(projects, [`${projects}/**`]), true);
+  // Hidden directories are NOT special in a folder whitelist. path.matchesGlob
+  // refuses to let a wildcard match a dot-entry, which meant the admin's `**`
+  // did not cover ~/.claude — nor the workspaces that now live under
+  // ~/.cc-webui, i.e. the admin could not open the folders they just created.
+  assert.equal(matchesAnyPattern("/Users/x/.claude", ["**"]), true);
+  assert.equal(
+    matchesAnyPattern("/Users/x/.cc-webui/workspaces/bob", ["**"]),
+    true,
+  );
+  assert.equal(
+    matchesAnyPattern("/ws/bob/.git", ["/ws/bob/**"]),
+    true,
+    "a hidden directory inside a granted subtree is still inside it",
+  );
+  // ...but the dot-blind pass must not loosen anything else.
+  assert.equal(matchesAnyPattern("/Users/x/code/a/b", ["/Users/x/code/*"]), false);
+  assert.equal(matchesAnyPattern("/etc/passwd", ["/Users/x/**"]), false);
+
   // Prefix-only must NOT match: /a/b may not authorise /a/bc.
   assert.equal(matchesAnyPattern(`${projects}-other/x`, [`${projects}/**`]), false);
+  assert.equal(matchesAnyPattern(`${projects}-other`, [`${projects}/**`]), false);
   assert.equal(matchesAnyPattern(real, []), false, "no patterns = nothing allowed");
   // A bare "**" must mean "anything" — it is the admin's default whitelist.
   // Resolving it against process.cwd() instead of "/" made it match nothing.

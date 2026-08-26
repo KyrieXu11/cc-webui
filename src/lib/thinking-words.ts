@@ -21,6 +21,17 @@ export const THINKING_WORDS = [
   "Unraveling",
   "Decoding",
   "Plotting",
+  // Claude Code CLI 状态行里的那批词，风格对齐。
+  "Whirring",
+  "Tinkering",
+  "Puttering",
+  "Noodling",
+  "Percolating",
+  "Mulling",
+  "Marinating",
+  "Wrangling",
+  "Finagling",
+  "Puzzling",
 ];
 
 export const WORKING_WORDS = [

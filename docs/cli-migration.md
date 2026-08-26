@@ -128,6 +128,39 @@ Codex 分支（`:63-88` 的 `thread.started` / `turn.failed` / `item.*`）本来
 **结论：事件映射层基本不用改。** 唯一改动是 `permission_request` / `permission_resolved` 的来源
 从 `canUseTool` 回调换成 `control_request` 帧。
 
+#### 4b. ⚠️ Claude 5 家族的 thinking 是加密的：**只有 token 计数，没有明文**（2026-08-26 实测）
+
+`thinking_delta` 照常来，但 `thinking` 字段恒为空串，真正的载荷是 `estimated_tokens`：
+
+```json
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,
+ "delta":{"type":"thinking_delta","thinking":"","estimated_tokens":50}}}
+```
+
+`content_block_start` 的 thinking block 是 `{"type":"thinking","thinking":"","signature":""}`，
+末尾一条 `signature_delta` 带 13.8KB 签名 blob。落盘的 `assistant` 消息里也一样是
+`{"type":"thinking","thinking":"","signature":"CAIS…"}`。
+
+- **`estimated_tokens` 是增量，不是累计值**：一次思考的 38 条 delta 累加 4350，对上同条消息
+  `usage.output_tokens_details.thinking_tokens = 4403`。要显示总量必须自己累加。
+- 最后一条 delta 可能**不带**这个字段，按 0 处理。
+- 历史回放没有 delta 可累加，但 `usage.output_tokens_details.thinking_tokens` 落盘了，用它。
+
+扫 `~/.claude/projects` 最近 120 个会话（按模型统计 thinking block）：
+
+| 模型 | block 数 | 明文为空 | 最长明文 |
+|---|---|---|---|
+| `claude-opus-5` | 2334 | **2334** | 0 |
+| `claude-sonnet-5` | 1 | 1 | 0 |
+| `claude-fable-5` | 2 | 2 | 0 |
+| `claude-sonnet-4-6` | 266 | 0 | 15638 |
+| `claude-haiku-4-5` | 66 | 4 | 2288 |
+
+**分界线就是 Claude 5 家族。** 4-6 / 4-5 仍给明文，5 一律不给。所以任何「渲染思考正文」的 UI
+在默认模型（`opus`）下都会退化成空白 —— 终端 Claude Code 显示的也不是正文，而是
+`✻ Whirring… (7m24s · ↓ 19.2k tokens · thinking with max effort)` 这种**状态行**。
+cc-webui 的对应实现是 `src/components/ThinkingRow.tsx`。
+
 ### 5. 模型
 
 **Claude 家族别名可用，且会 server-side 解析成当前版本**（8 个全部实测）：
@@ -249,6 +282,35 @@ Codex / 飞书用的原因。
 修 `default` 和 `dontAsk` 这两个说谎的；`auto`/`acceptEdits` 保持现状。
 另外 `validateConfig`（`groups/config.ts:39-81`）既不校验 `mode` 也不校验 `model`，任意字符串
 都能进 config 并直达 SDK/CLI——顺手加上。
+
+### ⚠️ `--allowedTools` / `--disallowedTools` 是变长参数，会吃掉 positional prompt
+
+`claude --help` 写的是 `--disallowedTools, --disallowed-tools <tools...>` —— 三个点是 commander
+的变长语法，它会贪心吞掉后面**所有不是 flag 的 argv**。而 prompt 就是个 positional：
+
+```bash
+# 坏：prompt 排在变长 flag 后面（CLI 2.1.246 实测）
+$ claude -p --disallowedTools Bash "say hi"
+Permission deny rule "say" matches no known tool — check for typos.
+Permission deny rule "hi" matches no known tool — check for typos.
+Error: Input must be provided either through stdin or as a prompt argument when using --print
+
+# 好：prompt 在变长 flag 之前
+$ claude -p "say hi" --disallowedTools Bash
+Hi! 👋 What can I help you with today?
+```
+
+报错信息和真实原因**毫无关系**（它说没给 prompt，其实是 prompt 被当成了两条 deny 规则），
+所以踩上去很难查。更阴的情况：prompt 里恰好有个词等于真实工具名（`Read` / `Bash` / `Write`…）
+时**不报错**，那个工具被静默禁用，表现为「agent 莫名其妙不会用某个工具」。
+
+`buildClaudeArgs` 原来把 prompt push 在最后，正是坏形状；没炸只因为两个调用方
+（`chat.ts` / `claude-runner.ts`）都传 `onPermissionAsk` → `needsStdinProtocol()` 为真 →
+prompt 走 stdin，那行是死代码。**已修**：prompt 移到固定 flag 之后、变长 flag 之前，
+`claude-executor.test.ts` 加了「prompt 下标必须小于两个变长 flag」+「argv 末项不得是 positional」
+的回归断言（旧断言 `plain.at(-1) === "say hi"` 恰好把坏形状固化了，已换掉）。
+
+**规则：`buildClaudeArgs` 里在变长 flag 之后追加的东西必须是 flag，永远不能是 positional。**
 
 ### 别再重复的死 flag
 
