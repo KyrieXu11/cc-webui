@@ -46,3 +46,62 @@ export function humanTime(ms: number): string {
     ? `${md} ${hm}`
     : `${d.getFullYear()}年${md}`;
 }
+
+// 取件台自己的读：比 lib/fs.ts 的 readFile 多返 mtimeMs+size，乐观锁要用。
+// 没有改那个旧函数，因为它有别的调用方（目录树预览），不需要这两个字段。
+export type FileContent = {
+  content: string;
+  truncated: boolean;
+  mtimeMs: number;
+  size: number;
+};
+
+export async function readFileVersioned(
+  absPath: string
+): Promise<FileContent> {
+  const res = await fetch(`/api/fs/read?path=${encodeURIComponent(absPath)}`);
+  if (!res.ok) throw new Error(`读取失败：${res.status}`);
+  const d = (await res.json()) as Partial<FileContent>;
+  return {
+    content: d.content ?? "",
+    truncated: !!d.truncated,
+    mtimeMs: d.mtimeMs ?? 0,
+    size: d.size ?? 0,
+  };
+}
+
+export type SaveResult =
+  | { ok: true; mtimeMs: number; size: number }
+  | { ok: false; conflict: boolean; message: string };
+
+// 保存必须带上打开时看到的版本。409 = 编辑期间文件被改过（很可能是 agent），
+// 这时**不覆盖**，让调用方提示重新打开（决策 12）。
+export async function saveFile(
+  absPath: string,
+  content: string,
+  ifMatch: { mtimeMs: number; size: number }
+): Promise<SaveResult> {
+  const res = await fetch("/api/files/content", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: absPath, content, ifMatch }),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.ok) {
+    return {
+      ok: true,
+      mtimeMs: Number(body.mtimeMs ?? 0),
+      size: Number(body.size ?? 0),
+    };
+  }
+  return {
+    ok: false,
+    conflict: res.status === 409,
+    message:
+      typeof body.detail === "string"
+        ? body.detail
+        : typeof body.error === "string"
+          ? body.error
+          : `保存失败：${res.status}`,
+  };
+}

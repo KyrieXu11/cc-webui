@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import ProjectSidebar from "./components/ProjectSidebar";
 import EmptyProjectSidebar from "./components/EmptyProjectSidebar";
 import FileExplorer from "./components/FileExplorer";
+import RightDock from "./components/RightDock";
 import FilePreviewWindow from "./components/FilePreviewWindow";
 import Header from "./components/Header";
 import Composer from "./components/Composer";
@@ -45,6 +46,7 @@ import { getSessionMessages, type SessionSummary } from "./lib/sessions";
 import { sendPermission } from "./lib/permission";
 import { useAuth } from "./AuthGate";
 import { useIsNarrow } from "./lib/useIsNarrow";
+import { openInDock } from "./lib/dock-bridge";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -1116,7 +1118,7 @@ export default function App() {
             refreshKey={sessionsRefreshKey}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
-            onPreviewFile={previewFile}
+            onPreviewFile={(abs, name) => openInDock({ path: abs, name })}
           />
         ) : (
           <EmptyProjectSidebar
@@ -1252,6 +1254,9 @@ export default function App() {
           </>
         )}
       </div>
+      {/* 右侧格：App 层唯一一份。⚠️ 不要下沉到某个视图里去渲染——切走就卸载，
+          而卸载会销毁编辑器（以后是 OnlyOffice iframe，律枢在那儿栽过）。 */}
+      <RightDock narrow={narrow} />
       {inProject && filesOpen && (
         <div className="flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:shadow-[0_0_60px_rgba(0,0,0,0.6)]">
           <FileExplorer
