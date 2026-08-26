@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { scanProjects, tildify } from "../lib/fs";
+import { useAuth } from "../AuthGate";
 
 interface Props {
   onClose: () => void;
@@ -9,6 +10,13 @@ interface Props {
 type Entry = { path: string; display: string };
 
 export default function OpenProjectDialog({ onClose, onOpen }: Props) {
+  // An account with no folder whitelist can open nothing at all — the scan
+  // would walk $HOME and come back empty, leaving "扫描中…" then "未找到匹配"
+  // plus an Enter-to-open affordance that can only 403. Say the real reason
+  // instead. Not role-based: an admin whose own list was emptied is in exactly
+  // the same position (assertCanOpen has no admin bypass).
+  const { allowedPaths } = useAuth();
+  const noFolders = allowedPaths.length === 0;
   const [all, setAll] = useState<Entry[]>([]);
   const [home, setHome] = useState("");
   const [query, setQuery] = useState("");
@@ -17,6 +25,10 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (noFolders) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     scanProjects()
       .then(({ dirs, home }) => {
@@ -29,7 +41,7 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [noFolders]);
 
   const filtered = useMemo<Entry[]>(() => {
     const q = query.trim().toLowerCase();
@@ -123,6 +135,19 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
             </svg>
           </button>
         </div>
+        {noFolders ? (
+          <div className="px-5 py-6">
+            <p className="text-fg text-[13.5px] leading-relaxed">
+              你的账号还没有被授权任何文件夹。
+            </p>
+            <p className="text-muted text-[12.5px] leading-relaxed mt-2">
+              找管理员在「管理 → 用户」里给你加上可访问的目录，例如{" "}
+              <code className="font-mono text-subtle">~/code/**</code>
+              ，之后刷新页面即可打开项目。
+            </p>
+          </div>
+        ) : (
+        <>
         <div className="p-3 border-b border-line">
           <div className="relative">
             <svg
@@ -180,6 +205,8 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
             </button>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

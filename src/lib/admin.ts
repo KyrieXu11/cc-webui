@@ -5,7 +5,10 @@ export type AdminUser = {
   username: string;
   role: Role;
   createdAt: number;
+  // 只含管理员手写的那些；工作区那条是系统管的，单独放在 workspace 里
+  // （决策 27），否则文本框会出现「删掉保存又自己回来」的行为。
   allowedPaths: string[];
+  workspace: { dir: string; pattern: string } | null;
   ownedResources: number;
 };
 
@@ -40,6 +43,8 @@ export async function createAdminUser(input: {
   password: string;
   role: Role;
   allowedPaths: string[];
+  // 默认建一个工作区（服务端对管理员角色忽略这个字段）。
+  workspace?: boolean;
 }): Promise<void> {
   await json(
     await fetch("/api/admin/users", {
@@ -52,7 +57,13 @@ export async function createAdminUser(input: {
 
 export async function patchAdminUser(
   id: string,
-  patch: { role?: Role; password?: string; allowedPaths?: string[] },
+  patch: {
+    role?: Role;
+    password?: string;
+    allowedPaths?: string[];
+    removeWorkspace?: boolean;
+    createWorkspace?: boolean;
+  },
 ): Promise<void> {
   await json(
     await fetch(`/api/admin/users/${id}`, {

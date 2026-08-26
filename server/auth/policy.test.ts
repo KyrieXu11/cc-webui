@@ -11,6 +11,8 @@ process.env.CC_WEBUI_GROUPS_DIR = path.join(tmp, "groups");
 process.env.CC_WEBUI_SESSION_INDEX = path.join(tmp, "sessions.json");
 process.env.CODEX_SESSIONS_DIR = path.join(tmp, "codex-empty");
 process.env.CC_WEBUI_CLAUDE_PROJECTS_DIR = path.join(tmp, "claude-projects");
+// Otherwise createUser() mkdirs into the developer's real ~/.cc-webui.
+process.env.CC_WEBUI_WORKSPACES_DIR = path.join(tmp, "workspaces");
 // Never let this test dial a real bot.
 process.env.CC_WEBUI_DOTENV = path.join(tmp, "empty.env");
 await fs.mkdir(tmp, { recursive: true });
@@ -18,7 +20,8 @@ await fs.writeFile(path.join(tmp, "empty.env"), "");
 
 const { closeDb } = await import("../db.ts");
 const { ROUTE_POLICIES, routeKey, policyFor } = await import("./policy.ts");
-const { createUser } = await import("./users.ts");
+const { createUser, getAllowedPaths, setAllowedPaths, deleteUser } =
+  await import("./users.ts");
 const { recordOwner } = await import("./ownership.ts");
 const { issueSession, SESSION_COOKIE } = await import("./session.ts");
 const { extractParams } = await import("./middleware.ts");
@@ -322,6 +325,26 @@ try {
   );
   assert.deepEqual(await answered, { behavior: "allow" });
 
+  // AskUserQuestion answers ride the same route: the tool's own input schema
+  // has an `answers` field "collected by the permission component", and without
+  // it the CLI returns "The user did not answer the questions."
+  const askId = randomUUID();
+  const asked = awaitPermission(askId, ac.signal, { ownerId: plain.id });
+  const posted = await app.request(`/api/permission/${askId}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...cookie(plain.id) },
+    body: JSON.stringify({
+      behavior: "allow",
+      answers: { "喜欢红还是蓝？": "蓝", bogus: 42 },
+    }),
+  });
+  assert.equal(posted.status, 200);
+  // Non-string values are dropped rather than passed through to the CLI.
+  assert.deepEqual(await asked, {
+    behavior: "allow",
+    answers: { "喜欢红还是蓝？": "蓝" },
+  });
+
   // Admins can answer anyone's, consistent with decision 11.
   const adminId2 = randomUUID();
   const answered2 = awaitPermission(adminId2, ac.signal, { ownerId: plain.id });
@@ -363,6 +386,180 @@ try {
   assert.equal(canSeeTaskSession(plain, undefined), false);
   assert.equal(canSeeTaskSession(admin, undefined), true);
 
+  // ── an empty whitelist means an empty whitelist ──────────────────────────
+  //
+  // `paths: [{ key: "cwd", optional: true }]` used to mean "no cwd in the body
+  // → no check", while chat.ts fell back to CC_WEBUI_CWD || process.cwd(). So
+  // an account allowed NOTHING could still start a turn, in the server's own
+  // checkout. The spec's `fallback` makes the middleware check the value the
+  // handler will actually use.
+
+  for (const route of ["/api/chat", "/api/groups"]) {
+    const res = await app.request(route, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookie(plain.id) },
+      body: JSON.stringify({ prompt: "hi" }),
+    });
+    assert.equal(res.status, 403, route);
+    assert.match((await res.json()).detail ?? "", /outside the folders/, route);
+  }
+
+  // ── Codex is admin-only (decision 14) ────────────────────────────────────
+  //
+  // `codex exec` has no --ask-for-approval, so on that side every mode is
+  // unrestricted writes. The UI hides the picker, but the UI is not the gate.
+  const codexTurn = await app.request("/api/codex/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...cookie(plain.id) },
+    body: JSON.stringify({ prompt: "hi", cwd: tmp }),
+  });
+  assert.equal(codexTurn.status, 403);
+  // The ROLE check must be what refused, not the path check — otherwise
+  // whitelisting a folder would quietly hand the account a Codex agent.
+  assert.equal((await codexTurn.json()).error, "forbidden");
+
+  // ── 工作区：建号时发一块地，服务端管着它那条 pattern ────────────────────
+
+  const wsRoot = process.env.CC_WEBUI_WORKSPACES_DIR!;
+
+  const createUserVia = (body: Record<string, unknown>) =>
+    app.request("/api/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookie(admin.id) },
+      body: JSON.stringify(body),
+    });
+  const rowFor = async (username: string) =>
+    (
+      await (
+        await app.request("/api/admin/users", { headers: cookie(admin.id) })
+      ).json()
+    ).users.find((u: { username: string }) => u.username === username);
+
+  assert.equal((await createUserVia({ username: "dave", password: "pw" })).status, 200);
+  const dave = await rowFor("dave");
+  const daveDir = path.join(wsRoot, "dave");
+  assert.ok((await fs.stat(daveDir)).isDirectory(), "workspace directory");
+  // The scan realpaths what it returns, and on macOS /var is a symlink.
+  const realDaveDir = await fs.realpath(daveDir);
+  // Reported apart from the textarea's contents (decision 27).
+  assert.deepEqual(dave.allowedPaths, []);
+  assert.equal(dave.workspace.dir, daveDir);
+  assert.equal(dave.workspace.pattern, path.join(daveDir, "**"));
+  // ...and it really is in the whitelist, not just in the response shape.
+  assert.ok(getAllowedPaths(dave.id).includes(dave.workspace.pattern));
+  // Seeded into recents (decision 23) so the home screen is not empty.
+  assert.ok(
+    (await (await app.request("/api/fs/recents", { headers: cookie(dave.id) })).json())
+      .recents.some((r: { path: string }) => r.path === daveDir),
+  );
+
+  // walkDirs skips dot-directories and the workspace lives under ~/.cc-webui,
+  // so /api/fs/scan has to add it back — otherwise an account whose only grant
+  // IS its workspace opens the picker and sees an empty list.
+  const scanned = (
+    await (await app.request("/api/fs/scan", { headers: cookie(dave.id) })).json()
+  ).dirs as string[];
+  assert.ok(
+    scanned.some((d) => d === daveDir || d === realDaveDir),
+    `workspace missing from the picker: ${JSON.stringify(scanned)}`,
+  );
+
+  // Saving the textarea must not drop the managed row (decision 26).
+  await app.request(`/api/admin/users/${dave.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...cookie(admin.id) },
+    body: JSON.stringify({ allowedPaths: ["/srv/shared/**"] }),
+  });
+  // Order is not meaningful — the set is what matters.
+  assert.deepEqual(getAllowedPaths(dave.id).sort(), [
+    "/srv/shared/**",
+    dave.workspace.pattern,
+  ].sort());
+
+  // Removing it is an explicit action, and leaves the directory alone.
+  await app.request(`/api/admin/users/${dave.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...cookie(admin.id) },
+    body: JSON.stringify({ removeWorkspace: true }),
+  });
+  assert.deepEqual(getAllowedPaths(dave.id), ["/srv/shared/**"]);
+  assert.ok((await fs.stat(daveDir)).isDirectory(), "directory survives removal");
+
+  // A name whose directory already exists is refused rather than inherited
+  // (decision 25) — that directory may hold the previous holder's files.
+  const reuse = await createUserVia({ username: "dave2", password: "pw" });
+  assert.equal(reuse.status, 200);
+  deleteUser((await rowFor("dave2")).id);
+  const again = await createUserVia({ username: "dave2", password: "pw" });
+  assert.equal(again.status, 409);
+  assert.equal((await again.json()).error, "workspace exists");
+
+  // A username that cannot be a directory name is refused up front.
+  const bad = await createUserVia({ username: "Bad Name", password: "pw" });
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json()).error, "invalid username");
+  // ...and the account is not created as a side effect.
+  assert.equal(await rowFor("Bad Name"), undefined);
+
+  // Admins get no workspace even if asked (decision 24).
+  assert.equal(
+    (await createUserVia({ username: "root2", password: "pw", role: "admin", workspace: true }))
+      .status,
+    200,
+  );
+  assert.equal((await rowFor("root2")).workspace, null);
+
+  // Demotion narrows the whitelist to the workspace (decision 29) — otherwise
+  // the role change leaves `**` in place and means nothing on disk.
+  const root2 = await rowFor("root2");
+  setAllowedPaths(root2.id, ["**"]);
+  await app.request(`/api/admin/users/${root2.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...cookie(admin.id) },
+    body: JSON.stringify({ role: "user" }),
+  });
+  assert.deepEqual(getAllowedPaths(root2.id), [path.join(wsRoot, "root2", "**")]);
+  assert.ok((await fs.stat(path.join(wsRoot, "root2"))).isDirectory());
+
+  // ── deleting a session: a colleague may not unlink your terminal history ──
+  //
+  // ~/.claude/projects is SHARED with the machine owner's own terminal
+  // `claude`, and the web UI lists whatever it finds there. Those files are
+  // unowned (decision 5b), so the ownership check is the only thing between a
+  // colleague's delete button and a transcript cc-webui never created.
+
+  const projRoot = process.env.CC_WEBUI_CLAUDE_PROJECTS_DIR!;
+  const slugDir = path.join(projRoot, "-Users-someone-proj");
+  await fs.mkdir(slugDir, { recursive: true });
+
+  const del = (id: string, who: string) =>
+    app.request(`/api/sessions/${id}`, {
+      method: "DELETE",
+      headers: cookie(who),
+    });
+
+  const terminalSession = randomUUID();
+  const terminalFile = path.join(slugDir, `${terminalSession}.jsonl`);
+  await fs.writeFile(terminalFile, '{"type":"user","content":"typed in a terminal"}\n');
+
+  assert.equal((await del(terminalSession, plain.id)).status, 404);
+  // The route answers {ok:true} whether or not a file went away, so the file
+  // itself is the assertion that matters.
+  await fs.access(terminalFile);
+
+  // Their own session is theirs to delete.
+  const ownSession = randomUUID();
+  const ownFile = path.join(slugDir, `${ownSession}.jsonl`);
+  await fs.writeFile(ownFile, "{}\n");
+  recordOwner(ownSession, "claude", plain.id);
+  assert.equal((await del(ownSession, plain.id)).status, 200);
+  await assert.rejects(fs.access(ownFile));
+
+  // The admin still can delete the orphan: that is the machine owner deleting
+  // their own history, deliberately left possible (decisions 5b & 15).
+  assert.equal((await del(terminalSession, admin.id)).status, 200);
+  await assert.rejects(fs.access(terminalFile));
+
   // ── fail-closed: an unclassified route is refused, not waved through ─────
 
   const { Hono } = await import("hono");
@@ -386,6 +583,7 @@ try {
     "CC_WEBUI_SESSION_INDEX",
     "CODEX_SESSIONS_DIR",
     "CC_WEBUI_CLAUDE_PROJECTS_DIR",
+    "CC_WEBUI_WORKSPACES_DIR",
     "CC_WEBUI_DOTENV",
     "CC_WEBUI_GROUPS_ENABLED",
   ]) {

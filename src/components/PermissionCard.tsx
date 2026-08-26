@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PermissionDecision } from "../lib/types";
+import AskUserQuestionCard, { parseQuestions } from "./AskUserQuestionCard";
 
 interface Props {
   tool: string;
@@ -10,7 +11,11 @@ interface Props {
   hasSessionPermissionSuggestions?: boolean;
   stale?: boolean;
   delay?: number;
-  onAnswer: (decision: PermissionDecision, message?: string) => void;
+  onAnswer: (
+    decision: PermissionDecision,
+    message?: string,
+    answers?: Record<string, string>,
+  ) => void;
 }
 
 function summarizeInput(tool: string, input: Record<string, any>): string {
@@ -59,6 +64,25 @@ export default function PermissionCard({
   const [showReason, setShowReason] = useState(false);
   const locked = resolved !== undefined || stale;
   const summary = summarizeInput(tool, input);
+
+  // AskUserQuestion 不是权限请求，是提问 —— 见 AskUserQuestionCard 顶部注释。
+  // 解析不出题目才退回通用卡片（模型给了畸形 input 时不至于什么都点不了）。
+  const questions = tool === "AskUserQuestion" ? parseQuestions(input) : [];
+  if (questions.length > 0) {
+    return (
+      <AskUserQuestionCard
+        questions={questions}
+        locked={locked}
+        // 「已允许本次」对一道选择题是错的说法。
+        resolvedLabel={
+          resolved ? (resolved === "deny" ? "已跳过" : "已回答") : undefined
+        }
+        delay={delay}
+        onSubmit={(answers) => onAnswer("allow", undefined, answers)}
+        onSkip={() => onAnswer("deny", "用户跳过了这个提问")}
+      />
+    );
+  }
 
   const btnBase =
     "px-3 h-8 rounded-md text-[12.5px] border transition-all duration-150 whitespace-nowrap";

@@ -54,6 +54,18 @@ export function normalizePattern(raw: string): string {
   return path.normalize(rooted);
 }
 
+// The part of a pattern before its first glob segment — i.e. the deepest
+// directory the pattern can possibly live under. "" for a pattern that starts
+// with a glob (`**`), which means "anywhere".
+export function patternRoot(raw: string): string {
+  const pattern = normalizePattern(raw);
+  const segments = pattern.split(path.sep);
+  const globAt = segments.findIndex((seg) => GLOB_CHARS.test(seg));
+  if (globAt === -1) return pattern;
+  const literal = segments.slice(0, globAt).join(path.sep);
+  return literal === "" ? "" : literal;
+}
+
 // Resolve symlinks in the LITERAL prefix of a pattern, leaving the glob part
 // alone.
 //
@@ -76,6 +88,35 @@ export async function canonicalizePattern(raw: string): Promise<string> {
   }
 }
 
+// Segment-wise matcher used ALONGSIDE path.matchesGlob.
+//
+// Why both: glob wildcards famously refuse to match entries that start with a
+// dot, so `**` did not match `~/.claude` — and, once workspaces landed under
+// `~/.cc-webui`, the admin's own `**` did not match the workspaces they had
+// just created. In a FOLDER WHITELIST "hidden" carries no meaning: an admin who
+// writes `**` means everything. This pass implements exactly that, and glob
+// keeps handling the richer syntax (`?`, `[]`, `{}`) inside a segment.
+//
+//   `**` matches zero or more segments · `*` matches exactly one
+function matchesSegments(pathSegs: string[], patSegs: string[]): boolean {
+  if (patSegs.length === 0) return pathSegs.length === 0;
+  const [head, ...rest] = patSegs;
+  if (head === "**") {
+    // Zero segments, then one, then two… `**` is the only backtracking case.
+    for (let skip = 0; skip <= pathSegs.length; skip++) {
+      if (matchesSegments(pathSegs.slice(skip), rest)) return true;
+    }
+    return false;
+  }
+  if (pathSegs.length === 0) return false;
+  const seg = pathSegs[0];
+  const ok = head === "*" ? true : head === seg || path.matchesGlob(seg, head);
+  return ok && matchesSegments(pathSegs.slice(1), rest);
+}
+
+const splitSegs = (p: string): string[] =>
+  p.split(path.sep).filter((x) => x.length > 0);
+
 // `*` matches one segment, `**` matches any depth (Node's own glob semantics).
 // Pure, and expects patterns that are ALREADY canonical — call it via
 // assertCanOpen unless you know your patterns contain no symlinks.
@@ -87,6 +128,7 @@ export function matchesAnyPattern(
     const pattern = normalizePattern(raw);
     if (normalizedPath === pattern) return true;
     if (path.matchesGlob(normalizedPath, pattern)) return true;
+    if (matchesSegments(splitSegs(normalizedPath), splitSegs(pattern))) return true;
     // A LITERAL directory implies its subtree: "/a/b" also allows "/a/b/c/d",
     // so an admin need not write every entry twice.
     //
@@ -96,6 +138,12 @@ export function matchesAnyPattern(
     // authorise everything underneath them too.
     if (!GLOB_CHARS.test(pattern)) {
       if (path.matchesGlob(normalizedPath, path.join(pattern, "**"))) return true;
+    }
+    // ...and the mirror image: "/a/b/**" reads as "everything under /a/b", but
+    // Node's glob requires at least one segment after "**", so on its own it
+    // would leave a user unable to open the very folder their whitelist names.
+    if (pattern.endsWith(`${path.sep}**`)) {
+      if (normalizedPath === pattern.slice(0, -3)) return true;
     }
   }
   return false;

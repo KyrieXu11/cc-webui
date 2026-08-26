@@ -147,6 +147,7 @@ function UsersSection({
   const [newName, setNewName] = useState("");
   const [newPw, setNewPw] = useState("");
   const [newRole, setNewRole] = useState<Role>("user");
+  const [newWorkspace, setNewWorkspace] = useState(true);
   const adminCount = users.filter((u) => u.role === "admin").length;
 
   return (
@@ -169,7 +170,10 @@ function UsersSection({
         ))}
       </div>
 
-      <SectionHead title="新建用户" hint="新用户默认不能打开任何目录。" />
+      <SectionHead
+        title="新建用户"
+        hint="普通用户默认会拿到一个属于自己的空工作区，除此之外打不开任何目录。"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Field value={newName} onChange={setNewName} placeholder="用户名" width={150} />
         <Field
@@ -187,6 +191,17 @@ function UsersSection({
           <option value="user">普通用户</option>
           <option value="admin">管理员</option>
         </select>
+        {newRole === "user" && (
+          <label className="flex items-center gap-1.5 text-[12.5px] text-muted select-none">
+            <input
+              type="checkbox"
+              checked={newWorkspace}
+              onChange={(e) => setNewWorkspace(e.target.checked)}
+              className="accent-blue"
+            />
+            建一个工作区
+          </label>
+        )}
         <Primary
           disabled={busy || !newName.trim() || !newPw}
           onClick={() =>
@@ -196,10 +211,12 @@ function UsersSection({
                 password: newPw,
                 role: newRole,
                 allowedPaths: [],
+                workspace: newWorkspace,
               });
               setNewName("");
               setNewPw("");
               setNewRole("user");
+              setNewWorkspace(true);
             })
           }
         >
@@ -242,6 +259,40 @@ function UserRow({
           {user.ownedResources} 个会话
         </span>
       </div>
+
+      {user.workspace ? (
+        <div className="flex items-center gap-2 mt-2.5">
+          <span
+            title="系统建的工作区。它是白名单里的一条，但由服务端维护，所以不在下面的文本框里。"
+            className="font-mono text-[11.5px] px-2 py-1 rounded bg-raised text-subtle border border-line truncate"
+          >
+            {user.workspace.dir}
+          </span>
+          <button
+            disabled={busy}
+            onClick={() =>
+              onRun(() => patchAdminUser(user.id, { removeWorkspace: true }))
+            }
+            className="text-[11.5px] text-subtle hover:text-fg disabled:opacity-40 shrink-0"
+          >
+            移除工作区
+          </button>
+        </div>
+      ) : (
+        user.role === "user" && (
+          <div className="mt-2.5">
+            <button
+              disabled={busy}
+              onClick={() =>
+                onRun(() => patchAdminUser(user.id, { createWorkspace: true }))
+              }
+              className="text-[11.5px] text-subtle hover:text-fg disabled:opacity-40"
+            >
+              + 建一个工作区
+            </button>
+          </div>
+        )
+      )}
 
       <textarea
         value={draft}
@@ -289,13 +340,24 @@ function UserRow({
         <Ghost
           disabled={busy || isLastAdmin}
           title={isLastAdmin ? "不能降级唯一的管理员" : undefined}
-          onClick={() =>
-            onRun(() =>
+          onClick={() => {
+            // Demotion rewrites the whitelist (decision 29). Destructive and
+            // one-way — promotion does not restore it — so say so first.
+            if (user.role === "admin") {
+              const n = user.allowedPaths.length;
+              const ok = window.confirm(
+                `降级为普通用户会把 ${user.username} 的目录白名单替换成只剩一个工作区。` +
+                  (n > 0 ? `现有的 ${n} 条会丢失，` : "") +
+                  "升回管理员时不会自动恢复。继续？",
+              );
+              if (!ok) return;
+            }
+            void onRun(() =>
               patchAdminUser(user.id, {
                 role: user.role === "admin" ? "user" : "admin",
               }),
-            )
-          }
+            );
+          }}
         >
           {user.role === "admin" ? "降为普通" : "设为管理员"}
         </Ghost>
@@ -305,7 +367,10 @@ function UserRow({
           onClick={() => {
             if (
               !confirm(
-                `删除 ${user.username}？他的会话不会被删除，但会变成无主，之后只有管理员可见。`,
+                `删除 ${user.username}？他的会话不会被删除，但会变成无主，之后只有管理员可见。` +
+                  (user.workspace
+                    ? `\n工作区 ${user.workspace.dir} 也会保留在磁盘上，要清理请自己删。`
+                    : ""),
               )
             ) {
               return;

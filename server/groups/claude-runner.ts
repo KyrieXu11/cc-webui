@@ -57,6 +57,7 @@ export async function* runClaude(args: {
   registerMcpSessionContext({
     token: mcpToken,
     sessionId: scope,
+    ownerId: ctx.ownerId,
     // The group bash MCP never used to receive a cwd, so mcp__bash__run ran in
     // the SERVER's cwd while Claude's own file tools got config.cwd — an agent
     // reading one tree and shelling into another. Fixed here, deliberately as
@@ -182,7 +183,13 @@ export async function* runClaude(args: {
           // after turn_end shows the card in its post-decision state.
           events = applySDKMessage(events, resolvedPayload, () => {});
           if (decision.behavior === "allow") {
-            return { behavior: "allow", updatedInput: input };
+            // 同网页单聊：AskUserQuestion 的答案通过 updatedInput.answers 回传。
+            return {
+              behavior: "allow",
+              updatedInput: decision.answers
+                ? { ...input, answers: decision.answers }
+                : input,
+            };
           }
           if (decision.behavior === "allow_session") {
             inputAllowance.add(inputKey);

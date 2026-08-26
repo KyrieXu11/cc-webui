@@ -1,7 +1,7 @@
 import type { ChatEvent, ImageAttachment, PermissionDecision } from "../lib/types";
 import UserBubble from "./UserBubble";
 import AssistantText from "./AssistantText";
-import StepTimeline from "./StepTimeline";
+import StepTimeline, { type TimelineRow } from "./StepTimeline";
 import PermissionCard from "./PermissionCard";
 import SummaryCard from "./SummaryCard";
 import ThinkingBlock from "./ThinkingBlock";
@@ -15,15 +15,31 @@ export type RetryInfo = {
   errorStatus: number | null;
 };
 
-type StepEvent = Extract<ChatEvent, { type: "step" }>;
-
 type Block =
-  | { kind: "step-group"; id: string; steps: StepEvent[] }
+  | { kind: "timeline"; id: string; rows: TimelineRow[] }
   | {
       kind: "single";
       id: string;
       event: Exclude<ChatEvent, { type: "step" }>;
     };
+
+// An event that renders nothing must never reach `blocks`: as its own block it
+// would split the surrounding timeline in two, leaving a blank gap and a broken
+// connector line. Empty thinking is the common case — the Claude 5 family sends
+// thinking with no plaintext at all (see ThinkingRow).
+function rendersNothing(ev: ChatEvent): boolean {
+  if (ev.type === "assistant") return !ev.text.trim();
+  if (ev.type === "thinking") return !ev.text.trim() && !(ev.tokens ?? 0);
+  return false;
+}
+
+// Thinking with no prose is a status row inside the timeline; thinking WITH
+// prose (sonnet-4-6 and older still return it) stays an expandable block.
+function isThinkingStatus(
+  ev: ChatEvent
+): ev is Extract<ChatEvent, { type: "thinking" }> {
+  return ev.type === "thinking" && !ev.text.trim();
+}
 
 interface Props {
   events: ChatEvent[];
@@ -32,7 +48,8 @@ interface Props {
   onAnswerPermission: (
     permissionId: string,
     decision: PermissionDecision,
-    message?: string
+    message?: string,
+    answers?: Record<string, string>
   ) => void;
   isPending?: boolean;
   retryInfo?: RetryInfo | null;
@@ -41,6 +58,9 @@ interface Props {
   // is itself rendered inside a tighter container (e.g. a per-agent block
   // in a group chat) where the parent already provides spacing.
   compact?: boolean;
+  // Effort level of the current turn, echoed on thinking status rows the way
+  // the CLI does ("thinking with max effort").
+  effort?: string;
 }
 
 export default function MessageList({
@@ -52,16 +72,18 @@ export default function MessageList({
   retryInfo,
   onPreviewImage,
   compact,
+  effort,
 }: Props) {
   const blocks: Block[] = [];
   // Step ids that still have an unresolved permission card: those steps are
   // "awaiting approval", not actually executing yet.
   const awaitingPermission = new Set<string>();
   for (const ev of events) {
-    if (ev.type === "step") {
+    if (rendersNothing(ev)) continue;
+    if (ev.type === "step" || isThinkingStatus(ev)) {
       const last = blocks[blocks.length - 1];
-      if (last && last.kind === "step-group") last.steps.push(ev);
-      else blocks.push({ kind: "step-group", id: `g-${ev.id}`, steps: [ev] });
+      if (last && last.kind === "timeline") last.rows.push(ev);
+      else blocks.push({ kind: "timeline", id: `g-${ev.id}`, rows: [ev] });
     } else {
       if (
         ev.type === "permission" &&
@@ -77,15 +99,16 @@ export default function MessageList({
   return (
     <div className={`flex flex-col ${compact ? "gap-3" : "gap-5 py-8"}`}>
       {blocks.map((b) => {
-        if (b.kind === "step-group") {
+        if (b.kind === "timeline") {
           return (
             <StepTimeline
               key={b.id}
-              steps={b.steps}
+              rows={b.rows}
               delay={0}
               expandedIds={expandedSteps}
               onToggle={onToggleStep}
               awaitingPermission={awaitingPermission}
+              effort={effort}
             />
           );
         }
@@ -102,10 +125,8 @@ export default function MessageList({
               />
             );
           case "assistant":
-            if (!ev.text.trim()) return null;
             return <AssistantText key={ev.id} text={ev.text} delay={0} />;
           case "thinking":
-            if (!ev.text.trim()) return null;
             return (
               <ThinkingBlock
                 key={ev.id}
@@ -128,8 +149,8 @@ export default function MessageList({
                   ev.hasSessionPermissionSuggestions
                 }
                 delay={0}
-                onAnswer={(decision, message) =>
-                  onAnswerPermission(ev.permissionId, decision, message)
+                onAnswer={(decision, message, answers) =>
+                  onAnswerPermission(ev.permissionId, decision, message, answers)
                 }
               />
             );

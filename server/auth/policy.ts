@@ -34,6 +34,13 @@ export type PathSpec = {
   from: ValueSource;
   key: string;
   optional?: boolean;
+  // What the HANDLER will use when the caller omits this value. Without it,
+  // `optional: true` means "no cwd in the body → no check at all", while the
+  // handler quietly falls back to CC_WEBUI_CWD or the server's own directory —
+  // so an account with an empty whitelist could still start a turn, inside the
+  // cc-webui checkout. The check has to see the effective value, not the
+  // literal one.
+  fallback?: "serverCwd";
 };
 
 export type RoutePolicy = {
@@ -79,7 +86,10 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "PUT /api/admin/feishu-senders": { auth: "admin", note: "the admin surface" },
 
   // ── web single chat (Claude) ──────────────────────────────────────────────
-  "POST /api/chat": { auth: "user", paths: [{ from: "body", key: "cwd", optional: true }] },
+  "POST /api/chat": {
+    auth: "user",
+    paths: [{ from: "body", key: "cwd", optional: true, fallback: "serverCwd" }],
+  },
   "POST /api/chat/cancel": {
     auth: "user",
     owns: { from: "body", key: "sessionId", kind: "claude", optional: true },
@@ -96,7 +106,17 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   },
 
   // ── web single chat (Codex) ───────────────────────────────────────────────
-  "POST /api/codex/chat": { auth: "user", paths: [{ from: "body", key: "cwd", optional: true }] },
+  //
+  // admin-only by decision 14: `codex exec` has no --ask-for-approval, so on
+  // that side even permissionMode `auto` means unrestricted writes — banning
+  // bypassPermissions for ordinary users (decision 12) would be paper-only.
+  // Only the route that STARTS a turn is gated; attach/cancel/inflight stay
+  // owner-scoped, which already yields nothing for someone who owns no Codex
+  // session, and keeps working if this ever loosens.
+  "POST /api/codex/chat": {
+    auth: "admin",
+    paths: [{ from: "body", key: "cwd", optional: true, fallback: "serverCwd" }],
+  },
   "POST /api/codex/chat/cancel": {
     auth: "user",
     owns: { from: "body", key: "sessionId", kind: "codex", optional: true },
@@ -109,7 +129,10 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
 
   // ── group chat (only mounted when CC_WEBUI_GROUPS_ENABLED) ────────────────
   "GET /api/groups": { auth: "user", handlerScoped: true },
-  "POST /api/groups": { auth: "user", paths: [{ from: "body", key: "cwd", optional: true }] },
+  "POST /api/groups": {
+    auth: "user",
+    paths: [{ from: "body", key: "cwd", optional: true, fallback: "serverCwd" }],
+  },
   "GET /api/groups/inflight/all": { auth: "user", handlerScoped: true },
   "GET /api/groups/:gid": { auth: "user", owns: { from: "param", key: "gid", kind: "group" } },
   "PATCH /api/groups/:gid/config": {

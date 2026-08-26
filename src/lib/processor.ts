@@ -203,13 +203,15 @@ export function applySDKMessage(
         if (idx >= 0) {
           return [
             ...events.slice(0, idx),
-            { ...events[idx], text: block.thinking ?? "" } as ChatEvent,
+            // Same idempotency contract as text: a replayed block_start resets
+            // the accumulator (text AND token count) so deltas re-fill it.
+            { ...events[idx], text: block.thinking ?? "", tokens: 0 } as ChatEvent,
             ...events.slice(idx + 1),
           ];
         }
         return [
           ...events,
-          { id, type: "thinking", text: block.thinking ?? "" },
+          { id, type: "thinking", text: block.thinking ?? "", tokens: 0 },
         ];
       }
     }
@@ -243,9 +245,20 @@ export function applySDKMessage(
         if (idx >= 0) {
           const target = events[idx];
           if (target.type === "thinking") {
+            // `estimated_tokens` is per-delta, not cumulative (measured: the
+            // series sums to usage.output_tokens_details.thinking_tokens). For
+            // encrypted thinking it is the ONLY progress signal there is.
+            const delta =
+              typeof ev.delta.estimated_tokens === "number"
+                ? ev.delta.estimated_tokens
+                : 0;
             return [
               ...events.slice(0, idx),
-              { ...target, text: target.text + (ev.delta.thinking ?? "") },
+              {
+                ...target,
+                text: target.text + (ev.delta.thinking ?? ""),
+                tokens: (target.tokens ?? 0) + delta,
+              },
               ...events.slice(idx + 1),
             ];
           }
@@ -549,6 +562,10 @@ export function sessionMessagesToEvents(
       const content = msg?.content;
       if (Array.isArray(content)) {
         const messageId = msg?.id ?? claudeMsg.uuid;
+        const thinkingTokens =
+          typeof msg?.usage?.output_tokens_details?.thinking_tokens === "number"
+            ? msg.usage.output_tokens_details.thinking_tokens
+            : 0;
         content.forEach((b, i) => {
           if (b?.type === "text" && b.text) {
             events.push({
@@ -561,6 +578,16 @@ export function sessionMessagesToEvents(
               id: `t-${messageId}-${i}`,
               type: "thinking",
               text: b.thinking,
+            });
+          } else if (b?.type === "thinking" && thinkingTokens > 0) {
+            // Encrypted thinking (Claude 5): no prose was ever recorded, but the
+            // message's usage kept the token count, so history can still show
+            // the same status row the live stream did.
+            events.push({
+              id: `t-${messageId}-${i}`,
+              type: "thinking",
+              text: "",
+              tokens: thinkingTokens,
             });
           } else if (b?.type === "tool_use") {
             const toolName = normalizeToolName(b.name);

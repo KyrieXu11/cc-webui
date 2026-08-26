@@ -148,7 +148,12 @@ async function checkPaths(
 ): Promise<Response | null> {
   const patterns = getAllowedPaths(user.id);
   for (const spec of specs) {
-    const raw = await valueFrom(c, spec.from, spec.key, params);
+    let raw = await valueFrom(c, spec.from, spec.key, params);
+    if (!raw && spec.fallback === "serverCwd") {
+      // Mirror of the handlers' own default (chat.ts / codex-chat.ts /
+      // groups.ts): body.cwd || CC_WEBUI_CWD || process.cwd().
+      raw = process.env.CC_WEBUI_CWD || process.cwd();
+    }
     if (!raw) {
       if (spec.optional) continue;
       return c.json({ error: `${spec.key} required` }, 400);

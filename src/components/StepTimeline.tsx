@@ -1,7 +1,16 @@
 import type { ChatEvent } from "../lib/types";
 import EditDiff from "./EditDiff";
+import ThinkingRow from "./ThinkingRow";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
+type ThinkingEvent = Extract<ChatEvent, { type: "thinking" }>;
+
+// The timeline interleaves tool calls with encrypted-thinking status rows —
+// exactly the order the model produced them (thinking, then the tool batch it
+// decided on). Keeping thinking INSIDE the group is what keeps the connector
+// line continuous; when these rows were separate blocks, every one of them cut
+// the line in two and left a blank gap.
+export type TimelineRow = StepEvent | ThinkingEvent;
 
 const CheckIcon = ({
   status,
@@ -148,32 +157,45 @@ function StepDetails({
 }
 
 interface Props {
-  steps: StepEvent[];
+  rows: TimelineRow[];
   delay?: number;
   expandedIds: Set<string>;
   onToggle: (id: string) => void;
   // Step ids (`s-<toolUseId>`) that still have an unanswered permission card.
   // These render a static dashed circle; otherwise pending renders a spinner.
   awaitingPermission?: Set<string>;
+  // Effort level of the turn, shown on thinking rows ("· max effort").
+  effort?: string;
 }
 
 export default function StepTimeline({
-  steps,
+  rows,
   delay = 0,
   expandedIds,
   onToggle,
   awaitingPermission,
+  effort,
 }: Props) {
   return (
     <div
       className="relative pl-1 msg-enter"
       style={{ animationDelay: `${delay}ms` }}
     >
-      {steps.length > 1 && (
+      {rows.length > 1 && (
         <div className="absolute left-[11px] top-[13px] bottom-[13px] w-px bg-fg/10" />
       )}
       <div className="flex flex-col">
-        {steps.map((s) => {
+        {rows.map((row) => {
+          if (row.type === "thinking") {
+            return (
+              <ThinkingRow
+                key={row.id}
+                tokens={row.tokens ?? 0}
+                effort={effort}
+              />
+            );
+          }
+          const s = row;
           const open = expandedIds.has(s.id);
           return (
             <div key={s.id}>

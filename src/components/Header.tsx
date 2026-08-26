@@ -4,6 +4,8 @@ import type { SessionSummary } from "../lib/sessions";
 import { providerLabel, type AgentProvider } from "../lib/settings";
 
 interface Props {
+  // 窄屏专用：打开左抽屉（rail + 会话栏）。桌面那两根是常驻列，不需要。
+  onOpenNav?: () => void;
   sessionId?: string | null;
   projectPath: string;
   home: string;
@@ -22,6 +24,7 @@ const PROVIDER_ACCENT: Record<AgentProvider, string> = {
 };
 
 export default function Header({
+  onOpenNav,
   sessionId,
   projectPath,
   home,
@@ -35,32 +38,43 @@ export default function Header({
 }: Props) {
   const accent = PROVIDER_ACCENT[provider];
   return (
-    <header className="flex items-center gap-4 h-14 px-5 border-b border-line shrink-0">
-      <div className="flex items-center gap-2 shrink-0 min-w-0">
+    <header className="flex items-center gap-4 max-md:gap-2 h-14 px-5 max-md:pl-1 max-md:pr-2 border-b border-line shrink-0">
+      {onOpenNav && (
+        <button
+          aria-label="打开侧栏"
+          onClick={onOpenNav}
+          className="md:hidden w-11 h-11 shrink-0 flex items-center justify-center text-muted"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
+      <div className="flex items-center gap-2 shrink-0 min-w-0 max-md:flex-1">
         <button
           onClick={onHome}
           title="回到主页"
           className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-fg/5 transition-colors"
         >
           <div className="w-2 h-2 rounded-full bg-blue pulse-dot" aria-hidden />
-          <span className="font-semibold tracking-tight text-fg text-[15px] ml-0.5">
+          <span className="font-semibold tracking-tight text-fg text-[15px] ml-0.5 max-md:hidden">
             Web Code
           </span>
         </button>
-        <span className="text-subtle">·</span>
-        <span className="font-mono text-[12px] text-subtle px-1.5">
+        <span className="text-subtle max-md:hidden">·</span>
+        <span className="font-mono text-[12px] text-subtle px-1.5 truncate max-md:px-0">
           {tildify(projectPath, home) || projectPath}
         </span>
         {sessionId && (
           <>
-            <span className="text-subtle">·</span>
-            <span className="font-mono text-[11px] text-subtle px-1.5">
+            <span className="text-subtle max-md:hidden">·</span>
+            <span className="font-mono text-[11px] text-subtle px-1.5 max-md:hidden">
               {sessionId.slice(0, 8)}
             </span>
           </>
         )}
       </div>
-      <div className="flex-1 flex justify-center min-w-0">
+      <div className="flex-1 flex justify-center min-w-0 max-md:hidden">
         {onPickProject && onPickSession && (
           <HeaderSearch
             home={home}

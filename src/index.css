@@ -43,6 +43,17 @@ body,
   width: 100%;
 }
 
+/* 手机浏览器的 100% 高度是「地址栏收起时」的高度，地址栏一展开内容就被顶掉一截，
+   底部输入框会被切走。dvh 跟着可视区实时变。放在 100% 之后当渐进增强：
+   不支持 dvh 的浏览器保留上面那条。 */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
 body {
   margin: 0;
   background: var(--color-canvas);
@@ -153,4 +164,15 @@ textarea {
   transform: translate(0.11em, 0.13em);
   pointer-events: none;
   user-select: none;
+}
+
+/* ── 窄屏：触摸可用性 ───────────────────────────────────────────────────────
+   两条都只在**没有 hover 的设备**上生效，桌面密度一点不动。 */
+@media (hover: none) {
+  /* 桌面上很多操作按钮是 opacity-0 + group-hover 才显形的。触屏没有 hover，
+     那些按钮不是「不好看」，是**根本不存在**——删除会话、删群、断开前台任务
+     全都点不到。 */
+  [class*="group-hover:opacity-100"] {
+    opacity: 1 !important;
+  }
 }

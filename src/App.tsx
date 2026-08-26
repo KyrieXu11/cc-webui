@@ -30,18 +30,21 @@ import { applySDKMessage, sessionMessagesToEvents } from "./lib/processor";
 import {
   loadSettings,
   saveSettings,
+  systemTheme,
   defaultModelForProvider,
   modelOptionsForProvider,
-  supportsXhighEffort,
+  clampEffort,
   type AgentProvider,
   type PermissionMode,
   type Settings,
+  type Theme,
 } from "./lib/settings";
 import { addRecent, getHome, readFile } from "./lib/fs";
 import { isImageFile, isTextFile, rawFileUrl } from "./lib/filepreview";
 import { getSessionMessages, type SessionSummary } from "./lib/sessions";
 import { sendPermission } from "./lib/permission";
 import { useAuth } from "./AuthGate";
+import { useIsNarrow } from "./lib/useIsNarrow";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -155,7 +158,13 @@ function historyEventsForActiveTurn(
 }
 
 function isVisibleProgress(ev: ChatEvent): boolean {
-  if (ev.type === "assistant" || ev.type === "thinking") {
+  // Encrypted thinking has no text, only a token counter — but it DOES render
+  // (as a timeline status row), so it counts as progress and must suppress the
+  // "nothing happened yet" spinner.
+  if (ev.type === "thinking") {
+    return ev.text.trim().length > 0 || (ev.tokens ?? 0) > 0;
+  }
+  if (ev.type === "assistant") {
     return ev.text.trim().length > 0;
   }
   return (
@@ -184,6 +193,11 @@ export default function App() {
   const [attachedStreaming, setAttachedStreaming] = useState(false);
   const [activeTurn, setActiveTurn] = useState<ActiveTurn | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [systemPref, setSystemPref] = useState<Theme>(systemTheme);
+  // 窄屏：两个侧栏从常驻列变成抽屉（方案 B）。
+  const narrow = useIsNarrow();
+  const [navOpen, setNavOpen] = useState(false);
+  const activeTheme: Theme = settings.theme ?? systemPref;
   const [projectCwd, setProjectCwd] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -262,9 +276,39 @@ export default function App() {
     saveSettings(settings);
   }, [settings]);
 
+  // No stored choice → follow the OS, and keep following it while it changes.
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme;
+    if (settings.theme) return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const sync = () => setSystemPref(mq.matches ? "light" : "dark");
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, [settings.theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = activeTheme;
+  }, [activeTheme]);
+
+  // 抽屉盖着整块内容，选完一个会话/项目/群还留在原地会让人以为没点中。
+  useEffect(() => {
+    setNavOpen(false);
+  }, [projectCwd, sessionId, currentGroupId]);
+
+  // 转成桌面宽度后抽屉不该还“开着”——它此时是常驻列，开关没有意义。
+  useEffect(() => {
+    if (!narrow) setNavOpen(false);
+  }, [narrow]);
+
+  // 抽屉盖住整屏，Esc 是除了点遮罩之外的第二条退路。
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   useEffect(() => {
     getHome().then(setHome).catch(() => {});
@@ -400,10 +444,11 @@ export default function App() {
   const answerPermission = async (
     permissionId: string,
     decision: PermissionDecision,
-    message?: string
+    message?: string,
+    answers?: Record<string, string>
   ) => {
     try {
-      await sendPermission(permissionId, decision, message);
+      await sendPermission(permissionId, decision, message, answers);
       setAllEvents((prev) =>
         prev.map((e) =>
           e.type === "permission" && e.permissionId === permissionId
@@ -745,13 +790,7 @@ export default function App() {
   }, []);
 
   const updateModel = (model: string) =>
-    setSettings((s) => {
-      const next = { ...s, model };
-      if (!supportsXhighEffort(model) && s.effort === "xhigh") {
-        next.effort = "high";
-      }
-      return next;
-    });
+    setSettings((s) => ({ ...s, model, effort: clampEffort(s.effort, model) }));
 
   const updateProvider = (agentProvider: AgentProvider) => {
     clearActiveTurnState();
@@ -763,17 +802,18 @@ export default function App() {
       const model = modelOptions.some((m) => m.id === s.model)
         ? s.model
         : defaultModelForProvider(agentProvider);
-      return {
-        ...s,
-        agentProvider,
-        model,
-        effort:
-          s.effort === "xhigh" && !supportsXhighEffort(model)
-            ? "high"
-            : s.effort,
-      };
+      return { ...s, agentProvider, model, effort: clampEffort(s.effort, model) };
     });
   };
+
+  // A provider choice lives in localStorage, so it outlives a role change (or
+  // an admin's browser being handed to a colleague). Codex is admin-only, so
+  // coerce it back instead of letting the composer fire requests the server
+  // will 403 — the picker itself is already hidden for non-admins.
+  useEffect(() => {
+    if (!isAdmin && settings.agentProvider === "codex") updateProvider("claude");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, settings.agentProvider]);
 
   const updateMode = (permissionMode: PermissionMode) =>
     setSettings((s) => ({ ...s, permissionMode }));
@@ -1033,21 +1073,32 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full bg-canvas">
+    <div className="flex h-full bg-canvas overflow-hidden">
+      {/* 桌面：rail(56) + 会话栏(260) 两根常驻列。
+          窄屏：同样两个组件原封不动，只是整体变成一个 316px 的左抽屉滑出来
+          —— 这是选方案 B 的理由，侧栏组件本身一行都不用改。 */}
+      <div
+        className={`flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[316px] max-md:bg-canvas max-md:transition-transform max-md:duration-200 ${
+          narrow && !navOpen
+            ? "max-md:-translate-x-full"
+            : "max-md:shadow-[0_0_60px_rgba(0,0,0,0.55)]"
+        }`}
+      >
       <Sidebar
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         onOpenProject={() => setDialogOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
-        theme={settings.theme}
+        theme={activeTheme}
         onToggleTheme={() =>
           setSettings((s) => ({
             ...s,
-            theme: s.theme === "dark" ? "light" : "dark",
+            theme: (s.theme ?? systemPref) === "dark" ? "light" : "dark",
+            themeChosen: true,
           }))
         }
       />
-      {sidebarOpen &&
+      {(sidebarOpen || narrow) &&
         (currentGroupId ? (
           <GroupSidebar
             home={home}
@@ -1071,6 +1122,20 @@ export default function App() {
             onOpenProject={() => setDialogOpen(true)}
           />
         ))}
+      </div>
+
+      {/* 遮罩：抽屉开着时点空白处关掉。只在窄屏存在。 */}
+      {narrow && (navOpen || (inProject && filesOpen)) && (
+        <div
+          data-drawer-scrim
+          className="fixed inset-0 z-30 bg-black/55 md:hidden"
+          onClick={() => {
+            setNavOpen(false);
+            setFilesOpen(false);
+          }}
+        />
+      )}
+
       <div className="flex flex-col flex-1 min-w-0">
         {adminOpen && isAdmin ? (
           <AdminView onClose={() => setAdminOpen(false)} />
@@ -1079,6 +1144,7 @@ export default function App() {
         ) : inProject ? (
           <>
             <Header
+              onOpenNav={() => setNavOpen(true)}
               sessionId={sessionId}
               projectPath={projectCwd}
               home={home}
@@ -1092,7 +1158,7 @@ export default function App() {
             />
             <main className="flex-1 relative overflow-hidden">
               <div ref={scrollRef} className="h-full overflow-y-auto">
-                <div className="max-w-[820px] mx-auto px-6 pb-4">
+                <div className="max-w-[820px] mx-auto px-6 max-md:px-3.5 pb-4">
                   {loadingSession ? (
                     <div className="flex items-center gap-2 text-subtle text-[12.5px] py-10 font-mono">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue pulse-dot" />
@@ -1117,6 +1183,7 @@ export default function App() {
                         isPending={shouldShowPending(allEvents, busy)}
                         retryInfo={retryInfo}
                         onPreviewImage={previewAttachedImage}
+                        effort={settings.effort}
                       />
                     </>
                   )}
@@ -1156,6 +1223,20 @@ export default function App() {
             </div>
           </>
         ) : (
+          <>
+          {/* 首页没有 Header，窄屏下得给一个够得着抽屉的入口 ——
+              rail 里装着「打开项目 / 管理 / 帮助 / 主题 / 退出」。 */}
+          <div className="md:hidden flex items-center h-12 px-1 border-b border-line shrink-0">
+            <button
+              aria-label="打开侧栏"
+              onClick={() => setNavOpen(true)}
+              className="w-11 h-11 flex items-center justify-center text-muted"
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
           <HomeView
             provider={settings.agentProvider}
             onProviderChange={updateProvider}
@@ -1167,14 +1248,17 @@ export default function App() {
             groupsRefreshKey={groupsRefreshKey}
             groupsEnabled={groupsFeature}
           />
+          </>
         )}
       </div>
       {inProject && filesOpen && (
-        <FileExplorer
-          cwd={projectCwd}
-          onInsertFile={insertFile}
-          onPreviewFile={previewFile}
-        />
+        <div className="flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:shadow-[0_0_60px_rgba(0,0,0,0.6)]">
+          <FileExplorer
+            cwd={projectCwd}
+            onInsertFile={insertFile}
+            onPreviewFile={previewFile}
+          />
+        </div>
       )}
       {preview && (
         <FilePreviewWindow

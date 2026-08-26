@@ -116,7 +116,15 @@ export type ChatEvent =
       images?: ImageAttachment[];
     }
   | { id: string; type: "assistant"; text: string }
-  | { id: string; type: "thinking"; text: string }
+  | {
+      id: string;
+      type: "thinking";
+      text: string;
+      // Claude 5 家族的 thinking 是加密的：`thinking_delta` 里 `thinking` 恒为
+      // 空串，只带 `estimated_tokens`（实测累加值 ≈ usage 里的 thinking_tokens）。
+      // 所以「有没有在思考」只能靠这个计数器，text 会一直是空的。
+      tokens?: number;
+    }
   | {
       id: string;
       type: "step";

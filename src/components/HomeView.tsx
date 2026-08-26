@@ -11,6 +11,8 @@ import {
   type AgentProvider,
 } from "../lib/settings";
 import { listGroups, deleteGroup } from "../lib/groups";
+import { useAuth } from "../AuthGate";
+import { useIsNarrow } from "../lib/useIsNarrow";
 import type { GroupIndexRow } from "../lib/types";
 
 interface Props {
@@ -124,9 +126,9 @@ export default function HomeView({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[820px] mx-auto px-10 py-20">
+      <div className="max-w-[820px] mx-auto px-10 py-20 max-md:px-5 max-md:pt-10 max-md:pb-8">
         <Wordmark />
-        <div className="flex items-center gap-2 text-[13px] text-muted mb-14 mt-1">
+        <div className="flex items-center gap-2 text-[13px] text-muted mb-14 max-md:mb-8 mt-1">
           <div className="w-1.5 h-1.5 rounded-full bg-green" />
           <span className="font-mono">{address}</span>
         </div>
@@ -289,13 +291,20 @@ function ProviderPicker({
   value: AgentProvider;
   onChange: (provider: AgentProvider) => void;
 }) {
+  const { isAdmin } = useAuth();
+  // Codex is admin-only (decision 14: `codex exec` has no approval channel, so
+  // every mode is unrestricted writes there). Hidden rather than disabled —
+  // same as the group-chat entry — and with nothing left to choose between,
+  // the picker itself goes away instead of showing a one-tab tablist.
+  const options = PROVIDER_OPTIONS.filter((p) => p.id !== "codex" || isAdmin);
+  if (options.length < 2) return null;
   return (
     <div
       role="tablist"
       aria-label="Agent provider"
       className="relative inline-flex items-stretch h-9 p-0.5 rounded-lg bg-canvas border border-line-strong shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
     >
-      {PROVIDER_OPTIONS.map((p) => {
+      {options.map((p) => {
         const active = p.id === value;
         const accent = PROVIDER_ACCENT[p.id];
         return (
@@ -431,10 +440,13 @@ function ProjectBlock({
 }
 
 function Wordmark() {
+  // 56/63px 在 390 宽的屏上要吃掉四成屏高，首屏就只剩一条项目列表。
+  const narrow = useIsNarrow();
+  const [a, b] = narrow ? [34, 38] : [56, 63];
   return (
     <div className="inline-flex flex-col items-start select-none gap-1" aria-label="Web Code">
-      <PixelRow text="WEB" size={56} />
-      <PixelRow text="CODE" size={63} />
+      <PixelRow text="WEB" size={a} />
+      <PixelRow text="CODE" size={b} />
     </div>
   );
 }

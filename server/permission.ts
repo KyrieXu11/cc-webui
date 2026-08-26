@@ -16,7 +16,13 @@ type PendingEntry = {
 };
 
 export type PermissionDecision =
-  | { behavior: "allow" }
+  // `answers` 只给 AskUserQuestion 用：那个工具的 input schema 里有一个
+  // `answers` 字段，注释写着「User answers collected by the permission
+  // component」—— 也就是说答案本来就该由权限组件填回去。实测（CLI 2.1.240）：
+  // 以「问题原文」为 key、选项 label 为 value 放进 updatedInput，工具结果就变成
+  // `Your questions have been answered: "..."="..."`；不填则是
+  // `The user did not answer the questions.`
+  | { behavior: "allow"; answers?: Record<string, string> }
   | { behavior: "allow_session" }
   | { behavior: "allow_tool_session" }
   | { behavior: "deny"; message: string };
@@ -96,6 +102,16 @@ export function resolvePermission(
   return true;
 }
 
+// 只接受 string → string，其余一律丢掉：这份东西会原样进 updatedInput 再交给 CLI。
+function parseAnswers(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string" && k) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 const permissionRoute = new Hono();
 
 permissionRoute.post("/:id", async (c) => {
@@ -116,9 +132,10 @@ permissionRoute.post("/:id", async (c) => {
       400
     );
   }
+  const answers = parseAnswers(body.answers);
   const decision: PermissionDecision =
     behavior === "allow"
-      ? { behavior: "allow" }
+      ? { behavior: "allow", ...(answers ? { answers } : {}) }
       : behavior === "allow_session"
         ? { behavior: "allow_session" }
         : behavior === "allow_tool_session"

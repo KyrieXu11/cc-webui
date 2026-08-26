@@ -17,7 +17,11 @@ export type Settings = {
   model: string;
   permissionMode: PermissionMode;
   effort: EffortLevel;
-  theme: Theme;
+  // Absent = follow the OS. Only written once the user actually flips the
+  // toggle, which is what `themeChosen` records — an old stored "dark" is
+  // indistinguishable from the old hardcoded default, so it is ignored.
+  theme?: Theme;
+  themeChosen?: boolean;
 };
 
 const KEY = "cc-webui:settings";
@@ -27,16 +31,31 @@ export const DEFAULT_SETTINGS: Settings = {
   cwd: "",
   agentProvider: "claude",
   model: "opus",
-  permissionMode: "acceptEdits",
-  effort: "medium",
-  theme: "dark",
+  // auto = 模型自己的行为分类器决定要不要问（决策 12 保留了它，禁掉的是 bypass）。
+  permissionMode: "auto",
+  // max 是 Claude 独有的顶档；切到 Codex 时 modelOptionsForProvider/EFFORT_OPTIONS
+  // 会把它过滤掉，落回 xhigh。
+  effort: "max",
 };
+
+export function systemTheme(): Theme {
+  return typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
+}
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } as Settings;
+    // Every earlier build persisted theme:"dark" on first render whether or not
+    // anyone asked for it, so a stored theme without themeChosen carries no
+    // intent — drop it and fall back to the OS.
+    if (!parsed.themeChosen) delete parsed.theme;
+    return parsed;
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -206,6 +225,20 @@ export function supportsXhighEffort(model: string): boolean {
   const canonical = canonicalizeClaudeModel(model);
   if (XHIGH_CLAUDE_MODELS.has(canonical)) return true;
   return isCodexModel(model);
+}
+
+// Clamp an effort to what this model actually offers, preferring the closest
+// tier below. Needed now that the DEFAULT is `max`: that tier is Claude-only,
+// so switching to Codex (or to Sonnet/Haiku, which lack xhigh too) would
+// otherwise carry an effort the target does not have.
+export function clampEffort(effort: EffortLevel, model: string): EffortLevel {
+  const available = availableEffortOptions(model).map((o) => o.id);
+  if (available.includes(effort)) return effort;
+  const order = EFFORT_OPTIONS.map((o) => o.id);
+  for (let i = order.indexOf(effort) - 1; i >= 0; i--) {
+    if (available.includes(order[i])) return order[i];
+  }
+  return available[0] ?? "medium";
 }
 
 export function availableEffortOptions(model: string) {

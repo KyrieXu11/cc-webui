@@ -19,11 +19,15 @@ import {
 import { MAX_DELAY_S, MIN_DELAY_S } from "./wakeup.ts";
 import {
   MAX_TIMEOUT_MS,
+  getBackgroundTaskById,
   killBackground,
   listBackgroundTasksForTool,
   readBackgroundOutput,
+  resolveTaskSessionId,
   runBashTool,
 } from "./bash-mcp.ts";
+import { getAllowedPaths, getUserById } from "./auth/users.ts";
+import { PathNotAllowedError, assertCanOpen } from "./auth/paths.ts";
 
 const route = new Hono();
 const MAX_LARK_FILE_BYTES = 30 * 1024 * 1024;
@@ -72,6 +76,8 @@ function createServerForToken(token: string): McpServer {
           isError: true,
         };
       }
+      const denied = await refusePath(token, ctx.cwd ?? process.cwd());
+      if (denied) return denied;
       return runBashTool(
         args,
         {
@@ -99,7 +105,12 @@ function createServerForToken(token: string): McpServer {
           .describe("The bashTaskId returned by run with run_in_background=true"),
       },
     },
-    async ({ bash_id }) => readBackgroundOutput(bash_id)
+    async ({ bash_id }) => {
+      if (foreignTask(token, bash_id)) {
+        return mcpError(`No background task with id "${bash_id}"`);
+      }
+      return readBackgroundOutput(bash_id);
+    }
   );
 
   server.registerTool(
@@ -113,7 +124,12 @@ function createServerForToken(token: string): McpServer {
           .describe("The bashTaskId returned by run with run_in_background=true"),
       },
     },
-    async ({ bash_id }) => killBackground(bash_id)
+    async ({ bash_id }) => {
+      if (foreignTask(token, bash_id)) {
+        return mcpError(`No background task with id "${bash_id}"`);
+      }
+      return killBackground(bash_id);
+    }
   );
 
   server.registerTool(
@@ -167,6 +183,8 @@ function createLarkServerForToken(token: string): McpServer {
     async ({ file_path, chat_id }) => {
       const ctx = getLarkContext();
       if (!ctx) return mcpError("Lark MCP context expired.");
+      const denied = await refusePath(token, file_path);
+      if (denied) return denied;
       try {
         const abs = path.resolve(file_path);
         const buf = await fs.readFile(abs);
@@ -207,6 +225,8 @@ function createLarkServerForToken(token: string): McpServer {
     async ({ file_path, chat_id }) => {
       const ctx = getLarkContext();
       if (!ctx) return mcpError("Lark MCP context expired.");
+      const denied = await refusePath(token, file_path);
+      if (denied) return denied;
       try {
         const abs = path.resolve(file_path);
         const buf = await fs.readFile(abs);
@@ -358,6 +378,48 @@ function mcpError(message: string) {
     content: [{ type: "text" as const, text: message }],
     isError: true,
   };
+}
+
+// These routes authenticate by bearer token alone — no login cookie ever
+// reaches them — so the account's folder guardrail has to be re-applied here,
+// against the identity the token carries. Fail closed: a token with no
+// resolvable user is refused rather than treated as unrestricted.
+//
+// This is a re-check, not the only check: the turn's cwd already passed the
+// route middleware when the turn started. It matters for the paths the MODEL
+// chooses (lark send_file), and for a whitelist narrowed mid-turn.
+async function refusePath(
+  token: string,
+  raw: string,
+): Promise<ReturnType<typeof mcpError> | null> {
+  const ctx = getMcpSessionContext(token);
+  const user = ctx?.ownerId ? getUserById(ctx.ownerId) : null;
+  if (!user) {
+    return mcpError(
+      "This turn is not bound to a cc-webui account, so path-guarded tools are refused.",
+    );
+  }
+  try {
+    await assertCanOpen(raw, getAllowedPaths(user.id));
+    return null;
+  } catch (err) {
+    if (err instanceof PathNotAllowedError) {
+      return mcpError(`${raw} is outside the folders ${user.username} may open.`);
+    }
+    throw err;
+  }
+}
+
+// The bash task registry is process-global, and task ids are handed to the
+// model in tool output. Scope output/kill to the turn that spawned the task so
+// an id that leaks into one conversation is not a handle into another. The
+// refusal reuses the registry's own not-found wording: whether an id exists is
+// itself information.
+function foreignTask(token: string, bashId: string): boolean {
+  const task = getBackgroundTaskById(bashId);
+  if (!task) return false; // let the registry answer "no such task"
+  const mine = resolveTaskSessionId(getMcpSessionContext(token)?.sessionId);
+  return resolveTaskSessionId(task.sessionId) !== mine;
 }
 
 // HTTP twin of server/schedule-mcp.ts. Same tool names, descriptions and

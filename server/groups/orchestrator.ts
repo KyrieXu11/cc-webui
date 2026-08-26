@@ -22,6 +22,7 @@ import {
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
 import type { LarkMcpContext } from "../mcp-context.ts";
 import { groupsEnabled } from "../features.ts";
+import { actorForResource } from "../auth/actor.ts";
 
 // ============================================================
 // Group turn state + in-flight registry
@@ -283,6 +284,7 @@ async function runPipeline(args: {
       turnId: turn.turnId,
       agentId,
       signal: turn.abort.signal,
+      ownerId: actorForResource(turn.gid),
       resumeSessionId: resume,
       codexMcp,
       emitPermission: (payload) => {

@@ -416,6 +416,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       registerMcpSessionContext({
         token: mcpToken,
         sessionId: currentSessionId ?? "",
+        ownerId: opts.ownerId,
         cwd: opts.cwd,
         onForegroundEvent: fanout,
         wakeupSlot,
@@ -476,11 +477,15 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
             ) {
               return { behavior: "allow", updatedInput: input };
             }
-            if (allowance.has(toolName)) {
+            // AskUserQuestion 永远不走「已放行」短路：放行它等于替用户回答，
+            // 而没有答案的放行只会让 CLI 回 "The user did not answer the
+            // questions."——一次误点会把之后所有提问都变成哑火。
+            const isAsk = toolName === "AskUserQuestion";
+            if (!isAsk && allowance.has(toolName)) {
               return { behavior: "allow", updatedInput: input };
             }
             const inputKey = permissionInputKey(toolName, input);
-            if (inputAllowance.has(inputKey)) {
+            if (!isAsk && inputAllowance.has(inputKey)) {
               return { behavior: "allow", updatedInput: input };
             }
             const permissionSuggestions = sessionPermissionSuggestions(
@@ -532,7 +537,12 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
               })
             );
             if (decision.behavior === "allow") {
-              return { behavior: "allow", updatedInput: input };
+              return {
+                behavior: "allow",
+                updatedInput: decision.answers
+                  ? { ...input, answers: decision.answers }
+                  : input,
+              };
             }
             if (decision.behavior === "allow_session") {
               inputAllowance.add(inputKey);

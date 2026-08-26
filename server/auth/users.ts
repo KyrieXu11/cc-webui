@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { getDb, transact } from "../db.ts";
+import { assertUsableUsername, isUsableUsername } from "./workspaces.ts";
 import { hashPassword, verifyPassword } from "./passwords.ts";
 import { claimUnowned } from "./ownership.ts";
 
@@ -70,6 +71,11 @@ export function createUser(opts: {
   role: Role;
   allowedPaths?: string[];
 }): User {
+  // A username becomes a directory name (server/auth/workspaces.ts), and an
+  // admin can be demoted later — so even an account that gets no workspace
+  // today needs a name that can become one. Enforced here rather than in the
+  // route so the env seed goes through the same gate.
+  assertUsableUsername(opts.username);
   const { hash, salt } = hashPassword(opts.password);
   const id = randomUUID();
   const now = Date.now();
@@ -159,8 +165,20 @@ export function seedAdminFromEnv(raw = process.env.CC_WEBUI_ADMIN): User | null 
   const password = spec.slice(sep + 1);
   if (getUserByUsername(username)) return null;
 
+  // Same shape of complaint as the malformed-spec case above: log and skip, do
+  // not throw. This runs at boot under launchd KeepAlive, so an exception here
+  // is not "fail loud" — it is a restart loop every 10 seconds.
+  if (!isUsableUsername(username)) {
+    console.error(
+      `[cc-webui] auth: CC_WEBUI_ADMIN username ${JSON.stringify(username)} is not usable ` +
+        "(lowercase letters, digits, - and _ only) — ignoring",
+    );
+    return null;
+  }
+
   // The admin may open anything; a plain user starts with nothing until an
-  // admin grants patterns (decision: default-closed).
+  // admin grants patterns (decision: default-closed), beyond the workspace they
+  // are given at creation (decision 24).
   const user = createUser({
     username,
     password,
