@@ -1,0 +1,21 @@
+CONTEXT.md
+  s_608e4f05a64aff::t_2b90eb7ed46bdd 1-63
+docs/file-manager.md
+  s_608e4f05a64aff::t_c225bb397ec863 1-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "9a24e1f2a58e5fbc5a5e3c247b331376aa24635a",
+  "prompts": {},
+  "sessions": {
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
