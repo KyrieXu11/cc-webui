@@ -105,3 +105,46 @@ export async function saveFile(
           : `保存失败：${res.status}`,
   };
 }
+
+export type DeleteResult = {
+  deleted: string[];
+  failed: { path: string; error: string }[];
+};
+
+// 真删，没有回收站。调用方必须先确认过（决策 13）。
+export async function deleteFiles(
+  paths: string[],
+  sessionId: string | null
+): Promise<DeleteResult> {
+  const res = await fetch("/api/files/delete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ paths, sessionId: sessionId ?? "" }),
+  });
+  if (!res.ok) {
+    const b = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(b.error ?? `删除失败：${res.status}`);
+  }
+  return (await res.json()) as DeleteResult;
+}
+
+// 上传到「本文件夹」。目标目录走 query —— 白名单检查读的是那儿（见
+// server/files-routes.ts 的 ⚠️）。
+export async function uploadToDir(
+  dir: string,
+  files: FileList | File[]
+): Promise<{ files: { path: string; name: string; size: number }[] }> {
+  const form = new FormData();
+  for (const f of Array.from(files)) form.append("files", f);
+  const res = await fetch(
+    `/api/files/upload?dir=${encodeURIComponent(dir)}`,
+    { method: "POST", body: form }
+  );
+  if (!res.ok) {
+    const b = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(b.error ?? `上传失败：${res.status}`);
+  }
+  return (await res.json()) as {
+    files: { path: string; name: string; size: number }[];
+  };
+}

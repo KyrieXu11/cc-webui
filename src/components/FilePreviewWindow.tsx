@@ -21,7 +21,6 @@ interface Props {
   loading: boolean;
   error: string | null;
   onClose: () => void;
-  onInsert?: () => void;
 }
 
 const MIN_WIDTH = 420;
@@ -55,7 +54,6 @@ export default function FilePreviewWindow({
   loading,
   error,
   onClose,
-  onInsert,
 }: Props) {
   const initialRef = useRef(getInitial());
   const [position, setPosition] = useState<Position>(initialRef.current.position);
@@ -227,16 +225,6 @@ export default function FilePreviewWindow({
             title={truncated ? "复制已加载的内容（文件被截断）" : "复制全文"}
           >
             {copied ? "已复制" : "复制"}
-          </button>
-        )}
-        {onInsert && (
-          <button
-            data-no-drag
-            onClick={onInsert}
-            className="shrink-0 font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
-            title="插入到对话"
-          >
-            @ 插入
           </button>
         )}
         <button

@@ -127,6 +127,15 @@ const put = async (user: unknown, body: unknown) => {
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 };
 
+const exists = async (p: string) => {
+  try {
+    await fsp.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const st0 = await fsp.stat(okFile);
 
 // 版本对得上 → 落盘。
@@ -179,6 +188,112 @@ const leftovers = (await fsp.readdir(mine)).filter((n) =>
   n.includes("cc-webui-tmp")
 );
 assert.deepEqual(leftovers, [], "临时文件必须已经 rename 掉");
+
+// ── POST /delete：真删 + 留痕 + 白名单逐个查 ────────────────────────────────
+
+const { listDeletions } = await import("./session-files.ts");
+
+const post = async (user: unknown, url: string, body: unknown) => {
+  const res = await appFor(user).request(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+};
+
+const doomed = path.join(mine, "doomed.md");
+await fsp.writeFile(doomed, "删我");
+const del = await post(alice, "/api/files/delete", {
+  paths: [doomed, outsideFile],
+  sessionId: ALICE_SESSION,
+});
+assert.equal(del.status, 200);
+assert.deepEqual(del.body.deleted, [doomed], "白名单内的删掉了");
+assert.equal(
+  (del.body.failed as { path: string }[])[0]?.path,
+  outsideFile,
+  "白名单外的被拒 —— 这条路由的白名单是处理器自己查的，中间件管不了数组"
+);
+assert.equal(
+  await fsp.readFile(outsideFile, "utf8"),
+  "outside the whitelist",
+  "被拒的那个文件必须完好无损"
+);
+assert.equal(await exists(doomed), false, "真删，不是移到别处");
+
+// 留痕：这是「不做回收站」的前提。
+const trail = listDeletions();
+assert.equal(trail.length, 1);
+assert.equal(trail[0].username, "alice");
+// 留痕记的是**实际 unlink 的那个路径**（规范化过的），不是请求里的字符串 ——
+// macOS 上 /var/… 会被 realpath 成 /private/var/…。查事故时要的正是前者。
+assert.equal(trail[0].path, path.join(await fsp.realpath(mine), "doomed.md"));
+assert.equal(trail[0].sessionId, ALICE_SESSION);
+
+// registry 里的行跟着走，不然列表还会列着它。
+assert.equal(
+  (await get(alice, ALICE_SESSION)).paths.includes(doomed),
+  false,
+  "删掉的文件立刻从列表消失，不等下一个 turn 的 prune"
+);
+
+// 目录不许删（v1 不做，且 recursive 删目录是这个仓库出过事故的形状）。
+const dirTarget = path.join(mine, "adir");
+await fsp.mkdir(dirTarget, { recursive: true });
+const delDir = await post(alice, "/api/files/delete", { paths: [dirTarget] });
+assert.deepEqual(delDir.body.deleted, []);
+assert.equal(await exists(dirTarget), true, "目录还在");
+
+// 空 paths → 400，不是「什么都没删算成功」。
+assert.equal(
+  (await post(alice, "/api/files/delete", { paths: [] })).status,
+  400
+);
+
+// ── POST /upload：不覆盖同名 ─────────────────────────────────────────────────
+
+const upload = async (user: unknown, dir: string, name: string, body: string) => {
+  const form = new FormData();
+  form.append("files", new File([body], name, { type: "text/plain" }));
+  const res = await appFor(user).request(
+    `/api/files/upload?dir=${encodeURIComponent(dir)}`,
+    { method: "POST", body: form }
+  );
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+};
+
+const up1 = await upload(alice, mine, "模板.docx", "v1");
+assert.equal(up1.status, 200);
+assert.equal(await fsp.readFile(path.join(mine, "模板.docx"), "utf8"), "v1");
+
+// 同名再传一次 → 加序号，**不许覆盖**（这块地没有版本控制，顶掉 agent 的产出
+// 是不可恢复的）。
+const up2 = await upload(alice, mine, "模板.docx", "v2");
+assert.equal(up2.status, 200);
+assert.equal(
+  await fsp.readFile(path.join(mine, "模板.docx"), "utf8"),
+  "v1",
+  "原文件没被顶掉"
+);
+assert.equal(await fsp.readFile(path.join(mine, "模板-1.docx"), "utf8"), "v2");
+
+// 文件名里的路径分隔符是异常输入：单位是文件名，不是路径。
+const evil = await upload(alice, mine, "../../escaped.txt", "x");
+assert.equal(evil.status, 200);
+assert.equal(
+  await exists(path.join(tmp, "..", "escaped.txt")),
+  false,
+  "不许逃出目标目录"
+);
+// "../../escaped.txt" 的三个分隔符各变一个下划线 → ".._.._escaped.txt"
+assert.equal(await exists(path.join(mine, ".._.._escaped.txt")), true);
+
+// 不存在的目录 → 404。
+assert.equal(
+  (await upload(alice, path.join(mine, "nodir"), "a.txt", "x")).status,
+  404
+);
 
 closeDb();
 await fsp.rm(tmp, { recursive: true, force: true });

@@ -82,7 +82,15 @@ try {
     "no group route may be mounted with the flag off",
   );
 
-  // Nothing under /api may be public except the auth entry points and MCP.
+  // Nothing under /api may be public except the auth entry points, MCP, and the
+  // two ONLYOFFICE container-side endpoints.
+  //
+  // The office pair is public for the same reason MCP is: the caller is not a
+  // browser and carries no cookie. A DocumentServer container fetches the file
+  // and posts the edit back, authenticating with a signed ticket in the query
+  // string (server/office.ts) — plus, on the callback, a JWT inside the body.
+  // Both legs run over host.docker.internal to the loopback and never traverse
+  // nginx, so the reverse proxy should 404 them exactly like /api/mcp/*.
   const publicApi = realRoutes.filter(
     (r) => r.path.startsWith("/api/") && policyFor(r.method, r.path)?.auth === "public",
   );
@@ -95,6 +103,8 @@ try {
       "/api/mcp/bash",
       "/api/mcp/lark",
       "/api/mcp/schedule",
+      "/api/office/callback",
+      "/api/office/download",
     ],
     "the public surface must stay exactly this",
   );

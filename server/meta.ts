@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { groupsEnabled } from "./features.ts";
+import { officeConfigured } from "./office.ts";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -128,7 +129,8 @@ metaRoute.get("/", async (c) => {
   // Feature flags are read fresh (not cached) — they're env lookups, and the
   // frontend uses `features.groups` to decide whether the group-chat surface
   // exists at all.
-  const features = { groups: groupsEnabled() };
+  // office=false 时前端把 Office 文件降级成只读/下载，而不是给一个点了没反应的按钮。
+  const features = { groups: groupsEnabled(), office: officeConfigured() };
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return c.json({ ...cached.scan, features, cached: true });
   }

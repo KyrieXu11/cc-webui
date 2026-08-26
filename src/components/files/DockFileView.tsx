@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Markdown from "../Markdown";
 import TextEditor from "./TextEditor";
+import OfficeEditor from "./OfficeEditor";
 import { isImageFile, isTextFile, rawFileUrl } from "../../lib/filepreview";
 import { readFileVersioned, saveFile } from "../../lib/files";
 
@@ -15,9 +16,13 @@ import { readFileVersioned, saveFile } from "../../lib/files";
 
 type Version = { mtimeMs: number; size: number };
 
+const OFFICE_RE = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
+
 interface Props {
   path: string;
   name: string;
+  /** 服务端是否配了 ONLYOFFICE（/api/meta 的 features.office）。 */
+  officeEnabled?: boolean;
   /** 由父级传入，用于「重新打开」后重建编辑器（换 key）。 */
   reloadToken: number;
   onReload: () => void;
@@ -26,6 +31,7 @@ interface Props {
 export default function DockFileView({
   path,
   name,
+  officeEnabled,
   reloadToken,
   onReload,
 }: Props) {
@@ -96,10 +102,34 @@ export default function DockFileView({
     );
   }
 
+  // Office 文件：容器可用就上 ONLYOFFICE，否则降级成浏览器打开/下载（决策 9）。
+  if (OFFICE_RE.test(name)) {
+    if (officeEnabled) return <OfficeEditor path={path} name={name} />;
+    return (
+      <div className="p-4 space-y-3">
+        <div className="text-[12.5px] text-muted leading-relaxed">
+          服务端没有开启在线编辑（缺 ONLYOFFICE 配置，或那个容器不在跑）。
+        </div>
+        <div className="text-[12px] text-subtle leading-relaxed">
+          Edge 会用它自带的 Office 查看器直接渲染，其它浏览器是下载。也可以直接
+          让 agent 改这份文件。
+        </div>
+        <a
+          href={rawFileUrl(path)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-block font-mono text-[11.5px] text-blue underline underline-offset-2"
+        >
+          用浏览器打开 / 下载 {name}
+        </a>
+      </div>
+    );
+  }
+
   if (!editable) {
     return (
       <div className="p-4 space-y-3 text-[12.5px] text-muted">
-        <div>这个格式还不能在线看（阶段 4 会接 Office 预览与编辑）。</div>
+        <div>这个格式没有内置查看器。</div>
         <a
           href={rawFileUrl(path)}
           target="_blank"
