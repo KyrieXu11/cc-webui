@@ -159,6 +159,11 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "GET /api/fs/raw": { auth: "user", paths: [{ from: "query", key: "path" }] },
   "GET /api/fs/tree": { auth: "user", paths: [{ from: "query", key: "path" }] },
   "GET /api/fs/scan": { auth: "user", handlerScoped: true },
+
+  // ── 取件台（本对话文件）─────────────────────────────────────────────────────
+  // handlerScoped：处理器自己按会话归属 + 路径白名单双重收窄（files-routes.ts）。
+  // 不用 paths 声明——要查的不是请求里的某个路径，而是 registry 里的每一行。
+  "GET /api/files": { auth: "user", handlerScoped: true },
   "GET /api/fs/recents": { auth: "user", handlerScoped: true },
   "POST /api/fs/recents": { auth: "user", paths: [{ from: "body", key: "path" }] },
   "DELETE /api/fs/recents": { auth: "user", paths: [{ from: "body", key: "path", optional: true }] },

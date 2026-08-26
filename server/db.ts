@@ -163,6 +163,29 @@ const MIGRATIONS: string[] = [
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
   );
   `,
+
+  // 3 — 「本对话文件」registry（docs/file-manager.md）。一条会话的 turn 亲手
+  // 创建或改动过的、位于该会话 cwd 之下的文件。
+  //
+  // 为什么要有它：agent 主要用 mcp__bash__run 写盘，只认 Write/Edit 报告过的
+  // 路径会漏掉主路径。所以每个 turn 收尾扫一遍 cwd，mtime >= turnStart 即算
+  // 这个 turn 碰过。
+  //
+  // session_id 不加外键：它是 Claude CLI 发的 session id，不是本库的实体，而且
+  // 首个 turn 会被换掉一次（见 relabelSessionFiles）。
+  `
+  CREATE TABLE session_files (
+    session_id      TEXT    NOT NULL,
+    path            TEXT    NOT NULL,
+    first_seen_ms   INTEGER NOT NULL,
+    last_touched_ms INTEGER NOT NULL,
+    size            INTEGER NOT NULL DEFAULT 0,
+    mtime_ms        INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, path)
+  );
+  CREATE INDEX idx_session_files_recent
+    ON session_files(session_id, last_touched_ms DESC);
+  `,
 ];
 
 let handle: Database | null = null;
