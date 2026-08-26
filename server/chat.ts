@@ -10,6 +10,12 @@ import { currentUser } from "./auth/middleware.ts";
 import { visibilityFor } from "./auth/scope.ts";
 import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 import { relabelTasksSessionId } from "./bash-mcp.ts";
+import {
+  pruneMissing,
+  recordSessionFiles,
+  relabelSessionFiles,
+  scanTouched,
+} from "./session-files.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl } from "./codex-mcp-config.ts";
@@ -352,6 +358,39 @@ interface TurnOptions {
   ownerId?: string;
 }
 
+// 「本对话文件」的收尾登记。t0（turn 开始那一刻）就是 mtime 的门槛。
+//
+// 三条都是刻意的：① 整段包在 try 里——取件台少几行不该让一个已经成功的 turn
+// 变成红色错误；② cwd 太大时**整体跳过**而不是扫一半，并把降级打到日志里
+// （静默截断会让人以为"agent 没写文件"）；③ 只在真的扫过时 prune，否则会把
+// 没扫到的目录里的行全清掉。
+async function recordTouchedFiles(
+  reqId: string,
+  sessionId: string | undefined,
+  cwd: string | undefined,
+  sinceMs: number
+): Promise<void> {
+  if (!sessionId || !cwd) return;
+  try {
+    const outcome = await scanTouched(cwd, sinceMs);
+    if (outcome.kind === "too-big") {
+      console.log(
+        `[chat ${reqId}] session-files: cwd 超过上限（已看到 ${outcome.seen} 个文件），` +
+          `本轮跳过扫描，文件列表不更新`
+      );
+      return;
+    }
+    recordSessionFiles(sessionId, outcome.touched);
+    const pruned = await pruneMissing(sessionId);
+    console.log(
+      `[chat ${reqId}] session-files: +${outcome.touched.length} -${pruned}` +
+        ` (扫了 ${outcome.seen} 个文件)`
+    );
+  } catch (err) {
+    console.error(`[chat ${reqId}] session-files 登记失败:`, err);
+  }
+}
+
 function runChatTurn(opts: TurnOptions): InFlightChat {
   const reqId = randomUUID().slice(0, 8);
   const t0 = Date.now();
@@ -624,6 +663,9 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           const previousId = currentSessionId;
           relabelScope(previousId, emittedId, allowance, inputAllowance);
           relabelTasksSessionId(previousId, emittedId);
+          // 「本对话文件」registry 必须跟着改名，否则首个 turn 的文件永远挂在
+          // 这个即将作废的 id 下面（docs/file-manager.md）。
+          relabelSessionFiles(previousId ?? "", emittedId);
           if (previousId && activeChats.get(previousId) === entry) {
             activeChats.delete(previousId);
           }
@@ -664,6 +706,11 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         throw new Error(ended.error ?? `run ${ended.status}`);
       }
       entry.status = "done";
+
+      // 「本对话文件」：turn 收尾扫一遍 cwd，mtime >= turnStartMs 的算这个 turn
+      // 碰过的。放在 status=done 之后、fanout("done") 之前，前端收到 done 就能
+      // 直接拉新列表。整个过程不许影响 turn 的成败——扫描失败就是列表少几行。
+      await recordTouchedFiles(reqId, entry.sessionId, opts.cwd, t0);
 
       // Surface pending wakeup BEFORE the terminal `done` event so the UI can
       // pin a countdown badge as soon as the turn ends. We still defer the

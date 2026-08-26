@@ -7,6 +7,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { chat } from "./chat.ts";
 import { codexChat } from "./codex-chat.ts";
 import { fsRoute } from "./fs.ts";
+import { filesRoute } from "./files-routes.ts";
 import { sessionsRoute } from "./sessions.ts";
 import { uploadRoute } from "./upload.ts";
 import { metaRoute } from "./meta.ts";
@@ -38,6 +39,7 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
     app.route("/api/groups", groups);
   }
   app.route("/api/fs", fsRoute);
+  app.route("/api/files", filesRoute);
   app.route("/api/sessions", sessionsRoute);
   app.route("/api/upload", uploadRoute);
   app.route("/api/permission", permissionRoute);

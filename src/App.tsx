@@ -1116,6 +1116,7 @@ export default function App() {
             refreshKey={sessionsRefreshKey}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
+            onPreviewFile={previewFile}
           />
         ) : (
           <EmptyProjectSidebar
