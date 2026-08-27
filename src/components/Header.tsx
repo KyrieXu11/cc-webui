@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { tildify } from "../lib/fs";
 import HeaderSearch from "./HeaderSearch";
 import type { SessionSummary } from "../lib/sessions";
@@ -37,6 +38,24 @@ export default function Header({
   onPickSession,
 }: Props) {
   const accent = PROVIDER_ACCENT[provider];
+
+  // 搜索框：**地方不够就整块不渲染**，不靠 CSS 压缩。
+  // 它的 `pl-8 pr-3` + 边框本身就是 46px，`width:0` / `min-w-0` 都压不下去（padding
+  // 是 border-box 的下限），于是会溢出那个已经缩到 0 宽的 flex 容器，画在右边
+  // 「via Claude」徽标上面 —— 右侧格拖宽时必现（实测 search 985→1031，chip 1001→1093）。
+  // 量的是容器（`flex-1 min-w-0`，宽度＝剩余空间，与是否渲染子元素无关），所以不会自激。
+  const searchBox = useRef<HTMLDivElement>(null);
+  const [searchRoom, setSearchRoom] = useState(true);
+  useEffect(() => {
+    const el = searchBox.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) =>
+      setSearchRoom(e.contentRect.width >= 170)
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <header className="flex items-center gap-4 max-md:gap-2 h-14 px-5 max-md:pl-1 max-md:pr-2 border-b border-line shrink-0">
       {onOpenNav && (
@@ -50,11 +69,14 @@ export default function Header({
           </svg>
         </button>
       )}
-      <div className="flex items-center gap-2 shrink-0 min-w-0 max-md:flex-1">
+      {/* ⚠️ **不能 shrink-0**：cwd 是一长串绝对路径，不让它收缩的话整条顶栏会被顶得
+          比主栏还宽，直接画到右侧那格上面（真机表现：搜索框浮在「本对话」标签上、
+          「新对话」按钮整个不见了）。`min-w-0` 是为了让下面那行 truncate 真的生效。 */}
+      <div className="flex items-center gap-2 min-w-0 max-md:flex-1">
         <button
           onClick={onHome}
           title="回到主页"
-          className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-fg/5 transition-colors"
+          className="flex items-center gap-2 shrink-0 whitespace-nowrap rounded px-1 py-0.5 hover:bg-fg/5 transition-colors"
         >
           <div className="w-2 h-2 rounded-full bg-blue pulse-dot" aria-hidden />
           <span className="font-semibold tracking-tight text-fg text-[15px] ml-0.5 max-md:hidden">
@@ -68,14 +90,20 @@ export default function Header({
         {sessionId && (
           <>
             <span className="text-subtle max-md:hidden">·</span>
-            <span className="font-mono text-[11px] text-subtle px-1.5 max-md:hidden">
+            <span className="font-mono text-[11px] text-subtle px-1.5 shrink-0 max-md:hidden">
               {sessionId.slice(0, 8)}
             </span>
           </>
         )}
       </div>
-      <div className="flex-1 flex justify-center min-w-0 max-md:hidden">
-        {onPickProject && onPickSession && (
+      {/* ⚠️ 不能用 flex-1：那是 basis:0、只吃「剩余」空间，而左边那串 cwd 绝对路径
+          通常把整行吃光 —— 右侧格一开，搜索框就整块消失。basis:420 且可收缩：它先
+          要到 420，逼着左边那组按 truncate 让位，两边都还在。 */}
+      <div
+        ref={searchBox}
+        className="flex-[0_1_420px] flex justify-center min-w-0 max-md:hidden"
+      >
+        {searchRoom && onPickProject && onPickSession && (
           <HeaderSearch
             home={home}
             onPickProject={onPickProject}

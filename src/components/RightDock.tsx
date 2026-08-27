@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import DockFileView from "./files/DockFileView";
 import FilesPanel from "./files/FilesPanel";
 import FileExplorer from "./FileExplorer";
-import Splitter from "./Splitter";
+import Splitter, { paneNarrow } from "./Splitter";
 import { onDockOpen, type DockFile } from "../lib/dock-bridge";
 
 // 右侧那一格（项目 / 文件 / 打开的文档），照律枢的 RightDock。
@@ -24,6 +24,9 @@ type Tab =
   | { kind: "doc"; path: string; name: string };
 
 const keyOf = (t: Tab) => (t.kind === "doc" ? `doc:${t.path}` : t.kind);
+
+// 宽档默认比例：装得下编辑器。窄档不写在这儿——直接用 paneNarrow，和左侧栏同一组数。
+const DOCK_WIDE_RATIO = 0.52;
 
 interface Props {
   /** 面板是否展开（右上角那颗按钮）。收起时**不卸载**，只是 hidden。 */
@@ -58,7 +61,6 @@ export default function RightDock({
 }: Props) {
   const [docs, setDocs] = useState<DockFile[]>([]);
   const [active, setActive] = useState<string>("files");
-  const [ratio, setRatio] = useState(0.52);
   // 「重新打开」用的令牌：按路径记一个计数，变化即让那份 DockFileView 重建。
   const [reloadTokens, setReloadTokens] = useState<Record<string, number>>({});
 
@@ -98,26 +100,41 @@ export default function RightDock({
   // 卸载会销毁编辑器）。
   if (!open && docs.length === 0) return null;
 
-  const width = narrow ? "100%" : `${Math.round(ratio * 100)}%`;
+  // **按内容分两档宽度，两档各记各的**（照律枢，它为此栽过一次）：列表档窄、编辑器档宽。
+  // 曾经的做法是一个「只放不收」的棘轮——打开过一次文档就把 52% 记死，此后关掉所有
+  // 文档、那一格只剩一张文件列表也还占半屏（律枢真机反馈连说两次「太宽」）。
+  // 不用在这里自己管：storageKey 一换，Splitter 的 effect 就去读那一档存的值。
+  const wideMode = active.startsWith("doc:");
 
   return (
     <>
-      {open && !narrow && <Splitter ratio={ratio} onRatio={setRatio} />}
+      {open && !narrow && (
+        <Splitter
+          cssVar="--dockw"
+          edge="right"
+          min={paneNarrow.min}
+          maxRatio={0.8}
+          storageKey={
+            wideMode ? "ccwebui.dock_w.wide" : "ccwebui.dock_w.narrow"
+          }
+          defaultRatio={wideMode ? DOCK_WIDE_RATIO : paneNarrow.ratio}
+          title="拖动调整右侧那格的宽度"
+        />
+      )}
       <div
         className={
           !open
             ? "hidden"
             : narrow
               ? "fixed inset-0 z-40 bg-canvas flex flex-col"
-              : "shrink-0 border-l border-line bg-canvas flex flex-col min-w-0"
+              : "dockcol border-l border-line bg-canvas"
         }
-        style={narrow || !open ? undefined : { width }}
       >
         <div className="flex items-stretch gap-0.5 px-2 pt-2 border-b border-line overflow-x-auto shrink-0">
           {tabs.map((t) => {
             const k = keyOf(t);
             const label =
-              t.kind === "tree" ? "项目" : t.kind === "files" ? "文件" : t.name;
+              t.kind === "tree" ? "项目" : t.kind === "files" ? "本对话" : t.name;
             return (
               <div
                 key={k}
