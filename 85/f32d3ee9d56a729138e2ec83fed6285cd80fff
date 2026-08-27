@@ -1,0 +1,35 @@
+src/index.css
+  s_608e4f05a64aff::t_9c693816b5333f 227,229,235-242,244
+  s_608e4f05a64aff::t_140b27e320a1de 243
+src/components/Splitter.tsx
+  s_608e4f05a64aff::t_aa66345e1a279c 1,25-27,29,38,40-45,64,71-82,93-94,122,129-131,145-146,152
+  s_608e4f05a64aff::t_e6b9d1b286c3eb 50-56,68,86-87,143
+  s_608e4f05a64aff::t_ea99c42c3c1ab6 88,96-116
+src/components/FileExplorer.tsx
+  s_608e4f05a64aff::t_9dbef6f9963585 22-27,41,43-44,48,51-52,72,82,85-96,100,123-132,134,136-140,202,205-215,218,227,229,259-275
+  s_608e4f05a64aff::t_7865705e0b9d8c 380,401,410-414,416-425,433
+src/components/RightDock.tsx
+  s_608e4f05a64aff::t_9e62a4d8797e5d 7,11,13-16,18-21,30,58,68,78,88-90,92,101-103,112,116-147,149-165,167-173,189-191,193-214,216
+  s_608e4f05a64aff::t_6620cdad794250 24-27,148
+src/components/Header.tsx
+  s_608e4f05a64aff::t_6620cdad794250 106,109-113
+  s_608e4f05a64aff::t_0f383f1992726d 59-71,73-76,137-139,157-159,173
+docs/file-manager.md
+  s_608e4f05a64aff::t_c0ef103cb485f3 20,23-25,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "85f32d3ee9d56a729138e2ec83fed6285cd80fff",
+  "prompts": {},
+  "sessions": {
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
