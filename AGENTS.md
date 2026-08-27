@@ -307,8 +307,11 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   分端口不是洁癖：vite dev 会拒绝陌生 Host，而且带源码映射、HMR、`/@fs/` 任意读文件。
 - 改完代码要 `npm run build` + `launchctl kickstart -k gui/501/com.xuqiang.cc-webui`——
   服务里**不**跑 build（KeepAlive 会让每次重启都重构一遍）。
-- 生产实例的 env 是 `~/.cc-webui/prod.env`（`CC_WEBUI_DOTENV` 指过去），**故意不含飞书凭据**；
-  仓库里的 `.env` 一被读到，两个真实 bot 就上线。
+- **生产实例现在读的是仓库里的 `.env`**（plist 的 `CC_WEBUI_DOTENV` 指过去），也就是说
+  **它一起来，两个真实飞书 bot 就上线**。`~/.cc-webui/prod.env` 是那份**不含凭据**的备选，
+  现在只剩注释——想让生产不带飞书，把 plist 指回它。
+  ⚠️ 同一份飞书凭据只能被一个进程持有：本地再 `npm start` / `npm run dev` 时**必须**把
+  `CC_WEBUI_DOTENV` 指到一个不含凭据的文件（如 `prod.env`），否则同一条飞书消息会被回两遍。
 - nginx 侧三条不是可选项：`/api/mcp/*` 返回 404、`/api/auth/login` 限流、
   `client_max_body_size 64m`（nginx 默认 1m，而应用层有意不做上限）。
 - ⚠️ **launchd + macOS TCC**：从 launchd 起的进程读 `~/Documents` / `~/Desktop` /

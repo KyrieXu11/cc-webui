@@ -121,8 +121,8 @@ export default function Header({
           <span>新对话</span>
         </button>
         <button
-          aria-label="切换文件侧栏"
-          title="切换文件侧栏"
+          aria-label="切换文件面板"
+          title="文件面板（项目 / 本对话文件）"
           onClick={onToggleFiles}
           className={`p-2 rounded-md hover:bg-fg/5 transition-colors ${
             filesOpen ? "text-fg bg-fg/[0.04]" : "text-muted hover:text-fg"

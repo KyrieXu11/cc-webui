@@ -7,6 +7,7 @@ import {
   uploadToDir,
   type ConversationFile,
 } from "../../lib/files";
+import { openInDock } from "../../lib/dock-bridge";
 
 // 取件台的列表：本对话文件（这条会话的 turn 亲手创建或改动过的文件）。
 //
@@ -25,14 +26,12 @@ interface Props {
   cwd: string;
   /** 变化即重新拉取（turn 结束时前进）。 */
   refreshKey?: number;
-  onOpenFile?: (absPath: string, name: string) => void;
 }
 
 export default function FilesPanel({
   sessionId,
   cwd,
   refreshKey,
-  onOpenFile,
 }: Props) {
   const [files, setFiles] = useState<ConversationFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -182,7 +181,7 @@ export default function FilesPanel({
               aria-label={`选择 ${f.name}`}
             />
             <button
-              onClick={() => onOpenFile?.(f.path, f.name)}
+              onClick={() => openInDock({ path: f.path, name: f.name })}
               className="flex-1 min-w-0 text-left"
               title={f.path}
             >

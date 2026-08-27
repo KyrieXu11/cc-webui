@@ -17,7 +17,7 @@
 | # | 决定 | 理由（一句） |
 |---|---|---|
 | 1 | 定位＝取件台 | 用户是老师不是开发者，IDE 侧栏那套他用不上而你有终端 |
-| 2 | 入口＝侧栏「对话 / 文件」tab 切换 | 现有 `FileExplorer` 就在侧栏里，这是升级不是再造一根栏 |
+| 2 | 入口＝右上角一颗按钮开右侧格；文件相关的一切都是那一格的标签（项目 / 本对话文件 / 打开的文档） | **返工过一次**（2026-08-27）：原来做成「左侧栏的对话/文件 tab」，而项目文件树在右边 ⇒ 按钮在右上角、开出来的东西在左边，两个文件面板抢一个位置。律枢是一格多标签（会话文件/文书/浏览器），对齐它 |
 | 3 | 呈现＝右侧格（照律枢 `RightDock`），可拖宽、可折叠 | Office 编辑器是 iframe，需要真画布；同时保住「边看对话边看产出」 |
 | 4 | 「本对话文件」＝ turn 收尾快照比对 + SQLite registry | agent 主要用 `mcp__bash__run` 写盘，只认 `Write`/`Edit` 会漏掉主路径 |
 | 5 | registry 每路径一行，挂进 sessionId relabel 链 | 首个 turn 的 id 会被 CLI 换掉，不 relabel 就查不出来 |
@@ -123,7 +123,7 @@ cc-webui **没有实现那条路**，所以也**没有**这个环境变量——
 
 ```
 src/components/RightDock.tsx          App 层唯一一份，Splitter + 内部 tab 栏
-src/components/files/FilesPanel.tsx   侧栏「文件」tab 的列表（多选、删除、上传、刷新）
+src/components/files/FilesPanel.tsx   右侧格「文件」标签的列表（多选、删除、上传、刷新）
 src/components/files/TextEditor.tsx   CodeMirror 6（动态 import）
 src/components/files/OfficeEditor.tsx ONLYOFFICE iframe
 src/lib/dock-bridge.ts                模块级通道，不逐层传回调（照律枢 dockBridge）
@@ -178,7 +178,7 @@ src/lib/files.ts                      API 客户端
 
 ## 实施顺序（每阶段可独立验收）
 
-1. **registry**：建表 + turn 收尾扫描 + relabel + `GET /api/files` + 侧栏「文件」tab（只列）。
+1. **registry**：建表 + turn 收尾扫描 + relabel + `GET /api/files` + 「文件」标签（只列）。
    验收：让 agent 用 bash 写一个文件，turn 结束后它出现在列表里。
 2. **RightDock + 文本编辑**：Splitter、tab 栏、CodeMirror 懒加载、乐观锁保存（409 提示重新打开）。
 3. **删除与上传**：批量选择、确认弹窗、审计写入、「上传到本文件夹」。

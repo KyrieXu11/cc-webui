@@ -1,8 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import ProjectSidebar from "./components/ProjectSidebar";
 import EmptyProjectSidebar from "./components/EmptyProjectSidebar";
-import FileExplorer from "./components/FileExplorer";
 import RightDock from "./components/RightDock";
 import FilePreviewWindow from "./components/FilePreviewWindow";
 import Header from "./components/Header";
@@ -46,7 +45,6 @@ import { getSessionMessages, type SessionSummary } from "./lib/sessions";
 import { sendPermission } from "./lib/permission";
 import { useAuth } from "./AuthGate";
 import { useIsNarrow } from "./lib/useIsNarrow";
-import { openInDock } from "./lib/dock-bridge";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -208,7 +206,9 @@ export default function App() {
   const [home, setHome] = useState("");
   const [loadingSession, setLoadingSession] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
-  const [filesOpen, setFilesOpen] = useState(false);
+  // 右侧格总开关（项目树 / 取件台 / 打开的文档都在那一格里）。
+  const [dockOpen, setDockOpen] = useState(false);
+  const openDock = useCallback(() => setDockOpen(true), []);
   const [composerValue, setComposerValue] = useState("");
   const [retryInfo, setRetryInfo] = useState<{
     attempt: number;
@@ -1121,7 +1121,6 @@ export default function App() {
             refreshKey={sessionsRefreshKey}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
-            onPreviewFile={(abs, name) => openInDock({ path: abs, name })}
           />
         ) : (
           <EmptyProjectSidebar
@@ -1131,13 +1130,13 @@ export default function App() {
       </div>
 
       {/* 遮罩：抽屉开着时点空白处关掉。只在窄屏存在。 */}
-      {narrow && (navOpen || (inProject && filesOpen)) && (
+      {narrow && (navOpen || (inProject && dockOpen)) && (
         <div
           data-drawer-scrim
           className="fixed inset-0 z-30 bg-black/55 md:hidden"
           onClick={() => {
             setNavOpen(false);
-            setFilesOpen(false);
+            setDockOpen(false);
           }}
         />
       )}
@@ -1157,8 +1156,8 @@ export default function App() {
               provider={settings.agentProvider}
               onHome={goHome}
               onNewChat={handleNewChat}
-              onToggleFiles={() => setFilesOpen((o) => !o)}
-              filesOpen={filesOpen}
+              onToggleFiles={() => setDockOpen((o) => !o)}
+              filesOpen={dockOpen}
               onPickProject={openProject}
               onPickSession={openSession}
             />
@@ -1259,16 +1258,18 @@ export default function App() {
       </div>
       {/* 右侧格：App 层唯一一份。⚠️ 不要下沉到某个视图里去渲染——切走就卸载，
           而卸载会销毁编辑器（以后是 OnlyOffice iframe，律枢在那儿栽过）。 */}
-      <RightDock narrow={narrow} officeEnabled={officeFeature} />
-      {inProject && filesOpen && (
-        <div className="flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:shadow-[0_0_60px_rgba(0,0,0,0.6)]">
-          <FileExplorer
-            cwd={projectCwd}
-            onInsertFile={insertFile}
-            onPreviewFile={previewFile}
-          />
-        </div>
-      )}
+      <RightDock
+        open={dockOpen}
+        onClose={() => setDockOpen(false)}
+        onRequestOpen={openDock}
+        narrow={narrow}
+        officeEnabled={officeFeature}
+        cwd={inProject ? projectCwd : ""}
+        sessionId={sessionId}
+        refreshKey={sessionsRefreshKey}
+        onInsertFile={insertFile}
+        onPreviewFile={previewFile}
+      />
       {preview && (
         <FilePreviewWindow
           absPath={preview.absPath}
