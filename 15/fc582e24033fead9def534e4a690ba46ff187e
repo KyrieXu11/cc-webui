@@ -1,0 +1,59 @@
+src/components/files/FilesPanel.tsx
+  s_608e4f05a64aff::t_a9cbc8407ac5db 184
+  s_608e4f05a64aff::t_a4e47736a30bf9 10
+server/app.ts
+  s_608e4f05a64aff::t_cb04c2c7684d22 55
+  s_608e4f05a64aff::t_7b1ddf5b2899d6 56-79
+src/components/FileExplorer.tsx
+  s_608e4f05a64aff::t_c9e9302f0dd289 8-9,16,40-48
+.design/mobile-preview.html
+  s_58b7404ce04904::t_1c6276a8a1f961 1-283
+src/App.tsx
+  s_608e4f05a64aff::t_3d803ec9a6e088 211
+  s_608e4f05a64aff::t_cf4e5e8d4ecac5 1
+  s_608e4f05a64aff::t_3dd721c5a1e31a 209-210,1133,1139,1159-1160,1261-1272
+.design/DirectionB.dc.html
+  s_58b7404ce04904::t_647cb72ba50f46 1-133
+src/components/Header.tsx
+  s_608e4f05a64aff::t_a125aa682a25e4 124-125
+server/auth/policy.test.ts
+  s_608e4f05a64aff::t_a31ef34b7bceef 586-616
+AGENTS.md
+  s_608e4f05a64aff::t_38496203769421 310-314
+.design/Main.dc.html
+  s_58b7404ce04904::t_0cfddc29924f7e 1-184
+src/components/RightDock.tsx
+  s_608e4f05a64aff::t_3d5507aa0f47c3 3-4,8,12,14-45,48-50,53-60,68,71-72,74,77-78,81-85,91-99,105,108-112,114,117-130,132-201,204,207-209
+.design/Home.dc.html
+  s_58b7404ce04904::t_897ec6b0925a7e 1-104
+.design/canvas.json
+  s_58b7404ce04904::t_e77cefe7015701 1-14
+docs/file-manager.md
+  s_608e4f05a64aff::t_82b6608b1e106c 20,126,181
+.design/cc-webui-mobile.html
+  s_58b7404ce04904::t_664dcd306a89d8 1-10394
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "15fc582e24033fead9def534e4a690ba46ff187e",
+  "prompts": {},
+  "sessions": {
+    "s_58b7404ce04904": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "efe0b87b-c0fe-4dd2-8af0-d8534e03f095",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
