@@ -19,8 +19,12 @@ import { openInDock } from "../lib/dock-bridge";
 //
 // 操作与树的关系：
 //   · 点文件名   → 在右侧格里打开（文本进编辑器、md 可渲染、Office 走 ONLYOFFICE）
-//   · 勾选       → 批量删除（**真删、无回收站**，所以确认弹窗逐个列出文件名——批量删除
-//                  最容易出的事故是多选里混进了一个你没看见的）
+//   · 右键文件   → 进多选模式（勾选框这时才出现，并顺手选中这一行；再右键别的行继续加选）
+//                  → 批量删除（**真删、无回收站**，所以确认弹窗逐个列出文件名——批量
+//                  删除最容易出的事故是多选里混进了一个你没看见的）
+//                  ⚠️ 勾选框**平时不画**：常驻的话一棵目录树看着像一排表单（用户原话
+//                  「多选框应该去掉，应该做一个右键点击多选之后，才出现动态加载多选框」）。
+//                  退出：取消按钮 / Esc / 取消到一个不剩时自动退出。
 //   · 悬停的 @   → 把相对路径插进对话框（原来的「单击插入」，给 agent 指路用）
 //   · 点文件夹   → 除了展开/收起，还把它设成**上传落点**（标题栏那颗「上传」的目标）
 //
@@ -34,13 +38,18 @@ interface Props {
   onPreviewFile: (absPath: string, relPath: string) => void;
   /** 当前会话 id —— 只用于删除留痕（file_deletions），没有也能删。 */
   sessionId?: string | null;
-  /** 内嵌在右侧格的一个标签里时用：不自带宽度/左边框，由那一格给。 */
+  /** 内嵌在右侧格里时用：不自带宽度/左边框，由那一格给。 */
   embedded?: boolean;
+  /** 有值就在标题栏右端画一颗「收起面板」——内嵌时它是这一格唯一常驻的表头。 */
+  onClose?: () => void;
 }
 
 type Ctx = {
+  selecting: boolean;
   picked: Map<string, string>;
   toggle: (path: string, name: string) => void;
+  /** 右键：进多选模式并顺手选中这一行。 */
+  beginSelect: (path: string, name: string) => void;
   insert: (abs: string) => void;
   preview: (abs: string) => void;
   uploadDir: string;
@@ -60,6 +69,7 @@ export default function FileExplorer({
   onPreviewFile,
   sessionId,
   embedded,
+  onClose,
 }: Props) {
   const [rootEntries, setRootEntries] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,11 +79,25 @@ export default function FileExplorer({
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [selecting, setSelecting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Esc 退出多选。绑在 window 上：焦点可能在树里的任何一个按钮上。
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setSelecting(false);
+      setPicked(new Map());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting]);
 
   useEffect(() => {
     setUploadDir(cwd);
     setPicked(new Map());
+    setSelecting(false);
   }, [cwd]);
 
   useEffect(() => {
@@ -96,15 +120,24 @@ export default function FileExplorer({
   const insert = (abs: string) => onInsertFile(abs, toRel(abs));
   const preview = (abs: string) => onPreviewFile(abs, toRel(abs));
 
+  const toggle = (path: string, name: string) =>
+    setPicked((cur) => {
+      const next = new Map(cur);
+      if (next.has(path)) next.delete(path);
+      else next.set(path, name);
+      // 取消到一个不剩就退出多选：留着一排空勾选框没有意义。
+      if (next.size === 0) setSelecting(false);
+      return next;
+    });
+
   const ctx: Ctx = {
+    selecting,
     picked,
-    toggle: (path, name) =>
-      setPicked((cur) => {
-        const next = new Map(cur);
-        if (next.has(path)) next.delete(path);
-        else next.set(path, name);
-        return next;
-      }),
+    toggle,
+    beginSelect: (path, name) => {
+      setSelecting(true);
+      toggle(path, name);
+    },
     insert,
     preview,
     uploadDir,
@@ -166,11 +199,23 @@ export default function FileExplorer({
                 ? "根目录"
                 : toRel(uploadDir))}
         </span>
-        {picked.size > 0 ? (
+        {selecting ? (
           <>
             <button
               onClick={() => {
+                setSelecting(false);
+                setPicked(new Map());
+              }}
+              className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
+              title="退出多选（Esc）"
+            >
+              取消
+            </button>
+            <button
+              disabled={picked.size === 0}
+              onClick={() => {
                 for (const p of picked.keys()) insert(p);
+                setSelecting(false);
                 setPicked(new Map());
               }}
               className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
@@ -179,8 +224,9 @@ export default function FileExplorer({
               @ {picked.size}
             </button>
             <button
+              disabled={picked.size === 0}
               onClick={() => setConfirming(true)}
-              className="font-mono text-[11px] text-red border border-red/40 hover:border-red/70 rounded px-2 py-0.5 transition-colors"
+              className="font-mono text-[11px] text-red border border-red/40 hover:border-red/70 rounded px-2 py-0.5 transition-colors disabled:opacity-40"
             >
               删除 {picked.size}
             </button>
@@ -210,6 +256,23 @@ export default function FileExplorer({
           className="hidden"
           onChange={(e) => void doUpload(e.target.files)}
         />
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="shrink-0 text-subtle hover:text-fg px-1 py-1 rounded hover:bg-fg/5"
+            title="收起面板"
+            aria-label="收起面板"
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <path
+                d="M2 2L9 9M9 2L2 9"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        )}
       </div>
 
       {err && (
@@ -314,6 +377,7 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
         }`}
         style={{ paddingLeft: 8 + depth * 12 }}
         title={`${entry.path}\n（点一下：展开 / 设为上传落点）`}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <Chevron open={open} />
         <FolderIcon />
@@ -334,7 +398,7 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
 }
 
 function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
-  const { picked, toggle, insert, preview } = useTree();
+  const { selecting, picked, toggle, beginSelect, insert, preview } = useTree();
   const checked = picked.has(entry.path);
 
   return (
@@ -343,17 +407,22 @@ function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
         checked ? "bg-blue/10" : "hover:bg-fg/[0.025]"
       }`}
       style={{ paddingLeft: 8 + depth * 12 }}
+      // 右键＝进多选并选中这一行；已在多选态里再右键就是加选/取消。
+      onContextMenu={(e) => {
+        e.preventDefault();
+        beginSelect(entry.path, entry.name);
+      }}
     >
-      {/* 没选中时保持低可见度（树看着才不像一排表单），选中或悬停即实体化。 */}
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={() => toggle(entry.path, entry.name)}
-        aria-label={`选择 ${entry.name}`}
-        className={`shrink-0 accent-blue transition-opacity ${
-          checked ? "opacity-100" : "opacity-25 group-hover:opacity-100"
-        }`}
-      />
+      {/* ⚠️ 勾选框只在多选态里存在，平时连位置都不占：常驻的话一棵目录树看着像一排表单。 */}
+      {selecting && (
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={() => toggle(entry.path, entry.name)}
+          aria-label={`选择 ${entry.name}`}
+          className="shrink-0 accent-blue"
+        />
+      )}
       <button
         onClick={(e) =>
           e.metaKey || e.ctrlKey
@@ -361,7 +430,7 @@ function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
             : openInDock({ path: entry.path, name: entry.name })
         }
         className="flex-1 min-w-0 flex items-center gap-1.5 text-left text-muted hover:text-fg transition-colors"
-        title={`${entry.path}\n（单击：在右侧打开 · ⌘/Ctrl+单击：浮窗速览）`}
+        title={`${entry.path}\n（单击：在右侧打开 · ⌘/Ctrl+单击：浮窗速览 · 右键：多选）`}
       >
         <FileIcon />
         <span className="font-mono text-[12px] truncate">{entry.name}</span>

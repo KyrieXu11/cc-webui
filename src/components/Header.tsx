@@ -56,8 +56,24 @@ export default function Header({
     return () => ro.disconnect();
   }, []);
 
+  // 右侧那格能拖到很宽，主栏因此可以只剩两三百像素。右边那组是 shrink-0（徽标和
+  // 按钮压扁了没法看），所以**地方不够时让它们整块消失，而不是互相叠**——叠起来的
+  // 样子是「W▓b.Co▓Claude」（真机截图），看着像坏了。
+  const bar = useRef<HTMLElement>(null);
+  const [tight, setTight] = useState(false);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setTight(e.contentRect.width < 560));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <header className="flex items-center gap-4 max-md:gap-2 h-14 px-5 max-md:pl-1 max-md:pr-2 border-b border-line shrink-0">
+    <header
+      ref={bar}
+      className="flex items-center gap-4 max-md:gap-2 h-14 px-5 max-md:pl-1 max-md:pr-2 border-b border-line shrink-0"
+    >
       {onOpenNav && (
         <button
           aria-label="打开侧栏"
@@ -87,10 +103,14 @@ export default function Header({
         <span className="font-mono text-[12px] text-subtle px-1.5 truncate max-md:px-0">
           {tildify(projectPath, home) || projectPath}
         </span>
-        {sessionId && (
+        {sessionId && !tight && (
           <>
             <span className="text-subtle max-md:hidden">·</span>
-            <span className="font-mono text-[11px] text-subtle px-1.5 shrink-0 max-md:hidden">
+            <span
+              className={`font-mono text-[11px] text-subtle px-1.5 shrink-0 ${
+                tight ? "hidden" : "max-md:hidden"
+              }`}
+            >
               {sessionId.slice(0, 8)}
             </span>
           </>
@@ -114,7 +134,9 @@ export default function Header({
       <div className="flex items-center gap-2 shrink-0">
         <div
           title={`当前 Agent: ${providerLabel(provider)}`}
-          className="hidden md:inline-flex items-center gap-1.5 h-7 pl-1.5 pr-2.5 rounded-full border border-line-strong bg-canvas/60"
+          className={`${
+            tight ? "hidden" : "hidden md:inline-flex"
+          } items-center gap-1.5 h-7 pl-1.5 pr-2.5 rounded-full border border-line-strong bg-canvas/60`}
         >
           <span
             aria-hidden
@@ -132,7 +154,9 @@ export default function Header({
             {providerLabel(provider)}
           </span>
         </div>
-        <span className="hidden md:inline w-px h-5 bg-line" />
+        <span
+          className={`${tight ? "hidden" : "hidden md:inline"} w-px h-5 bg-line`}
+        />
         <button
           aria-label="新对话"
           onClick={onNewChat}
@@ -146,7 +170,7 @@ export default function Header({
               strokeLinecap="round"
             />
           </svg>
-          <span>新对话</span>
+          <span className={tight ? "hidden" : undefined}>新对话</span>
         </button>
         <button
           aria-label="切换文件面板"

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 // 可拖拽的竖分隔条。**照搬律枢 `app/src/components/Splitter.tsx` 的机制**（配色是我们
 // 自己的）。四条都是它踩出来的，别按"看起来更简单"的写法改回去：
@@ -22,9 +22,11 @@ export function applyPaneWidth(
   cssVar: string,
   px: number,
   min: number,
-  maxRatio: number
+  maxRatio: number,
+  /** 上限按谁的宽度算。内层分隔条要传所在容器的宽度，不能用窗口宽度。 */
+  spanWidth: number = window.innerWidth
 ): number {
-  const max = Math.max(min, window.innerWidth * maxRatio);
+  const max = Math.max(min, spanWidth * maxRatio);
   const w = Math.min(Math.max(px, min), max);
   document.documentElement.style.setProperty(cssVar, `${w}px`);
   return w;
@@ -33,12 +35,25 @@ export function applyPaneWidth(
 interface Props {
   cssVar: string;
   storageKey: string;
-  /** 面板贴窗口哪一侧——决定宽度怎么从鼠标位置算。 */
+  /** 面板贴哪一侧——决定宽度怎么从鼠标位置算。 */
   edge: "left" | "right";
+  /**
+   * 从哪儿起算。`window`＝面板贴着窗口边（右侧格、左侧栏）；`parent`＝面板只是某个
+   * 容器里的一栏（右侧格**内部**的树/预览那条线）——那时必须按容器左沿算，按窗口算
+   * 会把左侧栏和主栏的宽度也算进去，一拖就跳。
+   */
+  originFrom?: "window" | "parent";
   min: number;
   /** 宽度上限占窗口的比例，给另一侧留活路。 */
   maxRatio: number;
   defaultRatio: number;
+  /**
+   * 固定像素的默认宽度，给了就压过 defaultRatio。
+   * ⚠️ **内层分隔条应该用这个**：`.dockcol` 的宽度有 140ms 过渡，内层 Splitter 挂载
+   * 那一刻量到的父容器还是过渡前的窄档宽度 ⇒ 按比例算出来的值被 min 顶掉，表现是
+   * 「树栏第一次打开总是最窄」（实测 0.34×352=120 → 夹到 min 180）。
+   */
+  defaultPx?: number;
   title?: string;
 }
 
@@ -46,41 +61,74 @@ export default function Splitter({
   cssVar,
   storageKey,
   edge,
+  originFrom = "window",
   min,
   maxRatio,
   defaultRatio,
+  defaultPx,
   title = "拖动调整宽度",
 }: Props) {
-  const widthAt = (clientX: number) =>
-    edge === "right" ? window.innerWidth - clientX : clientX;
+  const self = useRef<HTMLDivElement>(null);
+  const span = () => {
+    if (originFrom === "window") return { left: 0, width: window.innerWidth };
+    const box = self.current?.parentElement?.getBoundingClientRect();
+    return box
+      ? { left: box.left, width: box.width }
+      : { left: 0, width: window.innerWidth };
+  };
+  const widthAt = (clientX: number) => {
+    const { left, width } = span();
+    return edge === "right" ? left + width - clientX : clientX - left;
+  };
 
   useEffect(() => {
     const saved = Number(localStorage.getItem(storageKey));
-    const w = saved > 0 ? saved : Math.round(window.innerWidth * defaultRatio);
-    applyPaneWidth(cssVar, w, min, maxRatio);
-    const onResize = () =>
+    const w =
+      saved > 0 ? saved : (defaultPx ?? Math.round(span().width * defaultRatio));
+    const reclamp = () =>
       applyPaneWidth(
         cssVar,
         Number(localStorage.getItem(storageKey)) || w,
         min,
-        maxRatio
+        maxRatio,
+        span().width
       );
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [cssVar, storageKey, min, maxRatio, defaultRatio]);
+    reclamp();
+
+    window.addEventListener("resize", reclamp);
+    // ⚠️ 内层分隔条还要跟着**父容器**的宽度重夹，不只是窗口。三个理由，都实测过：
+    //   ① `.dockcol` 的宽度有 140ms 过渡，挂载那一刻量到的还是过渡前的窄档宽度 ⇒
+    //      min / maxRatio 会按那个错的跨度去夹（实测树栏第一次打开总是 180→211px，
+    //      改 defaultPx 也没用，因为夹的是 maxRatio×352）；
+    //   ② 外层那条线一拖，内层的上限就变了；
+    //   ③ 存的是绝对像素，父容器变窄后不重夹会把另一栏挤没。
+    const parent = self.current?.parentElement;
+    let ro: ResizeObserver | null = null;
+    if (originFrom === "parent" && parent && typeof ResizeObserver !== "undefined") {
+      // 不会自激：父容器是 `flex:none; width:var(--dockw)`，宽度不由子元素决定。
+      ro = new ResizeObserver(reclamp);
+      ro.observe(parent);
+    }
+    return () => {
+      window.removeEventListener("resize", reclamp);
+      ro?.disconnect();
+    };
+  }, [cssVar, storageKey, min, maxRatio, defaultRatio, defaultPx, originFrom]);
 
   const onDown = (e: React.MouseEvent) => {
     e.preventDefault();
     document.body.classList.add("resizing");
     const move = (ev: MouseEvent) =>
-      applyPaneWidth(cssVar, widthAt(ev.clientX), min, maxRatio);
+      applyPaneWidth(cssVar, widthAt(ev.clientX), min, maxRatio, span().width);
     const up = (ev: MouseEvent) => {
       document.body.classList.remove("resizing");
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
       localStorage.setItem(
         storageKey,
-        String(applyPaneWidth(cssVar, widthAt(ev.clientX), min, maxRatio))
+        String(
+          applyPaneWidth(cssVar, widthAt(ev.clientX), min, maxRatio, span().width)
+        )
       );
     };
     window.addEventListener("mousemove", move);
@@ -92,14 +140,16 @@ export default function Splitter({
     localStorage.removeItem(storageKey);
     applyPaneWidth(
       cssVar,
-      Math.round(window.innerWidth * defaultRatio),
+      defaultPx ?? Math.round(span().width * defaultRatio),
       min,
-      maxRatio
+      maxRatio,
+      span().width
     );
   };
 
   return (
     <div
+      ref={self}
       className="dragbar"
       onMouseDown={onDown}
       onDoubleClick={onDoubleClick}
