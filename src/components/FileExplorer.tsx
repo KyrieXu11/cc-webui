@@ -5,12 +5,15 @@ interface Props {
   cwd: string;
   onInsertFile: (absPath: string, relPath: string) => void;
   onPreviewFile: (absPath: string, relPath: string) => void;
+  /** 内嵌在右侧格的一个标签里时用：不自带宽度/左边框/标题，由那一格给。 */
+  embedded?: boolean;
 }
 
 export default function FileExplorer({
   cwd,
   onInsertFile,
   onPreviewFile,
+  embedded,
 }: Props) {
   const [rootEntries, setRootEntries] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,12 +37,15 @@ export default function FileExplorer({
   const previewFile = (abs: string) => onPreviewFile(abs, toRel(abs));
 
   return (
-    <aside className="w-[280px] shrink-0 border-l border-line flex flex-col bg-canvas">
-      <div className="px-4 py-3 border-b border-line">
-        <div className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em]">
-          文件
-        </div>
-        <div className="font-mono text-[11.5px] text-muted truncate mt-0.5">
+    <aside
+      className={
+        embedded
+          ? "h-full min-h-0 flex flex-col bg-canvas"
+          : "w-[280px] shrink-0 border-l border-line flex flex-col bg-canvas"
+      }
+    >
+      <div className="px-4 py-2.5 border-b border-line">
+        <div className="font-mono text-[11.5px] text-muted truncate">
           {cwd}
         </div>
       </div>

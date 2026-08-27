@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>cc-webui 移动端方案</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap">
+<style>
+  /* token 取自 src/index.css 的 @theme */
+  :root{--canvas:#0a0d14;--surface:#121620;--raised:#191e2a;--fg:#e8eaed;--muted:#a0a4ad;--subtle:#6b7079;
+        --line:rgba(255,255,255,.06);--line2:rgba(255,255,255,.12);--blue:#5b6bff;--green:#3ecf8e;--amber:#e0a030;--orange:#ef9d5a;--red:#e05252;
+        --sans:"IBM Plex Sans",-apple-system,"PingFang SC",sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:#05070c;color:var(--fg);font-family:var(--sans);padding:40px 32px 80px}
+  h1{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}
+  .lede{color:var(--muted);font-size:13.5px;line-height:1.7;max-width:760px;margin:0 0 34px}
+  .row{display:flex;gap:44px;flex-wrap:wrap;align-items:flex-start}
+  .col{display:flex;flex-direction:column;gap:14px;width:390px}
+  .cap{font-size:13px;font-weight:600}
+  .note{font-size:12.5px;line-height:1.75;color:var(--muted);white-space:pre-line}
+  .good{color:var(--green)} .bad{color:var(--orange)}
+  .phone{width:390px;height:844px;background:var(--canvas);border:1px solid var(--line2);border-radius:22px;overflow:hidden;
+         display:flex;flex-direction:column;position:relative;box-shadow:0 30px 70px -30px #000}
+  .bar{height:56px;flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line)}
+  .ico{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--muted);flex:0 0 auto;cursor:pointer;background:none;border:0;padding:0}
+  .ttl{font-size:14px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-family:var(--mono);font-size:10.5px;color:var(--subtle);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .body{flex:1 1 auto;overflow-y:auto}
+  .chat{padding:18px 16px 8px;display:flex;flex-direction:column;gap:18px}
+  .me{align-self:flex-end;max-width:84%;background:var(--raised);border:1px solid var(--line2);border-radius:14px;padding:10px 14px;font-size:14.5px;line-height:1.6}
+  .say{font-size:14.5px;line-height:1.65}
+  .code{font-family:var(--mono);font-size:13px;color:var(--orange)}
+  .steps{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .step{height:44px;display:flex;align-items:center;gap:10px;padding:0 12px}
+  .step+.step{border-top:1px solid var(--line)}
+  .dot{width:6px;height:6px;border-radius:99px;flex:0 0 auto}
+  .m{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .m2{font-family:var(--mono);font-size:11.5px;color:var(--subtle);flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .m3{font-family:var(--mono);font-size:11px;color:var(--subtle)}
+  .ask{border:1px solid rgba(91,107,255,.25);background:var(--surface);border-radius:12px;padding:14px}
+  .asklab{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--blue);margin-bottom:10px}
+  .opt{min-height:48px;display:flex;align-items:center;padding:8px 12px;border-radius:8px;border:1px solid var(--line2);color:var(--muted);font-size:13px}
+  .opt.on{border-color:rgba(91,107,255,.5);background:rgba(91,107,255,.12);color:var(--fg)}
+  .comp{flex:0 0 auto;padding:8px 12px 10px}
+  .compbox{background:var(--raised);border:1px solid var(--line2);border-radius:16px}
+  .ph{padding:12px 14px 6px;font-size:14.5px;line-height:1.6;color:var(--subtle)}
+  .comprow{display:flex;align-items:center;justify-content:space-between;padding:0 8px 8px}
+  .send{width:44px;height:44px;border-radius:99px;background:var(--blue);display:flex;align-items:center;justify-content:center}
+  .tabs{flex:0 0 auto;display:flex;border-top:1px solid var(--line);background:var(--surface);padding-bottom:20px}
+  .tab{flex:1;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--subtle);font-size:10.5px;background:none;border:0;cursor:pointer;font-family:inherit}
+  .tab.on{color:var(--blue)}
+  .frow{min-height:48px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:13px}
+  .task{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+  .tbtn{height:44px;flex:1;display:flex;align-items:center;justify-content:center;border:1px solid var(--line2);border-radius:8px;font-size:12.5px;color:var(--muted)}
+  .scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);cursor:pointer}
+  .drawer{position:absolute;top:0;bottom:0;width:320px;background:var(--canvas);display:flex;flex-direction:column}
+  .drawer.l{left:0;border-right:1px solid var(--line2)} .drawer.r{right:0;border-left:1px solid var(--line2)}
+  .drow{min-height:52px;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:6px 16px;border-left:2px solid transparent}
+  .hide{display:none !important}
+</style>
+</head>
+<body>
+<h1>cc-webui 移动端 · 390×844</h1>
+<p class="lede">桌面是三栏：56px 工具栏 + 260px 会话栏 + 主内容 + 280px 文件栏 = <b>596px 固定宽度</b>，塞不进 390 —— 这就是现在手机上"怪异"的来源。下面两套收拢方式都能点：A 点底部 tab，B 点左上汉堡 / 右上文件夹。颜色、字号、控件尺寸全部取自 <span class="code">src/index.css</span> 的 @theme 和真实组件。</p>
+
+<div class="row">
+  <!-- ══ 方案 A ══ -->
+  <div class="col">
+    <div class="cap">方案 A · 底部 Tab<span style="color:var(--subtle);font-weight:400"> —— 点下面的 tab</span></div>
+    <div class="phone">
+      <div class="bar">
+        <div class="dot" style="background:var(--blue);width:8px;height:8px"></div>
+        <div style="flex:1;min-width:0"><div class="ttl">cc-webui</div><div class="sub">~/code/cc-webui · 35ca51aa</div></div>
+        <button class="ico"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3V15M3 9H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+        <button class="ico"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="9" cy="9" r="1.4" fill="currentColor"/><circle cx="14" cy="9" r="1.4" fill="currentColor"/></svg></button>
+      </div>
+
+      <div class="body" id="a-chat">
+        <div class="chat">
+          <div class="me">把 scan 改成只遍历白名单里的目录</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="say">先看现在的实现——它是走完整个 <span class="code">$HOME</span> 再过滤。</div>
+            <div class="steps">
+              <div class="step" style="background:var(--surface)"><span class="dot" style="background:var(--green)"></span><span class="m">Read</span><span class="m2">server/fs.ts</span><span class="m3">0.2s</span></div>
+              <div class="step"><span class="dot" style="background:var(--amber)"></span><span class="m">Bash</span><span class="m2">npm test</span><span class="m3">运行中</span></div>
+            </div>
+            <div class="ask">
+              <div class="asklab">请选择</div>
+              <div style="font-size:13.5px;line-height:1.55;margin-bottom:10px">只遍历白名单根，还是保留全量扫描？</div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="opt on">只遍历白名单根</div>
+                <div class="opt">保留全量扫描</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="body hide" id="a-files"></div>
+      <div class="body hide" id="a-tasks"></div>
+
+      <div class="comp" id="a-comp">
+        <div class="compbox">
+          <div class="ph">问点什么…</div>
+          <div class="comprow">
+            <div style="display:flex;align-items:center">
+              <span class="ico"><svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M12.5 8.5L9 12a2.5 2.5 0 0 1-3.5-3.5l4-4a1.7 1.7 0 0 1 2.4 2.4L8 10.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+              <span class="m3" style="padding:0 6px">opus · auto</span>
+            </div>
+            <div class="send"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabs" id="a-tabs"></div>
+    </div>
+    <div class="note"><span class="good">好</span>：四个入口一眼可见、拇指够得着；每个面板独占全屏，文件树和任务列表不用再挤 280px。
+<span class="bad">差</span>：底部被 tab(76) + 输入框(~96) 吃掉约 172px，对话区只剩 <b>608px</b>；「更多」里还要塞管理页/群聊/设置，层级会变深。</div>
+  </div>
+
+  <!-- ══ 方案 B ══ -->
+  <div class="col">
+    <div class="cap">方案 B · 抽屉<span style="color:var(--subtle);font-weight:400"> —— 点左上汉堡 / 右上文件夹</span></div>
+    <div class="phone">
+      <div class="bar" style="gap:6px;padding:0 8px">
+        <button class="ico" onclick="drawer('sessions')"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 5h12M3 9h12M3 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+        <div style="flex:1;min-width:0"><div class="ttl">cc-webui</div><div class="sub">~/code/cc-webui</div></div>
+        <button class="ico" onclick="drawer('files')"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h3L9 6h4.5A1.5 1.5 0 0 1 15 7.5v6A1.5 1.5 0 0 1 13.5 15h-9A1.5 1.5 0 0 1 3 13.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+        <button class="ico"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="9" cy="9" r="1.4" fill="currentColor"/><circle cx="14" cy="9" r="1.4" fill="currentColor"/></svg></button>
+      </div>
+      <div class="body">
+        <div class="chat">
+          <div class="me">把 scan 改成只遍历白名单里的目录</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="say">先看现在的实现——它是走完整个 <span class="code">$HOME</span> 再过滤。内容区比方案 A 高 64px，一屏能多放一轮对话。</div>
+            <div class="steps">
+              <div class="step" style="background:var(--surface)"><span class="dot" style="background:var(--green)"></span><span class="m">Read</span><span class="m2">server/fs.ts</span><span class="m3">0.2s</span></div>
+              <div class="step"><span class="dot" style="background:var(--amber)"></span><span class="m">Bash</span><span class="m2">npm test</span><span class="m3">运行中</span></div>
+            </div>
+            <div class="say">任务面板和管理页在右上「⋯」里，不占常驻空间。</div>
+          </div>
+        </div>
+      </div>
+      <div class="comp" style="padding-bottom:28px">
+        <div class="compbox">
+          <div class="ph">问点什么…</div>
+          <div class="comprow">
+            <div style="display:flex;align-items:center">
+              <span class="ico"><svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M12.5 8.5L9 12a2.5 2.5 0 0 1-3.5-3.5l4-4a1.7 1.7 0 0 1 2.4 2.4L8 10.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+              <span class="m3" style="padding:0 6px">opus · auto</span>
+            </div>
+            <div class="send"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+        </div>
+      </div>
+      <div id="b-scrim" class="scrim hide" onclick="drawer(null)"></div>
+      <div id="b-drawer" class="drawer l hide">
+        <div style="padding:16px 16px 12px;border-bottom:1px solid var(--line)">
+          <div class="ttl" id="b-dtitle">会话</div><div class="sub" style="margin-top:2px">~/code/cc-webui</div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:6px 0" id="b-drows"></div>
+      </div>
+    </div>
+    <div class="note"><span class="good">好</span>：对话区 <b>672px</b>，比 A 多一屏 64px；心智和桌面一致（左会话、右文件）；<b>改造量最小</b>——两个侧栏组件原样复用，只是从 flex 列变成 fixed 抽屉。
+<span class="bad">差</span>：入口是藏起来的，第一次用要摸索；任务面板得走右上「⋯」二级菜单；两个抽屉都要自己处理手势和滚动锁。</div>
+  </div>
+
+  <!-- ══ 首页 ══ -->
+  <div class="col">
+    <div class="cap">首页<span style="color:var(--subtle);font-weight:400"> —— 按方案 A 的壳画</span></div>
+    <div class="phone">
+      <div class="body" style="padding:40px 20px 20px">
+        <div style="font-size:26px;font-weight:700;letter-spacing:-.02em">Web Code</div>
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0 28px">
+          <span class="dot" style="background:var(--green)"></span><span class="m" style="font-size:12px">cc-webui.freeaitech.top:8443</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:14.5px;font-weight:600;letter-spacing:-.01em">最近项目</div>
+          <div style="height:44px;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:10px;border:1px solid var(--line2);background:var(--surface)">
+            <span class="dot" style="background:var(--orange)"></span><span style="font-size:12.5px">Claude</span>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 4.5L6 7.5L9 4.5" stroke="#6b7079" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px" id="h-projects"></div>
+      </div>
+      <div style="flex:0 0 auto;padding:10px 16px 12px;border-top:1px solid var(--line)">
+        <div style="height:48px;border-radius:12px;background:var(--blue);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:500;color:#fff">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>打开项目
+        </div>
+      </div>
+      <div class="tabs" id="h-tabs"></div>
+    </div>
+    <div class="note"><b>两套都躲不掉的地基</b>（与选哪套无关）
+· 9 个组件的 group-hover 操作在触屏上<b>永远不出现</b> → 窄屏改常显
+· 全部按钮 28–40px，低于 44px 命中标准 → 窄屏抬高
+· 零处 dvh / safe-area → iOS 地址栏一收一展就跳，输入框会被 Home Indicator 压住
+· 断点只在窄屏生效，桌面密度一点不动</div>
+  </div>
+</div>
+
+<script>
+const ICONS = {
+  chat: "M3 5.5h14v8.5H8.5L5 17v-3H3z",
+  files: "M3 5.5A1.5 1.5 0 0 1 4.5 4h3l1.5 2h6.5A1.5 1.5 0 0 1 17 7.5v7A1.5 1.5 0 0 1 15.5 16h-11A1.5 1.5 0 0 1 3 14.5z",
+  tasks: "M4 6h12M4 10h12M4 14h7",
+  more: "M4 10h.01M10 10h.01M16 10h.01",
+};
+const TABS = [["chat","对话"],["files","文件"],["tasks","任务"],["more","更多"]];
+const svg = d => `<svg width="19" height="19" viewBox="0 0 20 20" fill="none"><path d="${d}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+function tabBar(el, active, onPick) {
+  el.innerHTML = TABS.map(([id, label]) =>
+    `<button class="tab${id === active ? " on" : ""}" data-id="${id}">${svg(ICONS[id])}<span>${label}</span></button>`).join("");
+  if (onPick) el.querySelectorAll(".tab").forEach(b => b.onclick = () => onPick(b.dataset.id));
+}
+
+// —— 方案 A：tab 切换 ——
+const FILES = ["auth/","executors/","chat.ts","fs.ts","index.ts","permission.ts","mcp-bash-route.ts"];
+document.getElementById("a-files").innerHTML =
+  `<div class="frow" style="min-height:44px;color:var(--subtle);font-size:11.5px">~/code/cc-webui / server</div>` +
+  FILES.map(n => {
+    const dir = n.endsWith("/");
+    const d = dir ? "M2 4.5A1.5 1.5 0 0 1 3.5 3h2.7l1.3 1.8h5A1.5 1.5 0 0 1 14 6.3v5.2A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z" : "M4 2h5l3 3v9H4z";
+    return `<div class="frow"><span style="color:${dir ? "var(--orange)" : "var(--subtle)"};display:flex"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="${d}" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span>${n}</div>`;
+  }).join("");
+
+const TASKS = [
+  { cmd: "npm test", status: "运行中", color: "var(--amber)", tail: "ℹ tests 17\nℹ pass 16" },
+  { cmd: "npm run build", status: "已完成", color: "var(--green)", tail: "✓ built in 551ms" },
+];
+document.getElementById("a-tasks").innerHTML = `<div style="padding:14px;display:flex;flex-direction:column;gap:10px">` +
+  TASKS.map(t => `<div class="task">
+     <div style="display:flex;align-items:center;gap:8px"><span class="dot" style="background:${t.color}"></span>
+       <span class="m" style="flex:1;font-size:12.5px;color:var(--fg)">${t.cmd}</span><span class="m3">${t.status}</span></div>
+     <div class="m3" style="line-height:1.5;white-space:pre-line">${t.tail}</div>
+     <div style="display:flex;gap:8px"><div class="tbtn">查看输出</div><div class="tbtn" style="color:var(--red)">终止</div></div>
+   </div>`).join("") + `</div>`;
+
+function pickA(id) {
+  for (const k of ["chat","files","tasks"]) document.getElementById("a-" + k).classList.toggle("hide", k !== id);
+  if (id === "more") ["chat","files","tasks"].forEach(k => document.getElementById("a-" + k).classList.add("hide"));
+  document.getElementById("a-comp").classList.toggle("hide", id !== "chat");
+  tabBar(document.getElementById("a-tabs"), id, pickA);
+}
+tabBar(document.getElementById("a-tabs"), "chat", pickA);
+
+// —— 方案 B：抽屉 ——
+const SESSIONS = [["把 scan 改成只遍历白名单","刚刚 · 12 条",1],["AskUserQuestion 渲染修复","1 小时前 · 34 条"],["工作区落地","3 小时前 · 51 条"],
+                  ["移动端适配调研","昨天 · 8 条"],["frpc + nginx 上线","昨天 · 22 条"],["SQLite 迁移","前天 · 40 条"]];
+const DFILES = [["auth/","目录 · 9 个文件"],["executors/","目录 · 3 个文件"],["chat.ts","36 KB · 10 分钟前"],["fs.ts","9 KB · 刚刚",1],["permission.ts","5 KB · 20 分钟前"],["index.ts","3 KB · 昨天"]];
+function drawer(kind) {
+  const d = document.getElementById("b-drawer"), s = document.getElementById("b-scrim");
+  if (!kind) { d.classList.add("hide"); s.classList.add("hide"); return; }
+  const rows = kind === "files" ? DFILES : SESSIONS;
+  d.className = "drawer " + (kind === "files" ? "r" : "l");
+  document.getElementById("b-dtitle").textContent = kind === "files" ? "文件" : "会话";
+  document.getElementById("b-drows").innerHTML = rows.map(([t, m, on]) =>
+    `<div class="drow" style="border-left-color:${on ? "var(--blue)" : "transparent"}">
+       <div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t}</div>
+       <div class="sub">${m}</div></div>`).join("");
+  s.classList.remove("hide");
+}
+
+// —— 首页 ——
+const PROJECTS = [
+  ["cc-webui","~/code/cc-webui","刚刚",[["把 scan 改成只遍历白名单",1],["AskUserQuestion 渲染修复"]]],
+  ["rebecca","~/.cc-webui/workspaces/rebecca","2 小时前",[["你好，你是谁？"]]],
+  ["quant","~/code/python/quant","昨天",[["回测脚本重构"],["因子相关性"]]],
+];
+document.getElementById("h-projects").innerHTML = PROJECTS.map(([n, p, ago, ss]) =>
+  `<div style="border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:14px">
+     <div style="display:flex;align-items:baseline;gap:8px">
+       <div style="font-size:14px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</div>
+       <div class="sub" style="margin-left:auto;flex:0 0 auto">${ago}</div></div>
+     <div class="sub" style="margin-top:3px">${p}</div>
+     <div style="display:flex;flex-direction:column;margin-top:10px">
+       ${ss.map(([t, on]) => `<div style="min-height:44px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--line)">
+          <span class="dot" style="width:5px;height:5px;background:${on ? "var(--green)" : "var(--subtle)"}"></span>
+          <span style="font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t}</span></div>`).join("")}
+     </div></div>`).join("");
+tabBar(document.getElementById("h-tabs"), "chat", null);
+</script>
+</body>
+</html>

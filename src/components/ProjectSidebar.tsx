@@ -7,7 +7,6 @@ import {
 import { getInflightSessions } from "../lib/api";
 import { tildify } from "../lib/fs";
 import { providerLabel, type AgentProvider } from "../lib/settings";
-import FilesPanel from "./files/FilesPanel";
 
 const INFLIGHT_POLL_MS = 3000;
 
@@ -20,8 +19,6 @@ interface Props {
   refreshKey?: number;
   onNewChat: () => void;
   onOpenSession: (s: SessionSummary) => void;
-  /** 取件台：点某个本对话文件时预览它。 */
-  onPreviewFile?: (absPath: string, relPath: string) => void;
 }
 
 function basename(p: string) {
@@ -37,10 +34,7 @@ export default function ProjectSidebar({
   refreshKey,
   onNewChat,
   onOpenSession,
-  onPreviewFile,
 }: Props) {
-  // 「对话 / 文件」——同一根侧栏两种内容，宽度不变（决策 2）。
-  const [tab, setTab] = useState<"chats" | "files">("chats");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [limit, setLimit] = useState(15);
   const [loading, setLoading] = useState(true);
@@ -142,37 +136,6 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      <div className="flex px-2 pt-2 gap-1 border-b border-line">
-        {(
-          [
-            ["chats", "对话"],
-            ["files", "文件"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`flex-1 h-7 rounded-t-md text-[12px] transition-colors border-b-2 ${
-              tab === id
-                ? "text-fg border-fg/60"
-                : "text-subtle border-transparent hover:text-muted"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "files" ? (
-        <div className="flex-1 min-h-0">
-          <FilesPanel
-            sessionId={currentSessionId}
-            cwd={cwd}
-            refreshKey={refreshKey}
-            onOpenFile={onPreviewFile}
-          />
-        </div>
-      ) : (
       <div className="flex-1 overflow-y-auto py-2">
         {loading ? (
           <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
@@ -239,7 +202,6 @@ export default function ProjectSidebar({
           </>
         )}
       </div>
-      )}
     </aside>
   );
 }

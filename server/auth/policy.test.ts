@@ -583,6 +583,37 @@ try {
   assert.equal(unclassified.status, 403, "a route with no policy must be refused");
   assert.notEqual(await unclassified.text(), "LEAKED");
 
+  // ── the serveDist branch is part of the route table too ──────────────────
+  //
+  // Regression (2026-08-27): the production app mounts a static handler plus a
+  // fallback, and a fallback written as `app.all("/api/*", …)` **took down the
+  // whole API**. targetRoute() reads the LAST non-"/*" entry of
+  // c.req.matchedRoutes, so a route registered after the real ones matches
+  // every /api/* request; having no policy entry, fail-closed answered 403 for
+  // everything. It escaped this file because the coverage block above builds
+  // createApp() with no options — i.e. never the shape production runs.
+  process.env.CC_WEBUI_GROUPS_ENABLED = "1";
+  const prod = createApp({ serveDist: true });
+  delete process.env.CC_WEBUI_GROUPS_ENABLED;
+
+  const prodUncovered = routesOf(prod)
+    .filter((r) => r.path !== "/*")
+    .filter((r) => !policyFor(r.method, r.path));
+  assert.deepEqual(
+    prodUncovered,
+    [],
+    "serveDist must not register any route of its own — use app.notFound()",
+  );
+
+  // And the behaviour that fallback exists for: an unknown /api path answers
+  // JSON, not index.html. A stale backend serving HTML to fetch().json() shows
+  // up as `Unexpected token '<'`, which names neither the route nor the cause.
+  const ghost = await prod.request("/api/no-such-thing", { headers: cookie(admin.id) });
+  assert.equal(ghost.status, 404);
+  assert.match((await ghost.json()).error, /no such API route/);
+
+  assert.equal((await prod.request("/api/meta", { headers: cookie(admin.id) })).status, 200);
+
   console.log("policy.test.ts: all assertions passed");
 } finally {
   closeDb();
