@@ -40,8 +40,11 @@ interface Props {
   sessionId?: string | null;
   /** 内嵌在右侧格里时用：不自带宽度/左边框，由那一格给。 */
   embedded?: boolean;
-  /** 有值就在标题栏右端画一颗「收起面板」——内嵌时它是这一格唯一常驻的表头。 */
-  onClose?: () => void;
+  /**
+   * 右端留出 52px 给窗口右上角那颗浮动的「文件面板」开关。
+   * 只有当这一栏就是右侧格最上面那条（＝没有文档打开、树占满整格）时才需要。
+   */
+  reserveRight?: boolean;
 }
 
 type Ctx = {
@@ -69,7 +72,7 @@ export default function FileExplorer({
   onPreviewFile,
   sessionId,
   embedded,
-  onClose,
+  reserveRight,
 }: Props) {
   const [rootEntries, setRootEntries] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -187,7 +190,13 @@ export default function FileExplorer({
           : "w-[280px] shrink-0 border-l border-line flex flex-col bg-canvas"
       }
     >
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-line shrink-0">
+      {/* ⚠️ h-14 是**和主栏顶栏同一个高度**：不等高的话两条下边框错开一截，
+          看着就是「对不齐」（用户 2026-08-27 反馈）。 */}
+      <div
+        className={`flex items-center gap-1.5 h-14 pl-3 border-b border-line shrink-0 ${
+          reserveRight ? "pr-[52px]" : "pr-3"
+        }`}
+      >
         <span
           className="font-mono text-[11px] text-subtle flex-1 truncate"
           title={`上传落点：${uploadDir}`}
@@ -256,23 +265,6 @@ export default function FileExplorer({
           className="hidden"
           onChange={(e) => void doUpload(e.target.files)}
         />
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="shrink-0 text-subtle hover:text-fg px-1 py-1 rounded hover:bg-fg/5"
-            title="收起面板"
-            aria-label="收起面板"
-          >
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path
-                d="M2 2L9 9M9 2L2 9"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
-        )}
       </div>
 
       {err && (

@@ -17,12 +17,20 @@ interface Props {
 }
 
 // 主题跟着应用的 CSS 变量走，light/dark 自动对齐，不引第三方主题包。
+//
+// ⚠️ **`&`（＝`.cm-editor`）必须有高度，`.cm-scroller` 必须自己 overflow:auto。**
+// 这是 CodeMirror 官方文档写的「内部滚动」配方，不是可选项。以前的写法是给外层
+// 那个 div 挂 `overflow-auto`、编辑器不限高 ⇒ `.cm-editor` 长到整份文档的高度、
+// 外层在滚 ⇒ **CM 的视口虚拟化被绕过，整份文档一次全渲染**。表现就是「编辑器
+// 有点不跟鼠标、总是卡卡的」（用户 2026-08-27 反馈），文件越大越明显。
 const THEME_VARS: Record<string, Record<string, string>> = {
   "&": {
+    height: "100%",
     backgroundColor: "transparent",
     color: "var(--color-fg)",
     fontSize: "12.5px",
   },
+  ".cm-scroller": { overflow: "auto" },
   ".cm-content": { fontFamily: "var(--font-mono, ui-monospace, monospace)" },
   ".cm-gutters": {
     backgroundColor: "transparent",
@@ -140,5 +148,6 @@ export default function TextEditor({
     );
   }
 
-  return <div ref={host} className="h-full overflow-auto" />;
+  // ⚠️ 外层**不能**再挂 overflow：滚动归 `.cm-scroller`（见 THEME_VARS 顶部注释）。
+  return <div ref={host} className="h-full min-h-0" />;
 }

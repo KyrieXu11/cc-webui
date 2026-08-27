@@ -29,7 +29,6 @@ const DOCK_WIDE_RATIO = 0.5;
 interface Props {
   /** 面板是否展开（顶栏那颗按钮）。收起时**不卸载**，只是 hidden。 */
   open: boolean;
-  onClose: () => void;
   /** 有文件被要求打开时：面板可能是收起的，得让 App 把它展开。 */
   onRequestOpen: () => void;
   narrow: boolean;
@@ -45,7 +44,6 @@ interface Props {
 
 export default function RightDock({
   open,
-  onClose,
   onRequestOpen,
   narrow,
   officeEnabled,
@@ -128,7 +126,7 @@ export default function RightDock({
               sessionId={sessionId}
               onInsertFile={onInsertFile}
               onPreviewFile={onPreviewFile}
-              onClose={onClose}
+              reserveRight={!hasDoc}
             />
           ) : (
             <div className="p-4 text-[12px] text-subtle">还没有打开项目。</div>
@@ -154,7 +152,9 @@ export default function RightDock({
         {/* ── 右栏：打开的文档（标签叠在上面）──────────────────────────── */}
         {hasDoc && (
           <div className="flex-1 min-w-0 flex flex-col">
-            <div className="flex items-stretch gap-0.5 px-2 pt-2 border-b border-line overflow-x-auto shrink-0">
+            {/* ⚠️ h-14＝主栏顶栏的高度（对齐），pr-[52px] 给窗口右上角那颗浮动开关让位。
+                标签底对齐，下划线正好落在这条下边框上。 */}
+            <div className="flex items-end gap-0.5 h-14 pb-0 pl-2 pr-[52px] border-b border-line overflow-x-auto shrink-0">
               {docs.map((t) => (
                 <div
                   key={t.path}

@@ -1078,7 +1078,10 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full bg-canvas overflow-hidden">
+    // ⚠️ relative：右上角那颗「文件面板」开关是绝对定位的（照律枢
+    // `.paneltgl.docktoggle{position:absolute;top:11px;right:12px}`）——它必须
+    // **位置不动、图标不变**，不能一会儿长在顶栏里、一会儿变成右侧格里的 ✗。
+    <div className="relative flex h-full bg-canvas overflow-hidden">
       {/* 桌面：rail(56) + 会话栏(260) 两根常驻列。
           窄屏：同样两个组件原封不动，只是整体变成一个 316px 的左抽屉滑出来
           —— 这是选方案 B 的理由，侧栏组件本身一行都不用改。 */}
@@ -1156,10 +1159,9 @@ export default function App() {
               provider={settings.agentProvider}
               onHome={goHome}
               onNewChat={handleNewChat}
-              onToggleFiles={() => setDockOpen((o) => !o)}
-              filesOpen={dockOpen}
               onPickProject={openProject}
               onPickSession={openSession}
+              reserveRight={!dockOpen}
             />
             <main className="flex-1 relative overflow-hidden">
               <div ref={scrollRef} className="h-full overflow-y-auto">
@@ -1258,9 +1260,45 @@ export default function App() {
       </div>
       {/* 右侧格：App 层唯一一份。⚠️ 不要下沉到某个视图里去渲染——切走就卸载，
           而卸载会销毁编辑器（以后是 OnlyOffice iframe，律枢在那儿栽过）。 */}
+      {/* 「文件面板」开关。**绝对定位在窗口右上角、图标永不变**，照律枢
+          `.paneltgl.docktoggle{position:absolute;top:11px;right:12px}`。
+          ⚠️ 别再把它挪进顶栏、也别在右侧格里另开一个 ✗：那样它会随主栏宽度飘、
+          还变成两种不同的东西（用户 2026-08-27：「一下是个侧边栏按钮一下是一个 ❌，
+          而且每次还对不齐」）。开关状态只用背景色表示。 */}
+      {inProject && (
+        <button
+          aria-label="切换文件面板"
+          title="文件面板（项目文件）"
+          onClick={() => setDockOpen((o) => !o)}
+          className={`absolute top-[11px] right-3 z-50 p-2 rounded-md border transition-colors ${
+            dockOpen
+              ? "text-fg bg-fg/[0.06] border-line-strong"
+              : "text-muted hover:text-fg border-transparent hover:bg-fg/5"
+          }`}
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <rect
+              x="2"
+              y="3"
+              width="12"
+              height="10"
+              rx="1.5"
+              stroke="currentColor"
+              strokeWidth="1.3"
+            />
+            <line
+              x1="10"
+              y1="3"
+              x2="10"
+              y2="13"
+              stroke="currentColor"
+              strokeWidth="1.3"
+            />
+          </svg>
+        </button>
+      )}
       <RightDock
         open={dockOpen}
-        onClose={() => setDockOpen(false)}
         onRequestOpen={openDock}
         narrow={narrow}
         officeEnabled={officeFeature}
