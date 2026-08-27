@@ -1,22 +1,80 @@
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { listTree, type TreeEntry } from "../lib/fs";
+import { deleteFiles, uploadToDir } from "../lib/files";
+import { openInDock } from "../lib/dock-bridge";
+
+// 项目文件面板：目录树 + 对这些文件的操作（打开/编辑、多选删除、上传、@插入）。
+//
+// **这是唯一的文件面板。**（2026-08-27 二次返工：先把「本对话文件」列表塞进左侧栏——
+// 按钮在右上角、开出来的东西在左边；挪到右侧格后又变成「项目 / 本对话」两个都叫文件的
+// 标签。用户原话是「我要的只是项目文件，然后要有对项目文件做操作的这些模块」，所以操作
+// 直接挂在树上，不再按会话分出第二个列表。`docs/file-manager.md` 决策 2/4 已改。）
+//
+// 操作与树的关系：
+//   · 点文件名   → 在右侧格里打开（文本进编辑器、md 可渲染、Office 走 ONLYOFFICE）
+//   · 勾选       → 批量删除（**真删、无回收站**，所以确认弹窗逐个列出文件名——批量删除
+//                  最容易出的事故是多选里混进了一个你没看见的）
+//   · 悬停的 @   → 把相对路径插进对话框（原来的「单击插入」，给 agent 指路用）
+//   · 点文件夹   → 除了展开/收起，还把它设成**上传落点**（标题栏那颗「上传」的目标）
+//
+// 刷新是整棵树重挂（`key={seq}`）：每个 DirRow 各自懒加载 children，逐个 refetch 既要
+// 跨组件通信又容易漏掉没展开的那些，重挂一次干净，而这棵树本来就是懒的。
 
 interface Props {
   cwd: string;
   onInsertFile: (absPath: string, relPath: string) => void;
+  /** ⌘/Ctrl+单击的速览（浮窗），不占右侧格的标签。 */
   onPreviewFile: (absPath: string, relPath: string) => void;
-  /** 内嵌在右侧格的一个标签里时用：不自带宽度/左边框/标题，由那一格给。 */
+  /** 当前会话 id —— 只用于删除留痕（file_deletions），没有也能删。 */
+  sessionId?: string | null;
+  /** 内嵌在右侧格的一个标签里时用：不自带宽度/左边框，由那一格给。 */
   embedded?: boolean;
 }
+
+type Ctx = {
+  picked: Map<string, string>;
+  toggle: (path: string, name: string) => void;
+  insert: (abs: string) => void;
+  preview: (abs: string) => void;
+  uploadDir: string;
+  setUploadDir: (d: string) => void;
+};
+
+const TreeCtx = createContext<Ctx | null>(null);
+const useTree = () => {
+  const c = useContext(TreeCtx);
+  if (!c) throw new Error("TreeCtx missing");
+  return c;
+};
 
 export default function FileExplorer({
   cwd,
   onInsertFile,
   onPreviewFile,
+  sessionId,
   embedded,
 }: Props) {
   const [rootEntries, setRootEntries] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [seq, setSeq] = useState(0);
+  const [picked, setPicked] = useState<Map<string, string>>(() => new Map());
+  const [uploadDir, setUploadDir] = useState(cwd);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setUploadDir(cwd);
+    setPicked(new Map());
+  }, [cwd]);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,13 +86,65 @@ export default function FileExplorer({
     return () => {
       cancelled = true;
     };
-  }, [cwd]);
+  }, [cwd, seq]);
+
+  const refresh = useCallback(() => setSeq((n) => n + 1), []);
 
   const toRel = (abs: string) =>
     abs.startsWith(cwd + "/") ? abs.slice(cwd.length + 1) : abs;
 
-  const insertFile = (abs: string) => onInsertFile(abs, toRel(abs));
-  const previewFile = (abs: string) => onPreviewFile(abs, toRel(abs));
+  const insert = (abs: string) => onInsertFile(abs, toRel(abs));
+  const preview = (abs: string) => onPreviewFile(abs, toRel(abs));
+
+  const ctx: Ctx = {
+    picked,
+    toggle: (path, name) =>
+      setPicked((cur) => {
+        const next = new Map(cur);
+        if (next.has(path)) next.delete(path);
+        else next.set(path, name);
+        return next;
+      }),
+    insert,
+    preview,
+    uploadDir,
+    setUploadDir,
+  };
+
+  const doDelete = async () => {
+    setBusy("删除中…");
+    try {
+      const r = await deleteFiles([...picked.keys()], sessionId ?? null);
+      setErr(
+        r.failed.length
+          ? `${r.failed.length} 个没删掉：` +
+              r.failed.map((f) => `${f.path}（${f.error}）`).join("；")
+          : null
+      );
+      setPicked(new Map());
+      setConfirming(false);
+      refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doUpload = async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    setBusy("上传中…");
+    try {
+      await uploadToDir(uploadDir, list);
+      setErr(null);
+      refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      setBusy(null);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
 
   return (
     <aside
@@ -44,63 +154,148 @@ export default function FileExplorer({
           : "w-[280px] shrink-0 border-l border-line flex flex-col bg-canvas"
       }
     >
-      <div className="px-4 py-2.5 border-b border-line">
-        <div className="font-mono text-[11.5px] text-muted truncate">
-          {cwd}
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto py-1.5 pr-1">
-        {loading ? (
-          <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
-        ) : !rootEntries || rootEntries.length === 0 ? (
-          <div className="px-4 py-3 text-[12px] text-subtle">空目录</div>
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-line shrink-0">
+        <span
+          className="font-mono text-[11px] text-subtle flex-1 truncate"
+          title={`上传落点：${uploadDir}`}
+        >
+          {busy ??
+            (loading
+              ? "读取中…"
+              : uploadDir === cwd
+                ? "根目录"
+                : toRel(uploadDir))}
+        </span>
+        {picked.size > 0 ? (
+          <>
+            <button
+              onClick={() => {
+                for (const p of picked.keys()) insert(p);
+                setPicked(new Map());
+              }}
+              className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
+              title="把选中的相对路径插进对话框"
+            >
+              @ {picked.size}
+            </button>
+            <button
+              onClick={() => setConfirming(true)}
+              className="font-mono text-[11px] text-red border border-red/40 hover:border-red/70 rounded px-2 py-0.5 transition-colors"
+            >
+              删除 {picked.size}
+            </button>
+          </>
         ) : (
-          rootEntries.map((e) =>
-            e.type === "dir" ? (
-              <DirRow
-                key={e.path}
-                entry={e}
-                depth={0}
-                onInsertFile={insertFile}
-                onPreviewFile={previewFile}
-              />
-            ) : (
-              <FileRow
-                key={e.path}
-                entry={e}
-                depth={0}
-                onInsertFile={insertFile}
-                onPreviewFile={previewFile}
-              />
-            )
-          )
+          <>
+            <button
+              onClick={() => fileInput.current?.click()}
+              className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
+              title={`上传到 ${uploadDir}（点某个文件夹可换落点）`}
+            >
+              上传
+            </button>
+            <button
+              onClick={refresh}
+              className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
+              title="重新读取目录"
+            >
+              刷新
+            </button>
+          </>
         )}
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => void doUpload(e.target.files)}
+        />
       </div>
+
+      {err && (
+        <div className="px-3 py-2 text-[11.5px] text-red border-b border-line break-words shrink-0">
+          {err}
+        </div>
+      )}
+
+      <TreeCtx.Provider value={ctx}>
+        <div key={seq} className="flex-1 overflow-y-auto py-1.5 pr-1">
+          {loading ? (
+            <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
+          ) : !rootEntries || rootEntries.length === 0 ? (
+            <div className="px-4 py-3 text-[12px] text-subtle">空目录</div>
+          ) : (
+            rootEntries.map((e) => <Row key={e.path} entry={e} depth={0} />)
+          )}
+        </div>
+      </TreeCtx.Provider>
+
+      {confirming && (
+        <div className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-6">
+          <div className="bg-canvas border border-line rounded-lg shadow-2xl max-w-[440px] w-full p-4 space-y-3">
+            <div className="text-[14px] text-fg font-semibold">
+              删除 {picked.size} 个文件？
+            </div>
+            <div className="text-[12.5px] text-orange leading-relaxed">
+              直接删掉，<span className="font-semibold">没有回收站</span>
+              ，也没有版本可以回退。
+            </div>
+            {/* 逐个列出来：批量删除最容易出的事故是多选里混进了没看见的那一个。 */}
+            <div className="max-h-[180px] overflow-y-auto bg-surface border border-line rounded p-2 space-y-0.5">
+              {[...picked.entries()].map(([path, name]) => (
+                <div
+                  key={path}
+                  className="font-mono text-[11.5px] text-muted truncate"
+                  title={path}
+                >
+                  {name}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setConfirming(false)}
+                className="text-[12.5px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-3 py-1 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => void doDelete()}
+                disabled={busy !== null}
+                className="text-[12.5px] text-red border border-red/50 hover:border-red rounded px-3 py-1 transition-colors disabled:opacity-40"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
 
-function DirRow({
-  entry,
-  depth,
-  onInsertFile,
-  onPreviewFile,
-}: {
-  entry: TreeEntry;
-  depth: number;
-  onInsertFile: (abs: string) => void;
-  onPreviewFile: (abs: string) => void;
-}) {
+function Row({ entry, depth }: { entry: TreeEntry; depth: number }) {
+  return entry.type === "dir" ? (
+    <DirRow entry={entry} depth={depth} />
+  ) : (
+    <FileRow entry={entry} depth={depth} />
+  );
+}
+
+function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
+  const { uploadDir, setUploadDir } = useTree();
   const [open, setOpen] = useState(false);
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const isTarget = uploadDir === entry.path;
 
   const toggle = async () => {
+    // 点文件夹同时把它设成上传落点：这是「上传到本文件夹」唯一需要的手势。
+    setUploadDir(entry.path);
     if (!open && !children) {
       setLoading(true);
       try {
-        const es = await listTree(entry.path);
-        setChildren(es);
+        setChildren(await listTree(entry.path));
       } finally {
         setLoading(false);
       }
@@ -112,8 +307,13 @@ function DirRow({
     <>
       <button
         onClick={toggle}
-        className="w-full flex items-center gap-1.5 py-1 pr-2 text-left text-muted hover:text-fg hover:bg-fg/[0.025] transition-colors rounded-sm"
+        className={`w-full flex items-center gap-1.5 py-1 pr-2 text-left transition-colors rounded-sm ${
+          isTarget
+            ? "text-fg bg-blue/10"
+            : "text-muted hover:text-fg hover:bg-fg/[0.025]"
+        }`}
         style={{ paddingLeft: 8 + depth * 12 }}
+        title={`${entry.path}\n（点一下：展开 / 设为上传落点）`}
       >
         <Chevron open={open} />
         <FolderIcon />
@@ -127,71 +327,54 @@ function DirRow({
           …
         </div>
       )}
-      {open && children && (
-        <>
-          {children.map((c) =>
-            c.type === "dir" ? (
-              <DirRow
-                key={c.path}
-                entry={c}
-                depth={depth + 1}
-                onInsertFile={onInsertFile}
-                onPreviewFile={onPreviewFile}
-              />
-            ) : (
-              <FileRow
-                key={c.path}
-                entry={c}
-                depth={depth + 1}
-                onInsertFile={onInsertFile}
-                onPreviewFile={onPreviewFile}
-              />
-            )
-          )}
-        </>
-      )}
+      {open &&
+        children?.map((c) => <Row key={c.path} entry={c} depth={depth + 1} />)}
     </>
   );
 }
 
-function FileRow({
-  entry,
-  depth,
-  onInsertFile,
-  onPreviewFile,
-}: {
-  entry: TreeEntry;
-  depth: number;
-  onInsertFile: (abs: string) => void;
-  onPreviewFile: (abs: string) => void;
-}) {
-  const onClick = (e: React.MouseEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      onPreviewFile(entry.path);
-      return;
-    }
-    onInsertFile(entry.path);
-  };
-
-  const onContextMenu = (e: React.MouseEvent) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      onPreviewFile(entry.path);
-    }
-  };
+function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
+  const { picked, toggle, insert, preview } = useTree();
+  const checked = picked.has(entry.path);
 
   return (
-    <button
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      className="w-full flex items-center gap-1.5 py-1 pr-2 text-left text-muted hover:text-fg hover:bg-fg/[0.025] transition-colors rounded-sm"
-      style={{ paddingLeft: 8 + depth * 12 + 10 }}
-      title={`${entry.path}\n(单击插入 · Ctrl/⌘+单击预览)`}
+    <div
+      className={`group w-full flex items-center gap-1.5 py-1 pr-1.5 rounded-sm transition-colors ${
+        checked ? "bg-blue/10" : "hover:bg-fg/[0.025]"
+      }`}
+      style={{ paddingLeft: 8 + depth * 12 }}
     >
-      <FileIcon />
-      <span className="font-mono text-[12px] truncate">{entry.name}</span>
-    </button>
+      {/* 没选中时保持低可见度（树看着才不像一排表单），选中或悬停即实体化。 */}
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={() => toggle(entry.path, entry.name)}
+        aria-label={`选择 ${entry.name}`}
+        className={`shrink-0 accent-blue transition-opacity ${
+          checked ? "opacity-100" : "opacity-25 group-hover:opacity-100"
+        }`}
+      />
+      <button
+        onClick={(e) =>
+          e.metaKey || e.ctrlKey
+            ? preview(entry.path)
+            : openInDock({ path: entry.path, name: entry.name })
+        }
+        className="flex-1 min-w-0 flex items-center gap-1.5 text-left text-muted hover:text-fg transition-colors"
+        title={`${entry.path}\n（单击：在右侧打开 · ⌘/Ctrl+单击：浮窗速览）`}
+      >
+        <FileIcon />
+        <span className="font-mono text-[12px] truncate">{entry.name}</span>
+      </button>
+      <button
+        onClick={() => insert(entry.path)}
+        className="shrink-0 font-mono text-[11px] text-subtle hover:text-fg px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+        title="把相对路径插进对话框"
+        aria-label={`插入 ${entry.name} 的路径`}
+      >
+        @
+      </button>
+    </div>
   );
 }
 

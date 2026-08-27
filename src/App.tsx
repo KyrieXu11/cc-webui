@@ -1266,7 +1266,6 @@ export default function App() {
         officeEnabled={officeFeature}
         cwd={inProject ? projectCwd : ""}
         sessionId={sessionId}
-        refreshKey={sessionsRefreshKey}
         onInsertFile={insertFile}
         onPreviewFile={previewFile}
       />

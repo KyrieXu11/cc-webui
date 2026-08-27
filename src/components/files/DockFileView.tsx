@@ -46,6 +46,7 @@ export default function DockFileView({
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -163,6 +164,20 @@ export default function DockFileView({
                 : "已同步"}
         </span>
         <div className="flex-1" />
+        {loaded !== null && (
+          <button
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(draft)
+                .then(() => setCopied(true))
+                .then(() => setTimeout(() => setCopied(false), 1400));
+            }}
+            className="font-mono text-[11px] rounded px-2 py-0.5 border transition-colors text-muted hover:text-fg border-line hover:border-fg/30"
+            title="复制全文"
+          >
+            {copied ? "已复制" : "复制"}
+          </button>
+        )}
         {!rendered && !truncated && (
           <button
             onClick={() => void save()}

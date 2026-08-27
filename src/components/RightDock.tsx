@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import DockFileView from "./files/DockFileView";
-import FilesPanel from "./files/FilesPanel";
 import FileExplorer from "./FileExplorer";
 import Splitter, { paneNarrow } from "./Splitter";
 import { onDockOpen, type DockFile } from "../lib/dock-bridge";
@@ -11,17 +10,15 @@ import { onDockOpen, type DockFile } from "../lib/dock-bridge";
 // 各处各渲染一份的话，切走就卸载，而卸载会销毁编辑器 iframe ——「累积三次再也
 // 打不开」。所以这里的「关闭」是 CSS 层面的 hidden，不卸载。
 //
-// ⚠️ **文件相关的东西全在这一格里，不许再往左侧栏放第二份。**（2026-08-27 返工：
-// 取件台列表原来做成了左侧栏的一个 tab，而项目文件树在右边——按钮在右上角、开出来的
-// 东西在左边，两个文件面板抢一个位置。律枢是「一格多标签」，这里对齐。）
+// ⚠️ **只有一个文件列表，就是「项目」。**（2026-08-27 两次返工：先把「本对话文件」
+// 列表放进左侧栏——按钮在右上角、开出来的东西在左边；挪进这一格后又变成「项目 / 本对话」
+// 两个都叫文件的标签。用户原话：「我要的只是项目文件，然后要有对项目文件做操作的这些
+// 模块」⇒ 操作挂在树上，取件台那条按会话过滤的列表从 UI 上撤掉。）
 //
 // 文档标签是内存态，刷新即清（决策 15）：取件台的动作是「进去取件、改完出来」，
 // 持久化会引入「标签指向的文件被 agent 删了/改名了」这类要维护的悬空状态。
 
-type Tab =
-  | { kind: "tree" }
-  | { kind: "files" }
-  | { kind: "doc"; path: string; name: string };
+type Tab = { kind: "tree" } | { kind: "doc"; path: string; name: string };
 
 const keyOf = (t: Tab) => (t.kind === "doc" ? `doc:${t.path}` : t.kind);
 
@@ -39,10 +36,8 @@ interface Props {
   officeEnabled?: boolean;
   /** 当前项目 cwd；空串表示没进项目（此时不拉目录树）。 */
   cwd: string;
-  /** 当前会话 id —— 「文件」标签（取件台）按它取本对话文件。 */
+  /** 当前会话 id —— 只用于删除留痕。 */
   sessionId: string | null;
-  /** 变化即让取件台重新拉取（turn 结束时前进）。 */
-  refreshKey?: number;
   onInsertFile: (absPath: string, relPath: string) => void;
   onPreviewFile: (absPath: string, relPath: string) => void;
 }
@@ -55,12 +50,11 @@ export default function RightDock({
   officeEnabled,
   cwd,
   sessionId,
-  refreshKey,
   onInsertFile,
   onPreviewFile,
 }: Props) {
   const [docs, setDocs] = useState<DockFile[]>([]);
-  const [active, setActive] = useState<string>("files");
+  const [active, setActive] = useState<string>("tree");
   // 「重新打开」用的令牌：按路径记一个计数，变化即让那份 DockFileView 重建。
   const [reloadTokens, setReloadTokens] = useState<Record<string, number>>({});
 
@@ -84,7 +78,7 @@ export default function RightDock({
           ? a
           : next.length
             ? `doc:${next[next.length - 1].path}`
-            : "files"
+            : "tree"
       );
       return next;
     });
@@ -92,7 +86,6 @@ export default function RightDock({
 
   const tabs: Tab[] = [
     { kind: "tree" },
-    { kind: "files" },
     ...docs.map((d) => ({ kind: "doc" as const, ...d })),
   ];
 
@@ -133,8 +126,7 @@ export default function RightDock({
         <div className="flex items-stretch gap-0.5 px-2 pt-2 border-b border-line overflow-x-auto shrink-0">
           {tabs.map((t) => {
             const k = keyOf(t);
-            const label =
-              t.kind === "tree" ? "项目" : t.kind === "files" ? "本对话" : t.name;
+            const label = t.kind === "tree" ? "项目" : t.name;
             return (
               <div
                 key={k}
@@ -200,6 +192,7 @@ export default function RightDock({
             <FileExplorer
               embedded
               cwd={cwd}
+              sessionId={sessionId}
               onInsertFile={onInsertFile}
               onPreviewFile={onPreviewFile}
             />
@@ -208,15 +201,6 @@ export default function RightDock({
           )}
         </div>
 
-        <div
-          className={`flex-1 min-h-0 ${active === "files" ? "" : "hidden"}`}
-        >
-          <FilesPanel
-            sessionId={sessionId}
-            cwd={cwd}
-            refreshKey={refreshKey}
-          />
-        </div>
 
         {docs.map((t) => (
           <div
