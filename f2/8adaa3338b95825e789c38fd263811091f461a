@@ -1,0 +1,28 @@
+src/components/RightDock.tsx
+  s_608e4f05a64aff::t_672da53c5d0228 13-16,21,39,57,81,129,195
+server/chat.ts
+  s_608e4f05a64aff::t_9d9d7381b03f7e 13-18
+src/components/files/DockFileView.tsx
+  s_608e4f05a64aff::t_23daa6f0809f37 49,167-180
+src/components/FileExplorer.tsx
+  s_608e4f05a64aff::t_69609b8642802d 33,45,97,109,337,358-362,364
+  s_608e4f05a64aff::t_3df6bfd26b1b08 1-8,10-28,35-37,41-44,46-56,61,66-77,89-91,96,98-108,110-147,157-187,189-204,206-212,214-272,277-286,290,293-294,298,310-314,316,330-331,336,338,341-345,347-357,363,365-377
+docs/file-manager.md
+  s_608e4f05a64aff::t_9c6a586f96854b 20,24,128-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "f28adaa3338b95825e789c38fd263811091f461a",
+  "prompts": {},
+  "sessions": {
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
