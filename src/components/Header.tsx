@@ -5,6 +5,12 @@ import type { SessionSummary } from "../lib/sessions";
 import { providerLabel, type AgentProvider } from "../lib/settings";
 
 interface Props {
+  /**
+   * 右端留出 52px。**右上角那颗「文件面板」开关是绝对定位在窗口右上角的**（照律枢
+   * 的 `.docktoggle`，位置不动、图标不变），面板收起时主栏顶到窗口右沿 ⇒ 不留位就
+   * 会盖住「新对话」。面板展开时那颗按钮浮在右侧格上面，主栏不需要让位。
+   */
+  reserveRight?: boolean;
   // 窄屏专用：打开左抽屉（rail + 会话栏）。桌面那两根是常驻列，不需要。
   onOpenNav?: () => void;
   sessionId?: string | null;
@@ -13,8 +19,6 @@ interface Props {
   provider: AgentProvider;
   onHome?: () => void;
   onNewChat?: () => void;
-  onToggleFiles?: () => void;
-  filesOpen?: boolean;
   onPickProject?: (cwd: string) => void;
   onPickSession?: (s: SessionSummary) => void;
 }
@@ -32,10 +36,9 @@ export default function Header({
   provider,
   onHome,
   onNewChat,
-  onToggleFiles,
-  filesOpen,
   onPickProject,
   onPickSession,
+  reserveRight,
 }: Props) {
   const accent = PROVIDER_ACCENT[provider];
 
@@ -72,7 +75,9 @@ export default function Header({
   return (
     <header
       ref={bar}
-      className="flex items-center gap-4 max-md:gap-2 h-14 px-5 max-md:pl-1 max-md:pr-2 border-b border-line shrink-0"
+      className={`flex items-center gap-4 max-md:gap-2 h-14 pl-5 max-md:pl-1 border-b border-line shrink-0 ${
+        reserveRight ? "pr-[52px]" : "pr-5 max-md:pr-2"
+      }`}
     >
       {onOpenNav && (
         <button
@@ -171,34 +176,6 @@ export default function Header({
             />
           </svg>
           <span className={tight ? "hidden" : undefined}>新对话</span>
-        </button>
-        <button
-          aria-label="切换文件面板"
-          title="文件面板（项目 / 本对话文件）"
-          onClick={onToggleFiles}
-          className={`p-2 rounded-md hover:bg-fg/5 transition-colors ${
-            filesOpen ? "text-fg bg-fg/[0.04]" : "text-muted hover:text-fg"
-          }`}
-        >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <rect
-              x="2"
-              y="3"
-              width="12"
-              height="10"
-              rx="1.5"
-              stroke="currentColor"
-              strokeWidth="1.3"
-            />
-            <line
-              x1="10"
-              y1="3"
-              x2="10"
-              y2="13"
-              stroke="currentColor"
-              strokeWidth="1.3"
-            />
-          </svg>
         </button>
       </div>
     </header>
