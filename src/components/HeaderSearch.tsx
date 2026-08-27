@@ -112,8 +112,11 @@ export default function HeaderSearch({
     }
   };
 
+  // ⚠️ 下面 `min-w-0` 两处都要：`<input>` 有浏览器给的内在最小宽度，只有容器
+  // min-w-0 的话它照样撑到 ~46px 溢出出去，画在右边那颗 via 徽标上面
+  // （右侧格开着、主栏被挤窄时必现）。
   return (
-    <div ref={boxRef} className="relative w-full max-w-[420px]">
+    <div ref={boxRef} className="relative w-full max-w-[420px] min-w-0">
       <div className="relative">
         <svg
           className="absolute left-2.5 top-1/2 -translate-y-1/2 text-subtle"
@@ -136,7 +139,7 @@ export default function HeaderSearch({
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           placeholder="搜索项目或对话"
-          className="w-full h-8 pl-8 pr-3 rounded-md bg-surface border border-line text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
+          className="w-full min-w-0 h-8 pl-8 pr-3 rounded-md bg-surface border border-line text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
         />
       </div>
       {open && (
