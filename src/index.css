@@ -25,6 +25,26 @@
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
 }
 
+/* 代码高亮的配色。**用 CSS 变量而不是在 JS 里按主题切两套 HighlightStyle**：
+   CodeMirror 生成的类里写 `var(--syn-x)`，浏览器在渲染时按当前 :root 解析，
+   换主题即时生效，编辑器这边一行 JS 都不用管。
+   ⚠️ CodeMirror 的 `basicSetup` 自带 defaultHighlightStyle，那是**亮色**配色
+   （关键字 #708 深紫、标识符 #00f 纯蓝），落在本项目近黑的 #0a0d14 上基本读不出来。
+   所以 TextEditor 必须显式加 appSyntaxHighlighting 把它盖掉。 */
+:root {
+  --syn-keyword: #b78cff;
+  --syn-string: #7ee0a8;
+  --syn-number: #ef9d5a;
+  --syn-comment: #6b7079;
+  --syn-func: #7aa2f7;
+  --syn-type: #5ecfd6;
+  --syn-var: #c3c8d4;
+  --syn-def: #e8eaed;
+  --syn-punct: #8a90a0;
+  --syn-meta: #e0a030;
+  --syn-invalid: #e05252;
+}
+
 :root[data-theme="light"] {
   --color-canvas: #fafafa;
   --color-surface: #ffffff;
@@ -34,6 +54,18 @@
   --color-subtle: #9ca3af;
   --color-line: rgba(0, 0, 0, 0.08);
   --color-line-strong: rgba(0, 0, 0, 0.14);
+
+  --syn-keyword: #8250df;
+  --syn-string: #0a7c42;
+  --syn-number: #b3541e;
+  --syn-comment: #6e7781;
+  --syn-func: #1f5edb;
+  --syn-type: #0e7490;
+  --syn-var: #24292f;
+  --syn-def: #111827;
+  --syn-punct: #57606a;
+  --syn-meta: #9a6700;
+  --syn-invalid: #cf222e;
 }
 
 html,
