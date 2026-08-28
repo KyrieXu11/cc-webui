@@ -1,0 +1,42 @@
+src/components/Markdown.tsx
+  s_608e4f05a64aff::t_fbd3536bd25e95 3,14,108
+package.json
+  s_608e4f05a64aff::t_b5b8a8f65d5df7 35
+  s_608e4f05a64aff::t_fafecafe84f05d 16-20,24-31
+src/components/HomeView.tsx
+  s_608e4f05a64aff::t_0e909f9a95ae37 555-559,561
+src/lib/cjk-autolink.ts
+  s_608e4f05a64aff::t_fbd3536bd25e95 1-88
+src/index.css
+  s_608e4f05a64aff::t_b5b8a8f65d5df7 28-47,57-68
+src/components/Header.tsx
+  s_608e4f05a64aff::t_8cc2832bf5d4dd 132
+  s_608e4f05a64aff::t_06ac40d888d389 108-114
+  s_608e4f05a64aff::t_b04f5c671aed57 133-142,145
+src/components/files/TextEditor.tsx
+  s_608e4f05a64aff::t_29f30f3c10b648 3,189-191
+  s_608e4f05a64aff::t_94c292d071d3e6 51-60,63-91,94,97-99,121,150,152-153
+  s_608e4f05a64aff::t_1be8ccad06b97c 2,61-62,100-120,122-149,151,154-156
+src/components/files/highlight.ts
+  s_608e4f05a64aff::t_29f30f3c10b648 1-58
+AGENTS.md
+  s_608e4f05a64aff::t_292d286dc11edf 85-94
+package-lock.json
+  s_608e4f05a64aff::t_6ac6f51aa40029 12-16,20-27,31,546-555,569-581,599-608,649-727,742-750,1340-1350,1362-1372,1393-1403,1445-1499
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "b4fd10ab8e1769855ce9577f16ef83bd93db9443",
+  "prompts": {},
+  "sessions": {
+    "s_608e4f05a64aff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "383c6d92-64a4-4ae4-9019-d415be2e9bbe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
