@@ -76,6 +76,12 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   `settings.ts`（**model / mode / effort 选项与默认值**）、`groups.ts`、`sessions.ts`、`types.ts` 等。
 - `components/` — 单聊 UI；`components/group/` — 群聊 UI（`GroupChatView` / `GroupComposer` /
   `GroupConfigDialog` / `AgentTunePopover` / `ParticipantsBar` / `GroupSidebar`）。
+- **搜索只有两面，别加第三面**：`HeaderSearch.tsx` 是**项目内**顶栏那个下拉浮层
+  （分组 项目/对话、↑↓ 选、Enter 开、Esc 关）；首页「最近项目」那一行是**就地过滤**
+  （`HomeView` 里的 `SearchField`）—— 那一页本身就是结果列表，另开浮层去盖它没意义。
+  两处共用 `Highlighted.tsx` 画命中段，共用 `sessions.ts` 的 `SEARCH_WINDOW`
+  （**默认列表 60 条 ≠ 搜索范围**：搜索必须能翻到底，本机 786 个会话全拿是 ~677ms，
+  实测数据记在那个常量的注释里；聚焦搜索框才拉，首屏不拉）。
 
 ## 三个子系统
 

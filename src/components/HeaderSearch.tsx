@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getRecents, tildify, timeAgo, type RecentProject } from "../lib/fs";
-import { listSessions, type SessionSummary } from "../lib/sessions";
+import {
+  listSessions,
+  SEARCH_WINDOW,
+  type SessionSummary,
+} from "../lib/sessions";
+import Highlighted from "./Highlighted";
 import type { AgentProvider } from "../lib/settings";
 
 interface Props {
@@ -29,10 +34,21 @@ export default function HeaderSearch({
   const [idx, setIdx] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
 
+  // ⚠️ **窗口是 SEARCH_WINDOW，不是 100。** 本机有 786 个会话，只装 100 的话搜两周前
+  // 的东西一律「无匹配」—— 那比没有搜索更糟，用户会以为它被删了。
+  // 拉全量是 ~677ms（见 SEARCH_WINDOW 的实测），所以给一个 20 秒的新鲜度窗口：
+  // 反复开合不重复拉，而刚建完的会话下次打开还是能搜到。
+  const fetchedAt = useRef(0);
   useEffect(() => {
     if (!open) return;
+    if (Date.now() - fetchedAt.current < 20_000) return;
+    fetchedAt.current = Date.now();
     getRecents().then(setRecents).catch(() => {});
-    listSessions(100).then(setSessions).catch(() => {});
+    listSessions(SEARCH_WINDOW)
+      .then(setSessions)
+      .catch(() => {
+        fetchedAt.current = 0;
+      });
   }, [open]);
 
   useEffect(() => {
@@ -251,21 +267,5 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
       <span>{label}</span>
       <span className="text-subtle/60">· {count}</span>
     </div>
-  );
-}
-
-function Highlighted({ text, query }: { text: string; query: string }) {
-  const q = query.trim().toLowerCase();
-  if (!q) return <span>{text}</span>;
-  const pos = text.toLowerCase().indexOf(q);
-  if (pos < 0) return <span>{text}</span>;
-  return (
-    <span>
-      {text.slice(0, pos)}
-      <span className="text-fg font-medium bg-blue/20 rounded-sm px-[1px]">
-        {text.slice(pos, pos + query.length)}
-      </span>
-      {text.slice(pos + query.length)}
-    </span>
   );
 }
