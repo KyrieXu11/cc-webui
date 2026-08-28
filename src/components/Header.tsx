@@ -105,7 +105,13 @@ export default function Header({
           </span>
         </button>
         <span className="text-subtle max-md:hidden">·</span>
-        <span className="font-mono text-[12px] text-subtle px-1.5 truncate max-md:px-0">
+        {/* ⚠️ **cwd 要有宽度上限。** 只有 truncate 的话它要等到被挤才收缩，宽屏上一条
+            长绝对路径能独占一千像素，把中间的搜索框整个推到右边去（2500px 实测中心
+            偏离顶栏中线 386px）。截断后完整路径在 title 里，鼠标一停就能看。 */}
+        <span
+          title={projectPath}
+          className="font-mono text-[12px] text-subtle px-1.5 truncate max-w-[320px] max-md:px-0 max-md:max-w-none"
+        >
           {tildify(projectPath, home) || projectPath}
         </span>
         {sessionId && !tight && (
@@ -123,10 +129,20 @@ export default function Header({
       </div>
       {/* ⚠️ 不能用 flex-1：那是 basis:0、只吃「剩余」空间，而左边那串 cwd 绝对路径
           通常把整行吃光 —— 右侧格一开，搜索框就整块消失。basis:420 且可收缩：它先
-          要到 420，逼着左边那组按 truncate 让位，两边都还在。 */}
+          要到 420，逼着左边那组按 truncate 让位，两边都还在。
+          ⚠️ **`mx-auto` 是这条顶栏唯一的「撑开」机制。** 三组都不 grow，所以宽屏上
+          它们会全挤在左边、右侧留一大片空（2500px 的屏上「新对话」落在 x≈900，而
+          右上角那颗面板开关孤零零在 2400 —— 真机反馈「顶部这个布局明显不合理」）。
+          flex 的 auto margin **只吸收正的剩余空间**、空间为负时按 0 算，所以它把浪费
+          的那片空白平分到搜索框两侧，而空间一紧就自动退场，退化路径一行没变。
+          ⚠️ **不要改成「左右两条 `flex-1` 的等宽轨」去追求精确居中。** 试过：宽屏确实
+          正中（2500px 下偏差 16px），但代价是优先级反转 —— 空间不够时缺口只能由搜索框
+          或左边那组吞，实测 820px 下「新对话」跑到 x=824（顶栏只到 820）、直接压在右上角
+          那颗面板开关上。现在这版偏差约 (左组宽 − 右组宽)/2 ≈ 150px，2184px 的顶栏上
+          约 7%，看着就是居中；换来的是「品牌 > 操作 > 搜索」这个正确的让位次序。 */}
       <div
         ref={searchBox}
-        className="flex-[0_1_420px] flex justify-center min-w-0 max-md:hidden"
+        className="flex-[0_1_420px] mx-auto flex justify-center min-w-0 max-md:hidden"
       >
         {searchRoom && onPickProject && onPickSession && (
           <HeaderSearch

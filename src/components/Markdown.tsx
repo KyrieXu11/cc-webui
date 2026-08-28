@@ -1,13 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-// remark-gfm 的 autolink 不识别中文标点/中文字符为 URL 终止符，会把
-// "http://localhost:8787。刷新…" 整段吞成链接。这里在 URL 和紧跟的 CJK 字符
-// 之间插入一个空格，既不破坏正文语义，也让 autolink 正常停下来。
-const CJK_RE = /(https?:\/\/[^\s<>"'`]*?)([　-〿一-鿿＀-￯])/g;
-function fixAutolinkBoundaries(src: string): string {
-  return src.replace(CJK_RE, "$1 $2");
-}
+import remarkCjkAutolink from "../lib/cjk-autolink";
 
 interface Props {
   text: string;
@@ -18,7 +11,7 @@ interface Props {
 export default function Markdown({ text }: Props) {
   return (
     <ReactMarkdown
-      remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
+      remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkAutolink]}
       components={{
         p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
         h1: ({ children }) => (
@@ -112,7 +105,7 @@ export default function Markdown({ text }: Props) {
         ),
       }}
     >
-      {fixAutolinkBoundaries(text)}
+      {text}
     </ReactMarkdown>
   );
 }

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import type { Extension } from "@codemirror/state";
+import { appSyntaxHighlighting } from "./highlight";
 
 // CodeMirror 6 的薄包装。**动态 import**：主 bundle 不为一个校对场景涨 200KB
 // （决策 7），只有真正打开编辑器时才拉那个 chunk。
@@ -46,22 +48,112 @@ const THEME_VARS: Record<string, Record<string, string>> = {
   },
 };
 
-async function languageFor(filename: string) {
-  const ext = filename.slice(filename.lastIndexOf(".") + 1).toLowerCase();
-  if (ext === "md" || ext === "markdown" || ext === "mdx") {
-    return (await import("@codemirror/lang-markdown")).markdown();
-  }
-  if (ext === "json" || ext === "jsonc" || ext === "json5") {
-    return (await import("@codemirror/lang-json")).json();
-  }
-  if (["js", "jsx", "ts", "tsx", "mjs", "cjs"].includes(ext)) {
+// 语言表。**全部动态 import** —— 主 bundle 不为高亮涨体积，每种语言是自己的 lazy chunk，
+// 只在真打开那种文件时才下载。
+//
+// ⚠️ **加语言就加在这张表里，别在 `languageFor` 里堆 if。** 上一版只有 md / json /
+// js-ts 三个 if，其余一律 `return null` —— 于是打开 .py 完全没高亮（真机反馈原话：
+// 「不是有代码高亮了嘛，怎么 python 的没有高亮显示」），.sh / .yml / .css / .swift
+// 同理。三个 if 看不出这是个"缺省即无高亮"的坑，一张表看得出。
+//
+// 没有官方 lang 包的走 `StreamLanguage` + legacy-modes（CodeMirror 5 时代的 mode，
+// 高亮质量略糙但完全够看），见下面的 STREAM。
+const LANG: Record<string, () => Promise<Extension | null>> = {};
+const put = (exts: string, load: () => Promise<Extension | null>) => {
+  for (const e of exts.split(" ")) LANG[e] = load;
+};
+
+put("md markdown mdx", async () =>
+  (await import("@codemirror/lang-markdown")).markdown()
+);
+put("json jsonc json5", async () =>
+  (await import("@codemirror/lang-json")).json()
+);
+put("py pyi pyw", async () => (await import("@codemirror/lang-python")).python());
+put("css", async () => (await import("@codemirror/lang-css")).css());
+put("html htm vue svelte", async () =>
+  (await import("@codemirror/lang-html")).html()
+);
+put("yaml yml", async () => (await import("@codemirror/lang-yaml")).yaml());
+put("sql", async () => (await import("@codemirror/lang-sql")).sql());
+put("rs", async () => (await import("@codemirror/lang-rust")).rust());
+put("go", async () => (await import("@codemirror/lang-go")).go());
+put("xml svg xsl plist", async () =>
+  (await import("@codemirror/lang-xml")).xml()
+);
+put("java", async () => (await import("@codemirror/lang-java")).java());
+put("c h cc cpp cxx hpp hh m mm", async () =>
+  (await import("@codemirror/lang-cpp")).cpp()
+);
+put("php", async () => (await import("@codemirror/lang-php")).php());
+
+for (const ext of ["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"]) {
+  LANG[ext] = async () => {
     const { javascript } = await import("@codemirror/lang-javascript");
     return javascript({
-      typescript: ext.startsWith("ts"),
+      typescript: ext.startsWith("ts") || ext.endsWith("ts"),
       jsx: ext.endsWith("x"),
     });
-  }
-  return null; // 其它格式：只给行号与基础编辑，不猜语言
+  };
+}
+
+/**
+ * 没有官方 lang 包的语言：`StreamLanguage` + legacy-modes（CodeMirror 5 时代的 mode，
+ * 高亮略糙但完全够看）。
+ *
+ * ⚠️ **每一项都得是写死的 import 说明符。** 试过 `import.meta.glob` 扫
+ * `node_modules/@codemirror/legacy-modes/mode/*.js` 去省这几十行 —— 那是一条相对路径
+ * 摸进 node_modules，构建器换个布局（pnpm / 提升方式变了）就整片静默失效，而且要额外
+ * 挂 vite/client 类型。写死的说明符 Vite 能静态看见，每个 mode 一个 lazy chunk。
+ */
+const stream =
+  (load: () => Promise<Record<string, unknown>>, name: string) =>
+  async (): Promise<Extension | null> => {
+    const [{ StreamLanguage }, m] = await Promise.all([
+      import("@codemirror/language"),
+      load(),
+    ]);
+    const legacy = m[name];
+    return legacy
+      ? StreamLanguage.define(legacy as Parameters<typeof StreamLanguage.define>[0])
+      : null;
+  };
+
+put("sh bash zsh fish ksh", stream(() => import("@codemirror/legacy-modes/mode/shell"), "shell"));
+put("swift", stream(() => import("@codemirror/legacy-modes/mode/swift"), "swift"));
+put("rb rake gemspec", stream(() => import("@codemirror/legacy-modes/mode/ruby"), "ruby"));
+put("lua", stream(() => import("@codemirror/legacy-modes/mode/lua"), "lua"));
+put("toml", stream(() => import("@codemirror/legacy-modes/mode/toml"), "toml"));
+put("ini conf cfg properties env", stream(() => import("@codemirror/legacy-modes/mode/properties"), "properties"));
+put("diff patch", stream(() => import("@codemirror/legacy-modes/mode/diff"), "diff"));
+put("dockerfile", stream(() => import("@codemirror/legacy-modes/mode/dockerfile"), "dockerfile"));
+put("ps1 psm1", stream(() => import("@codemirror/legacy-modes/mode/powershell"), "powerShell"));
+put("pl pm", stream(() => import("@codemirror/legacy-modes/mode/perl"), "perl"));
+put("r", stream(() => import("@codemirror/legacy-modes/mode/r"), "r"));
+put("scala sc", stream(() => import("@codemirror/legacy-modes/mode/clike"), "scala"));
+put("kt kts", stream(() => import("@codemirror/legacy-modes/mode/clike"), "kotlin"));
+put("cs", stream(() => import("@codemirror/legacy-modes/mode/clike"), "csharp"));
+put("dart", stream(() => import("@codemirror/legacy-modes/mode/clike"), "dart"));
+put("groovy gradle", stream(() => import("@codemirror/legacy-modes/mode/groovy"), "groovy"));
+put("clj cljs edn", stream(() => import("@codemirror/legacy-modes/mode/clojure"), "clojure"));
+put("erl hrl", stream(() => import("@codemirror/legacy-modes/mode/erlang"), "erlang"));
+put("hs", stream(() => import("@codemirror/legacy-modes/mode/haskell"), "haskell"));
+put("jl", stream(() => import("@codemirror/legacy-modes/mode/julia"), "julia"));
+put("scss sass", stream(() => import("@codemirror/legacy-modes/mode/sass"), "sass"));
+put("less", stream(() => import("@codemirror/legacy-modes/mode/css"), "less"));
+put("nginx", stream(() => import("@codemirror/legacy-modes/mode/nginx"), "nginx"));
+put("proto", stream(() => import("@codemirror/legacy-modes/mode/protobuf"), "protobuf"));
+put("tcl", stream(() => import("@codemirror/legacy-modes/mode/tcl"), "tcl"));
+put("vb", stream(() => import("@codemirror/legacy-modes/mode/vb"), "vb"));
+put("f f90 f95", stream(() => import("@codemirror/legacy-modes/mode/fortran"), "fortran"));
+put("cmake", stream(() => import("@codemirror/legacy-modes/mode/cmake"), "cmake"));
+
+async function languageFor(filename: string): Promise<Extension | null> {
+  const base = filename.slice(filename.lastIndexOf("/") + 1).toLowerCase();
+  const dot = base.lastIndexOf(".");
+  // 没有扩展名的按整个文件名认（Dockerfile / Makefile / .env 那类）。
+  const key = dot > 0 ? base.slice(dot + 1) : base.replace(/^\./, "");
+  return LANG[key] ? LANG[key]!() : null; // 认不出来：只给行号与基础编辑，不猜语言
 }
 
 export default function TextEditor({
@@ -94,6 +186,9 @@ export default function TextEditor({
 
         const extensions = [
           basicSetup,
+          // ⚠️ 必须在 basicSetup **之后**：它自带的 defaultHighlightStyle 是亮色配色，
+          // 落在本项目近黑的底色上读不出来。见 ./highlight.ts。
+          appSyntaxHighlighting,
           EditorView.theme(THEME_VARS),
           EditorView.lineWrapping,
           EditorView.updateListener.of((u) => {

@@ -82,6 +82,16 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   两处共用 `Highlighted.tsx` 画命中段，共用 `sessions.ts` 的 `SEARCH_WINDOW`
   （**默认列表 60 条 ≠ 搜索范围**：搜索必须能翻到底，本机 786 个会话全拿是 ~677ms，
   实测数据记在那个常量的注释里；聚焦搜索框才拉，首屏不拉）。
+- `Markdown.tsx` — 唯一的 markdown 渲染器（聊天正文 + .md 预览共用）。
+  **GFM autolink 在中文里会吞掉整句**（中文没空格，`（www.x.cn）、后面一大段…` 全进
+  href），修在 `lib/cjk-autolink.ts`：一个 remark 插件，在 **GFM 产出的 link 节点上**
+  把越界的尾巴挪回正文。⚠️ 别退回"用正则改源文本"那种写法 —— 那等于自己重实现一遍
+  GFM 的 URL 匹配规则，上一版就漏了裸 `www.` 这一种形式，用户报的例子完全没修到。
+- `components/files/TextEditor.tsx` — CodeMirror 包装。语言在 `LANG` 那张表里
+  （**加语言就加表，别堆 if**：上一版三个 if + `return null`，打开 .py 完全没高亮）。
+  语法配色在 `files/highlight.ts`，颜色是 `var(--syn-*)` CSS 变量（index.css 里明暗
+  两套），所以换主题即时生效；**必须显式加**，`basicSetup` 自带的是亮色配色，在本项目
+  近黑底上读不出来。
 
 ## 三个子系统
 

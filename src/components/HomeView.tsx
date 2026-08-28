@@ -356,7 +356,6 @@ export default function HomeView({
             onChange={setQuery}
             onFocus={loadWide}
             onEnter={openTopHit}
-            busy={wideLoading}
           />
           <div className="flex items-center gap-2 shrink-0 ml-auto">
             <ProviderPicker value={provider} onChange={onProviderChange} />
@@ -508,7 +507,6 @@ function SearchField({
   onChange,
   onFocus,
   onEnter,
-  busy,
 }: {
   inputRef: React.Ref<HTMLInputElement>;
   value: string;
@@ -516,7 +514,6 @@ function SearchField({
   /** 聚焦即开始拉全量窗口，这样它和用户打字并行，不是打完再等 677ms。 */
   onFocus: () => void;
   onEnter: () => void;
-  busy: boolean;
 }) {
   return (
     <div className="relative flex-1 min-w-[180px] max-w-[300px]">
@@ -555,13 +552,13 @@ function SearchField({
         aria-label="搜索项目或对话"
         className="w-full min-w-0 h-9 pl-8 pr-12 rounded-lg bg-canvas border border-line-strong text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
       />
+      {/* ⚠️ **预加载不许有可见的加载指示。** 曾经在这儿放过一个转圈：全量窗口是聚焦时
+          就开始拉的（788 个会话 677ms+），于是「鼠标点进框里、一个字没输」就开始转 ——
+          用户没让它干活，它却在忙，这指示器对他毫无意义，只有干扰（真机反馈原话：
+          「我怎么鼠标放上去就转圈了」）。装入状态归下面那条「搜索范围」行：**那条只在
+          真的在搜的时候才出现**，也只有那时候「范围不全」才是个需要告知的事实。 */}
       <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">
-        {busy ? (
-          <span
-            className="w-3 h-3 rounded-full border border-line-strong border-t-muted animate-spin"
-            title="正在装入全部对话"
-          />
-        ) : value ? (
+        {value ? (
           <button
             onClick={() => onChange("")}
             aria-label="清空搜索"
