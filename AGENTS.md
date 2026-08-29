@@ -7,6 +7,10 @@
 > **要动 SDK / CLI 驱动这块，先读 [`docs/cli-migration.md`](./docs/cli-migration.md)**——那里有
 > 「扔掉两个 SDK、自己驱动 CLI」的全部决策 + **已实测的事实**（CLI flag 全集、无文档的控制协议线格式、
 > 模型别名解析结果、lvshu 参考实现索引）。别重跑那轮调研。
+>
+> **要动桌面客户端 / 远端工具执行这块，先读 [`docs/desktop-client.md`](./docs/desktop-client.md)**——
+> 「runtime 留在服务端、工具执行下沉到家人 Windows 机器」的全部决策 + 被否掉的方案（连否决理由）
+> + 实测事实（MCP 无 WS transport、skill 的可控粒度、Chrome PNA 拦 localhost）。**设计已定稿，未实施。**
 
 ## 这是什么
 
