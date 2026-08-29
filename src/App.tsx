@@ -1092,8 +1092,17 @@ export default function App() {
             : "max-md:shadow-[0_0_60px_rgba(0,0,0,0.55)]"
         }`}
       >
+      {/* ⚠️ **窄屏下这颗按钮是「关抽屉」，不是「切会话栏」。** 窄屏时会话栏的渲染条件
+          是 `(sidebarOpen || narrow)` —— `narrow` 已经把它顶成 true，所以在手机上切
+          `sidebarOpen` 一点效果都没有：用户点抽屉左上角这颗最显眼的按钮，什么都不发生
+          （真机反馈「左边的侧边栏不能关闭」）。而此时顶栏那个汉堡**被抽屉盖住点不到**
+          （实测 is_visible=true 但 click 超时），于是唯一的退路只剩右边那条 74px 的
+          遮罩 —— 等于没有关闭按钮。桌面那边的偏好不动，narrow 分支只管抽屉。 */}
       <Sidebar
-        onToggleSidebar={() => setSidebarOpen((o) => !o)}
+        onToggleSidebar={() =>
+          narrow ? setNavOpen(false) : setSidebarOpen((o) => !o)
+        }
+        narrow={narrow}
         onOpenProject={() => setDialogOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
@@ -1152,7 +1161,7 @@ export default function App() {
         ) : inProject ? (
           <>
             <Header
-              onOpenNav={() => setNavOpen(true)}
+              onOpenNav={() => setNavOpen((o) => !o)}
               sessionId={sessionId}
               projectPath={projectCwd}
               home={home}
@@ -1236,7 +1245,7 @@ export default function App() {
           <div className="md:hidden flex items-center h-12 px-1 border-b border-line shrink-0">
             <button
               aria-label="打开侧栏"
-              onClick={() => setNavOpen(true)}
+              onClick={() => setNavOpen((o) => !o)}
               className="w-11 h-11 flex items-center justify-center text-muted"
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
