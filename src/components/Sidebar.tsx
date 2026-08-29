@@ -2,7 +2,9 @@ import type { Theme } from "../lib/settings";
 import { useAuth } from "../AuthGate";
 
 interface Props {
+  /** 窄屏＝关抽屉，桌面＝收起会话栏。文案/图标跟着变，见下面的注释。 */
   onToggleSidebar?: () => void;
+  narrow?: boolean;
   onOpenProject?: () => void;
   onOpenHelp?: () => void;
   onOpenAdmin?: () => void;
@@ -12,6 +14,7 @@ interface Props {
 
 export default function Sidebar({
   onToggleSidebar,
+  narrow = false,
   onOpenProject,
   onOpenHelp,
   onOpenAdmin,
@@ -22,13 +25,15 @@ export default function Sidebar({
   return (
     <aside className="flex flex-col items-center justify-between w-14 border-r border-line py-3 shrink-0">
       <div className="flex flex-col items-center gap-1">
+        {/* 窄屏下这颗按钮做的是「关掉抽屉」，所以画成 ✕ 并改文案 —— 同一个图标同一个
+            位置却做两件事，用户没法知道点下去会发生什么。 */}
         <button
           onClick={onToggleSidebar}
-          aria-label="切换侧栏"
-          title="切换侧栏"
+          aria-label={narrow ? "关闭侧栏" : "切换侧栏"}
+          title={narrow ? "关闭侧栏" : "切换侧栏"}
           className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
         >
-          <SidebarIcon />
+          {narrow ? <CloseIcon /> : <SidebarIcon />}
         </button>
         <button
           onClick={onOpenProject}
@@ -153,6 +158,17 @@ const MoonIcon = () => (
       stroke="currentColor"
       strokeWidth="1.3"
       strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+    <path
+      d="M4.5 4.5L13.5 13.5M13.5 4.5L4.5 13.5"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
     />
   </svg>
 );
