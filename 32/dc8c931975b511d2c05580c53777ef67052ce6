@@ -1,0 +1,82 @@
+server/auth/identify.ts
+  s_1c527dc43afeed::t_226a71f4116558 11-22,30-31
+  s_1c527dc43afeed::t_2286f5bc212b34 32-33
+server/meta.ts
+  s_1c527dc43afeed::t_00b7c0a862639c 4
+  s_1c527dc43afeed::t_0737d5b1949c46 135-141,143,147
+server/client-routes.ts
+  s_1c527dc43afeed::t_b9b1ba06ac790d 1-63
+server/db.ts
+  s_1c527dc43afeed::t_3942f0d3ad883a 209-253
+server/devices/protocol.ts
+  s_1c527dc43afeed::t_02eca03c1f9969 1-172
+server/executors/types.ts
+  s_1c527dc43afeed::t_67e27cd27231e0 171-187
+server/mcp-local-route.ts
+  s_1c527dc43afeed::t_9b8bd97c348704 1-144
+server/executors/claude-executor.ts
+  s_1c527dc43afeed::t_c00377d6022fd9 82-84,86
+  s_1c527dc43afeed::t_744964c4d43e05 111,114-126
+  s_1c527dc43afeed::t_6bbc3712265281 85,112-113
+.env.example
+  s_1c527dc43afeed::t_b0a14ef7a2c38b 13-19
+server/devices/store.ts
+  s_1c527dc43afeed::t_e18da584ea6797 139-145,150,152-153,156-167
+  s_1c527dc43afeed::t_a9da9c669d8837 13
+  s_1c527dc43afeed::t_14ccac453a13ab 1-12,14-138,146-149,151,154-155,168
+server/devices/ws.ts
+  s_1c527dc43afeed::t_2313a1962d97ae 1-195
+server/index.ts
+  s_1c527dc43afeed::t_d310f6b7ca49ed 67-73
+  s_1c527dc43afeed::t_0798c45aad8503 36-47
+  s_1c527dc43afeed::t_40ef44718a2000 8
+server/chat.ts
+  s_1c527dc43afeed::t_29bae17b63aa02 21-23
+  s_1c527dc43afeed::t_27ff1597d1ccbf 59-93
+  s_1c527dc43afeed::t_a65079a1bac503 468-484
+  s_1c527dc43afeed::t_7a3aed874e9262 506,518-532
+server/executors/claude-executor.test.ts
+  s_1c527dc43afeed::t_ff48eee04b0e98 126-169
+server/client-release.test.ts
+  s_1c527dc43afeed::t_7fc360fd9cf2b5 53-55,109
+  s_1c527dc43afeed::t_676918e3cb38bb 1-31,37,40-52,56-108,110-116
+  s_1c527dc43afeed::t_2d6584f6049b33 32-36,38-39
+server/codex-mcp-config.ts
+  s_1c527dc43afeed::t_127f221af79919 13
+  s_1c527dc43afeed::t_8a090fa9a4362b 39-58
+server/auth/policy.ts
+  s_1c527dc43afeed::t_1b8a3a75a814c8 218-230
+server/executors/contract.test.ts
+  s_1c527dc43afeed::t_75993c2b832873 107-112
+package.json
+  s_1c527dc43afeed::t_841b0177c509e3 43-44,51
+server/app.ts
+  s_1c527dc43afeed::t_64bf2605f426be 18-19
+  s_1c527dc43afeed::t_cfb1fc8fb4356c 53-61
+server/client-release.ts
+  s_1c527dc43afeed::t_9e4daadbe301be 1-93
+README.md
+  s_1c527dc43afeed::t_2b09b4e242ab00 131
+server/devices/registry.ts
+  s_1c527dc43afeed::t_fb42c678ca1400 1-350
+server/auth/policy.test.ts
+  s_1c527dc43afeed::t_c66e3d99a865c3 94-103,115
+package-lock.json
+  s_1c527dc43afeed::t_b9423891d3cdfb 39-40,47,2510-2519
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "32dc8c931975b511d2c05580c53777ef67052ce6",
+  "prompts": {},
+  "sessions": {
+    "s_1c527dc43afeed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "348a0962-077e-457d-932c-09de4062370e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
