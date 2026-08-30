@@ -40,15 +40,25 @@
     },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "assets/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false
+    },
+    "directories": {
+      "output": "release"
     }
-  }
+  },
+  "author": "cc-webui"
 }
