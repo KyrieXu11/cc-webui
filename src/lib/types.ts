@@ -133,6 +133,15 @@ export type ChatEvent =
       status: StepStatus;
       input?: Record<string, any>;
       output?: string;
+      /**
+       * 工具已经跑了多少秒。来自 CLI 的 `tool_progress` 心跳帧（每 30 秒一帧）。
+       *
+       * ⚠️ 只有慢工具才会有这个值。它存在的意义是桌面客户端那条链：本地工具
+       * 最长能等到 MCP_TOOL_TIMEOUT（我们把它抬到了 5.5 分钟，因为扫码登录
+       * 要等人拿手机）。没有它，UI 会一动不动地停在「进行中」好几分钟，
+       * 和「卡死了」完全区分不开。
+       */
+      elapsedSeconds?: number;
     }
   | {
       id: string;

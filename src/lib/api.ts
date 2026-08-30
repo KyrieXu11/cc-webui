@@ -135,6 +135,9 @@ export function connectAttach(
     "foreground_ended",
     "wakeup_pending",
     "wakeup_turn_started",
+    // 慢工具的心跳（每 30 秒一帧）。⚠️ 这张列表是白名单——不加进来，
+    // 事件在 EventSource 层就被丢了，前端连看都看不到。
+    "tool_progress",
   ]) {
     es.addEventListener(t, forward);
   }

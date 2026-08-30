@@ -216,6 +216,16 @@ export default function StepTimeline({
                       {s.arg}
                     </span>
                   )}
+                  {/* 慢工具的已等待时长。本地工具最长能等 5.5 分钟（扫码登录
+                      要等人拿手机），没有这个数字的话 UI 停在「进行中」和
+                      「卡死了」看起来一模一样。 */}
+                  {s.status === "pending" && s.elapsedSeconds !== undefined && (
+                    <span className="font-mono text-subtle shrink-0 tabular-nums">
+                      {s.elapsedSeconds >= 60
+                        ? `${Math.floor(s.elapsedSeconds / 60)}m${s.elapsedSeconds % 60}s`
+                        : `${s.elapsedSeconds}s`}
+                    </span>
+                  )}
                 </div>
                 <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
                   <Chevron open={open} />

@@ -41,6 +41,7 @@ const registry = await import("./registry.ts");
 const { setLocalMcpServers } = await import("./store.ts");
 const { createDeviceWs, DEVICE_WS_PATH } = await import("./ws.ts");
 const { mcpLocalRoute } = await import("../mcp-local-route.ts");
+const { authRoutes } = await import("../auth-routes.ts");
 const { registerMcpSessionContext, unregisterMcpSessionContext } = await import(
   "../mcp-context.ts"
 );
@@ -101,6 +102,7 @@ try {
 
   const app = new Hono();
   app.route("/api/mcp", mcpLocalRoute);
+  app.route("/api/auth", authRoutes);
 
   // ── 起客户端（真的 desktop/src 代码）─────────────────────────────────────
   const cookie = `${SESSION_COOKIE}=${issueSession(user.id)}`;
@@ -218,8 +220,30 @@ try {
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(registry.availableServers(user.id), ["echo"], "恢复后 server 回来");
 
-  // ── 掉线：挂起的调用立即回错（决策 11），不等重连 ────────────────────────
+  // ── 登出即断连（决策 14）────────────────────────────────────────────────
+  // ⚠️ 这条必须显式做，不能指望心跳发现：session cookie 是无状态 HMAC，没有
+  // 服务端 session 表，clearedSessionCookie() 只让浏览器丢掉自己那份，已建立
+  // 的 WS 毫无感知。registry 心跳里的 revalidate 只查 getUserById()，那只抓
+  // 得到销号，抓不到登出。
+  {
+    assert.ok(registry.connectedDevice(user.id), "登出之前设备应当连着");
+    const res = await app.request("/api/auth/logout", {
+      method: "POST",
+      headers: { cookie },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(
+      registry.connectedDevice(user.id),
+      undefined,
+      "登出必须把这个账号的设备断开",
+    );
+  }
+  // 客户端会自己重连（cookie 还有效）——这正是「登出不等于完整吊销」那句话的
+  // 具体形态。为了让后面的掉线用例干净，这里先停掉再继续。
   client.stop();
+  await new Promise((r) => setTimeout(r, 50));
+
+  // ── 掉线：挂起的调用立即回错（决策 11），不等重连 ────────────────────────
   const gone = Date.now() + 5_000;
   while (registry.connectedDevice(user.id)) {
     if (Date.now() > gone) throw new Error("registry 没有察觉到掉线");

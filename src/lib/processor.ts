@@ -268,6 +268,27 @@ export function applySDKMessage(
     return events;
   }
 
+  // 慢工具的心跳。实测帧形（CLI 2.1.251）：
+  //   { type:"tool_progress", parent_tool_use_id, elapsed_time_seconds, heartbeat:true }
+  // ⚠️ 认的是 parent_tool_use_id —— 帧自己的 tool_use_id 是
+  // `<真 id>-heartbeat-N`，拿它去找步骤永远找不到。
+  if (
+    msg.type === "tool_progress" &&
+    msg.parent_tool_use_id &&
+    typeof msg.elapsed_time_seconds === "number"
+  ) {
+    const stepId = `s-${msg.parent_tool_use_id}`;
+    const idx = events.findIndex((e) => e.id === stepId);
+    if (idx < 0) return events;
+    const existing = events[idx];
+    if (existing.type !== "step" || existing.status !== "pending") return events;
+    return [
+      ...events.slice(0, idx),
+      { ...existing, elapsedSeconds: msg.elapsed_time_seconds },
+      ...events.slice(idx + 1),
+    ];
+  }
+
   if (msg.type === "assistant" && msg.message?.content) {
     let result = events;
     const messageId = msg.message.id ?? msg.uuid;
