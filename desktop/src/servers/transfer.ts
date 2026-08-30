@@ -22,8 +22,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createReadStream } from "node:fs";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const BASE = (process.env.CC_WEBUI_URL ?? "").replace(/\/+$/, "");
@@ -64,10 +63,10 @@ server.registerTool(
       if (!s.isFile()) return fail(`不是一个文件：${local_path}`);
 
       const form = new FormData();
-      // Node 的 fetch 接受 Blob/File。用流式的 Blob 避免把大文件整个读进内存。
-      const buf = await new Response(
-        createReadStream(local_path) as unknown as ReadableStream,
-      ).arrayBuffer();
+      // 直接 readFile：`.arrayBuffer()` 那条路最终也是整个读进内存，而
+      // `new Response(nodeReadStream)` 虽然在 undici 上能跑，类型上要一次
+      // `as unknown as ReadableStream` 的强转——为一个不存在的收益撒谎。
+      const buf = await readFile(local_path);
       form.append("files", new Blob([buf]), path.basename(local_path));
 
       const res = await fetch(`${BASE}/api/upload`, {
