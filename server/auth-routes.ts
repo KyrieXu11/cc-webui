@@ -8,6 +8,7 @@ import {
   sessionCookie,
 } from "./auth/session.ts";
 import { identifyRequest, isSecureRequest } from "./auth/identify.ts";
+import { drop as dropDevice } from "./devices/registry.ts";
 
 const authRoutes = new Hono();
 
@@ -31,6 +32,20 @@ authRoutes.post("/login", async (c) => {
 });
 
 authRoutes.post("/logout", (c) => {
+  // 登出时把这个账号的桌面客户端也断开（docs/desktop-client.md 决策 14）。
+  //
+  // ⚠️ 必须显式做，不能指望心跳发现。session cookie 是**无状态 HMAC**，没有
+  // 服务端 session 表（server/auth/session.ts 头部注释），所以
+  // `clearedSessionCookie()` 只是让浏览器丢掉自己那份 —— 已经建立的 WS
+  // 毫无感知，会一直活到 30 天 TTL 到期。registry 心跳里的 revalidate 只查
+  // `getUserById()`，那只抓得到销号，**抓不到登出**。
+  //
+  // ⚠️ 这**不等于**完整的吊销：偷到 cookie 的人在别处仍然能重新连上（cookie
+  // 本身还有效）。真正的吊销要一张服务端 session 表或 token 版本号，尚未做。
+  // 这里兑现的是决策 14 承诺里能兑现的那一半：**这个人自己点了登出，他的机器
+  // 就不再听命于服务端**。
+  const user = identifyRequest(c);
+  if (user) dropDevice(user.id, "signed out");
   c.header("set-cookie", clearedSessionCookie());
   return c.json({ ok: true });
 });
