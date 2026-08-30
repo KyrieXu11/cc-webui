@@ -1,0 +1,38 @@
+vite.config.ts
+  s_1c527dc43afeed::t_5506f2e2df260a 21-28
+server/chat.ts
+  s_1c527dc43afeed::t_d1e2f748e88888 23,507-512
+server/executors/claude-executor.ts
+  s_1c527dc43afeed::t_d1e2f748e88888 420-421
+server/codex-mcp-config.ts
+  s_1c527dc43afeed::t_44d24c679baa27 24,26-39,42,50-51,57
+scripts/verify-local-mcp.mjs
+  s_1c527dc43afeed::t_e5103affb6a2a7 36,204-210
+  s_1c527dc43afeed::t_a9c4a4b2a96d8a 245-254
+  s_1c527dc43afeed::t_df8f3ffd1d5b23 85-89,107-115,192,197-199
+server/executors/types.ts
+  s_1c527dc43afeed::t_d1e2f748e88888 173-185
+server/executors/contract.test.ts
+  s_1c527dc43afeed::t_63c9ae045ab73e 109-110
+server/devices/protocol.ts
+  s_1c527dc43afeed::t_d1e2f748e88888 174-185
+  s_1c527dc43afeed::t_7513f8fb6bcd45 173
+server/codex-mcp-config.test.ts
+  s_1c527dc43afeed::t_5506f2e2df260a 6,81-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "c8f8773c8b760dad093038dc06408e378a976272",
+  "prompts": {},
+  "sessions": {
+    "s_1c527dc43afeed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "348a0962-077e-457d-932c-09de4062370e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
