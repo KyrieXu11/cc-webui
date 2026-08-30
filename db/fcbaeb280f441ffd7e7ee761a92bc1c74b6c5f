@@ -1,0 +1,19 @@
+desktop/package.json
+  s_1c527dc43afeed::t_c1e8220daba077 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "dbfcbaeb280f441ffd7e7ee761a92bc1c74b6c5f",
+  "prompts": {},
+  "sessions": {
+    "s_1c527dc43afeed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "348a0962-077e-457d-932c-09de4062370e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
