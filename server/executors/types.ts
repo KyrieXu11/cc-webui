@@ -168,6 +168,23 @@ export type ExecOptions = {
   allowedTools?: string[];
   appendSystemPrompt?: string;
 
+  // Per-account skill/plugin isolation (docs/desktop-client.md decision 20).
+  // `--strict-mcp-config` fences off the OS user's own ~/.claude MCP servers
+  // but does NOT fence off skills or plugins, so today every family member's
+  // turn loads the host account's entire ~/.claude/skills tree. These two are
+  // the only handles the CLI gives us: there is no per-skill switch.
+  //
+  // ⚠️ Two arrays, two DIFFERENT arities on the wire — do not "simplify" them
+  // into one shape, and do not model either on allowedTools (a single
+  // comma-joined variadic flag):
+  //   - `--plugin-dir <path>` takes exactly one value and is REPEATED, so N
+  //     dirs mean N flag/value pairs.
+  //   - `--setting-sources <sources>` takes exactly one COMMA-JOINED value
+  //     (user, project, local) and appears at most once.
+  // Both are plain (non-variadic) so neither can swallow a following argument.
+  pluginDirs?: string[];
+  settingSources?: string[];
+
   // Wall-clock cap. Exceeding it yields `status: "timeout"`, distinct from a
   // caller abort.
   timeoutMs?: number;

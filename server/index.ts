@@ -5,6 +5,7 @@ import { importLegacyJson } from "./import-legacy-json.ts";
 import { startFeishuChannels } from "./feishu/index.ts";
 import { countUsers, seedAdminFromEnv } from "./auth/users.ts";
 import { groupsEnabled } from "./features.ts";
+import { createDeviceWs, DEVICE_WS_PATH } from "./devices/ws.ts";
 
 // .env first: it carries CC_WEBUI_ADMIN and the Feishu credentials, and
 // everything below reads config.
@@ -32,7 +33,18 @@ const viteDevPort = Number(process.env.VITE_DEV_PORT) || 8787;
 // CC_WEBUI_HOST=0.0.0.0 to expose on LAN.
 const host = process.env.CC_WEBUI_HOST ?? "127.0.0.1";
 
-serve({ fetch: app.fetch, port, hostname: host }, (info) => {
+// 桌面客户端的 WebSocket 端点（docs/desktop-client.md）。
+//
+// ⚠️ 它**只能**起在这里，不能起在 app.ts —— 那个文件有「零 import 期副作用」的
+// 硬约束（policy.test.ts 会 import 它 4 次，任何 import 期的监听/外连都会在跑
+// 测试时真的发生）。
+//
+// ⚠️ upgrade 事件在 Hono 之前被 node 的 http.Server 截走，所以这条通道**完全
+// 绕开 authMiddleware**：没有 policy 条目，policy.test.ts 也看不见它。
+// cookie 校验在 server/devices/ws.ts 里手写，钉住它的是 devices/ws.test.ts。
+const deviceWs = createDeviceWs();
+
+const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
   const url = isProd
     ? `http://${host}:${info.port}`
     : `http://${host}:${info.port} (api only; web on vite http://${host}:${viteDevPort})`;
@@ -52,4 +64,11 @@ serve({ fetch: app.fetch, port, hostname: host }, (info) => {
   if (bots > 0) {
     console.log(`[cc-webui] feishu: ${bots} bot(s) connected`);
   }
+  console.log(`[cc-webui] devices: ws endpoint at ${DEVICE_WS_PATH}`);
+});
+
+// 反代那侧这条 location 需要 Upgrade / Connection 头 + 够长的 proxy_read_timeout，
+// 否则长连接会被 nginx 默认的 60s 读超时切掉。见 server/devices/ws.ts 文件头。
+server.on("upgrade", (req, socket, head) => {
+  deviceWs.handleUpgrade(req, socket, head);
 });

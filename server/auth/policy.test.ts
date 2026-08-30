@@ -91,6 +91,16 @@ try {
   // string (server/office.ts) — plus, on the callback, a JWT inside the body.
   // Both legs run over host.docker.internal to the loopback and never traverse
   // nginx, so the reverse proxy should 404 them exactly like /api/mcp/*.
+  //
+  // /api/mcp/local/:server is the desktop-client relay (docs/desktop-client.md).
+  // Same shape as the other three: a per-turn bearer token, callable only by the
+  // local CLI child process, and it fails closed when the token has no ownerId.
+  //
+  // ⚠️ NOT on this list, deliberately: the desktop installer download
+  // (/api/client/download/:file) is auth:"user" — the client's main process
+  // downloads it with the session cookie it already holds (decision 27).
+  // And the device WebSocket is not a Hono route at all, so it can never appear
+  // here — which is exactly why server/devices/ws.test.ts exists.
   const publicApi = realRoutes.filter(
     (r) => r.path.startsWith("/api/") && policyFor(r.method, r.path)?.auth === "public",
   );
@@ -102,6 +112,7 @@ try {
       "/api/auth/me",
       "/api/mcp/bash",
       "/api/mcp/lark",
+      "/api/mcp/local/:server",
       "/api/mcp/schedule",
       "/api/office/callback",
       "/api/office/download",
