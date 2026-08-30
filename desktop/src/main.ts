@@ -50,11 +50,16 @@ const host = new McpHost({
   // 决策 23：借 Electron 自带的 Node 跑打包进来的 MCP server，家人机器零依赖。
   // 服务端下发的 spec 里写了 command 就用它（npx 逃生口）。
   defaultCommand: process.execPath,
-  defaultEnv: {
+  bundledDir: path.join(app.getAppPath(), "servers"),
+  defaultEnv: () => ({
     ELECTRON_RUN_AS_NODE: "1",
     // 决策 24：浏览器 MCP server 用专属持久 profile，不碰家人日常那个。
     CC_WEBUI_BROWSER_PROFILE: browserProfileDir(app.getPath("userData")),
-  },
+    // 传输 server（决策 18）要以这个人的身份访问 cc-webui。**每次 spawn 现取** ——
+    // 见 HostOptions.defaultEnv 的注释。
+    CC_WEBUI_URL: cfg.serverUrl,
+    CC_WEBUI_COOKIE: cookie ?? "",
+  }),
   onMessage: (server, payload) => client.handleServerMessage(server, payload),
   onExit: (server) => client.handleServerExit(server),
 });
@@ -239,8 +244,11 @@ if (!app.requestSingleInstanceLock()) {
     void checkUpdate(false);
   });
 
-  // 关掉所有窗口不退出（macOS 之外的默认行为是退出）。
-  app.on("window-all-closed", (e: Event) => e.preventDefault());
+  // 关掉所有窗口不退出（决策 15：托盘常驻，WS 要一直连着）。
+  // ⚠️ 这里**没有** preventDefault —— Electron 的语义是「只要有人订阅了
+  // window-all-closed，默认的退出行为就不发生」。空函数体是对的，别为了看起来
+  // 「做了点什么」而往里塞 e.preventDefault()：那个事件根本没有这个方法。
+  app.on("window-all-closed", () => {});
 
   app.on("before-quit", () => {
     quitting = true;

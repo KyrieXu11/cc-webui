@@ -28,7 +28,16 @@ export type LocalMcpServerSpec = {
    * 还要进模型看到的工具名，任何一处转义都会变成排查噩梦。
    */
   name: string;
-  /** 可执行文件。空 = 用客户端内置的 Electron Node（ELECTRON_RUN_AS_NODE=1，决策 23）。 */
+  /**
+   * 用客户端**内置**的哪个 server（决策 23：打包进安装包，家人机器零依赖）。
+   *
+   * ⚠️ 存在的理由是服务端**不知道客户端装在哪**。写 `bundled: "transfer"` 而不是
+   * 一个绝对路径，配置才能和安装位置无关 —— 否则家人换个盘符装，服务端的配置就废了。
+   * 由客户端解析成 `defaultCommand + <安装目录>/servers/<bundled>.mjs`。
+   * 和 `command` 二选一；两个都给时 `command` 优先（那是 npx 逃生口）。
+   */
+  bundled?: string;
+  /** 可执行文件。留空且没有 bundled = 用客户端内置的 Electron Node（ELECTRON_RUN_AS_NODE=1）。 */
   command?: string;
   args?: string[];
   env?: Record<string, string>;
