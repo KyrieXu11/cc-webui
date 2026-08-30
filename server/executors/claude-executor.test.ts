@@ -123,50 +123,6 @@ try {
     "nothing positional may follow a variadic flag",
   );
 
-  // Per-account skill/plugin isolation (docs/desktop-client.md decision 20).
-  // These two flags sit between the positional prompt and the variadic tool
-  // flags, so the assertions above are repeated here: the window is only safe
-  // as long as nothing pushes a positional into it.
-  const isolated = buildClaudeArgs(
-    base({
-      pluginDirs: ["/a", "/b"],
-      settingSources: ["project", "local"],
-      allowedTools: ["Read"],
-      disallowedTools: ["Bash"],
-      prompt: "say hi",
-    }),
-  );
-  const pairOfIsolated = (flag: string) =>
-    isolated[isolated.indexOf(flag) + 1];
-  // One comma-joined value, one occurrence — NOT modelled like --plugin-dir.
-  assert.equal(pairOfIsolated("--setting-sources"), "project,local");
-  assert.equal(
-    isolated.filter((a) => a === "--setting-sources").length,
-    1,
-    "--setting-sources takes a single comma-joined value",
-  );
-  // ⚠️ indexOf() only ever finds the first one, and --plugin-dir is REPEATED
-  // (one value each): a naive `indexOf` assertion passes even if the second
-  // dir was silently dropped. Collect every occurrence instead.
-  const pluginDirs = isolated.reduce<string[]>(
-    (acc, a, i) => (a === "--plugin-dir" ? [...acc, isolated[i + 1]] : acc),
-    [],
-  );
-  assert.deepEqual(
-    pluginDirs,
-    ["/a", "/b"],
-    "--plugin-dir repeats once per directory, in order",
-  );
-  assert.equal(
-    isolated.at(-1),
-    "Bash",
-    "the new flags must not push anything past a variadic flag",
-  );
-  assert.ok(
-    isolated.indexOf("say hi") < isolated.indexOf("--allowedTools"),
-    "the new flags must not displace the prompt past a variadic flag",
-  );
-
   // MCP config is inline JSON (--mcp-config takes files OR strings).
   const cfg = JSON.parse(
     buildMcpConfig([

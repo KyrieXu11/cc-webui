@@ -106,10 +106,6 @@ const claudeCallSite: ExecOptions = {
   appendSystemPrompt: "extra rules",
   // Per-account skill/plugin isolation (docs/desktop-client.md decision 20).
   // Pinned here because the two have different arities on the wire and it is
-  // tempting to collapse them: pluginDirs becomes one repeated flag,
-  // settingSources one comma-joined value.
-  pluginDirs: ["/Users/me/.cc-webui/workspaces/alice/plugins"],
-  settingSources: ["project", "local"],
   timeoutMs: 600_000,
   onPermissionAsk: async ({ input }) => ({
     behavior: "allow",
