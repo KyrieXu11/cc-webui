@@ -170,6 +170,19 @@ export type ExecOptions = {
 
   // Wall-clock cap. Exceeding it yields `status: "timeout"`, distinct from a
   // caller abort.
+  /**
+   * 追加到子进程环境里的变量（覆盖同名的 process.env）。
+   *
+   * ⚠️ 加它的唯一动机是 `MCP_TOOL_TIMEOUT`：**CLI 侧的 MCP 工具超时默认是 60 秒**
+   * （2026-08-30 实测，CLI 2.1.251：工具在第 30/60 秒各发一帧 tool_progress，
+   * 第 60 秒返回 "The operation timed out."）。桌面客户端那条链上有需要等人的工具
+   * （扫码登录），60 秒必然不够 —— 而这个值只能通过环境变量调。
+   *
+   * 别把它当通用的 env 注入口用：spawn 本来就继承 process.env，这里只放
+   * 「这一个 turn 才成立」的东西。
+   */
+  extraEnv?: Record<string, string>;
+
   timeoutMs?: number;
 
   onPermissionAsk?: PermissionAsk;

@@ -20,7 +20,7 @@ import { claudeExecutor } from "./executors/claude-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
 import { availableServers } from "./devices/registry.ts";
-import { LOCAL_PREFIX } from "./devices/protocol.ts";
+import { CLI_MCP_TOOL_TIMEOUT_MS, LOCAL_PREFIX } from "./devices/protocol.ts";
 import {
   registerMcpSessionContext,
   unregisterMcpSessionContext,
@@ -504,6 +504,12 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         // timers the server owns (survive across turns, cancellable).
         disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
         appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers),
+        // 只在真有本地工具时才抬高超时（见 CLI_MCP_TOOL_TIMEOUT_MS 的注释）。
+        // 无条件抬高会让服务端那些本该快速失败的 MCP 调用也拖到 5 分钟。
+        extraEnv:
+          localServers.length > 0
+            ? { MCP_TOOL_TIMEOUT: String(CLI_MCP_TOOL_TIMEOUT_MS) }
+            : undefined,
         mcpServers: [
           {
             name: "bash",
