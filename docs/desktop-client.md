@@ -88,7 +88,7 @@
 | 17 | **v1 只给浏览器 + 文件读写，不给本机 shell** | 不是安全考量（决策已接受不设限），是**调试成本**：shell 一上，任何失败都可能来自远端环境差异，而你人不在那台机器前 |
 | 18 | **必须配两个传输工具**（`upload_to_server` / `download_from_server`） | 否则本地成果永远困在家人机器上，「外挂」退化成一个孤立的浏览器。服务端复用已有 `/api/upload` 和取件台 |
 | 19 | **v1 只有网页单聊能用本地工具**，群聊 / 飞书显式排除 | 飞书**没有 sender 白名单**且 turn 跑在管理员身份下（见 AGENTS.md），接上就等于「飞书群里任何人 @ 一下能碰家人机器」 |
-| 20 | **每账号一个独立 skills/plugin 目录**，起 turn 时 `--plugin-dir` 指过去 + `--setting-sources` 排掉 user 级 | CLI 没有逐个 skill 开关（见事实 §2）；顺带修掉现状问题：家人的每个 turn 现在都全量加载了你的个人 skill 和插件 |
+| ~~20~~ **已撤回** | ~~每账号一个独立 skills/plugin 目录~~ → **默认全部可用，不做任何隔离** | 评审时把用户的原话（Q25「可以把系统的 skill 都加载进来，管理员在页面上配哪些有用哪些没用」）理解成了「按账号隔离」，方向错了。用户要的是**全局开关**，而且实施后发现连开关都不必要。撤回理由见「实施期的修正」§5b |
 | 21 | 配置粒度 **per-account**，不做 per-session | per-session 会让决策 9 的「工具集冻结」变成用户可感知的怪事（同一人两个会话工具不一样） |
 | 22 | **Windows only**；你自己那台 Mac **不装**客户端 | 家人全是 Windows；你就是服务端，CLI 本来就跑在你机器上、本来就有完整本地访问。macOS TCC 那套顾虑因此完全消失 |
 | 23 | **MCP server 内置打包**（`ELECTRON_RUN_AS_NODE=1` 借 Electron 自带的 Node 跑）**+ 保留 npx 逃生口** | 默认路径零依赖，「只装一个客户端」字面成立；npx 首次运行要联网拉包，在家人机器上是首启体验杀手 |
@@ -187,7 +187,7 @@ CLI **没有「逐个 skill 开关」的 flag**。能用的抓手只有：
 | `--agents <json>` | 内联定义自定义 agent |
 
 ⚠️ **当前状态**：CLI 以你的 OS 用户身份跑，所以 `~/.claude/skills/` 和你装的所有插件，
-**家人的每个 turn 现在都已经全量加载了**。决策 20 顺带修这个。
+**家人的每个 turn 都会全量加载**。这是**有意保留**的现状 —— 决策 20 已撤回，见 §5b。
 
 ### §3 浏览器侧的两条事实
 
@@ -278,41 +278,48 @@ location /ws/device {
 能抓到销号；要抓到登出还需要一个服务端 session 表或 token 版本号，**尚未做**）。
 `revalidate` 自己抛异常时按「不能用」处理 —— fail-closed。
 
-### §5 决策 20 需要改 `server/executors/types.ts`
+### §5 ~~决策 20 需要改 `server/executors/types.ts`~~（已随决策 20 撤回）
 
-原文「要动的地方」表里写着这个文件不用改。那句话对**MCP 那一半**是对的
-（`McpServerSpec` 确实够用），但决策 20 的 `--plugin-dir` / `--setting-sources`
-必须在 `ExecOptions` 上加字段。已加 `pluginDirs?: string[]` 和 `settingSources?: string[]`。
+实施期一度给 `ExecOptions` 加了 `pluginDirs` / `settingSources` 两个字段，
+决策 20 撤回后**已一并删除**（没有调用方的字段就是死代码）。
 
-⚠️ 两者 arity 不同，**不能照 `allowedTools` 建模**：`--plugin-dir <path>` 取单值且可重复；
-`--setting-sources <sources>` 取一个逗号串且至多出现一次。两者都**不是** variadic。
+这一轮为它核实到的、和它无关但值得留下的事实：**`--mcp-config <configs...>` 也是
+variadic**（CLI 2.1.251 的 `--help`），源码注释原来没写。它今天没炸只是因为
+`--strict-mcp-config` 这个 flag 紧跟在它后面 —— 这条已补进
+`claude-executor.ts` 那段关于变长 flag 的硬规则注释里，**保留**。
 
-⚠️ 顺带核实到一条源码注释没写的事实：**`--mcp-config <configs...>` 也是 variadic**
-（CLI 2.1.251 的 `--help`）。它今天没炸只是因为 `--strict-mcp-config` 这个 flag
-紧跟在它后面。
+### §5b 决策 20 已**撤回** —— 但实测出来的事实留着
 
-### §5b 决策 20 已实测验证（不是推的）
+**结论先行：不做任何 skill / plugin 隔离，家人的 turn 和 owner 的 turn 看到完全一样的一套。**
 
-三次真实 CLI 调用（2026-08-30，CLI 2.1.250），同一个问题「列出你能用的所有 skill」：
+撤回的经过值得记下来，因为它是一次**需求理解偏差**而不是技术问题：
 
-| 命令 | 结果 |
+- 用户在评审 Q25 说的是「做一个界面，刚好有管理员的角色，能配置 mcp、skill 啥的
+  （**可以把系统的 skill 都加载进来**）」—— 那是一个**全局的启用/禁用清单**。
+- 我在 Q29 推荐了「每账号一个独立目录」，用户答「按照你的来」，于是实现成了**按账号隔离**。
+- 实施后用户看到效果，明确纠正：「我可以把我个人的 skill 都给别人用啊……**我也没有说按照账户区分**」。
+- 进一步讨论后连全局开关也一并放弃：「这个开关似乎没有必要，**避免影响我电脑上其他项目用的 skill**」。
+
+**代码已全部回退**（`server/account-plugins.ts` 删除，`ExecOptions` 的
+`pluginDirs` / `settingSources` 删除，`chat.ts` 的接线删除，两个 env 变量注销）。
+
+⚠️ **回退的直接原因之一是一个被低估的副作用**：`--setting-sources` 管的是**整个
+settings 文件**，不是只管插件。排掉 user 级会连带丢掉 `~/.claude/settings.json` 里的
+`permissions.allow`（owner 那份有 44 条，丢了就是权限卡显著变多）、`hooks`、`env`。
+`model` / `effortLevel` / `defaultMode` 不受影响 —— cc-webui 每个 turn 都显式传。
+
+以下事实是这一轮实测出来的，**将来真要做这个开关时直接用，别重跑**：
+
+| 命令（CLI 2.1.250，2026-08-30） | 结果 |
 |---|---|
-| A：默认 | owner 的**全部**个人插件都在（`mattpocock-skills:*`、`obsidian:*`、`codex:*`…）—— 确认了 AGENTS.md 记的现状问题：家人的每个 turn 现在确实拿得到 |
-| B：只加 `--plugin-dir <某插件>` | 注入的那个出现了，但是**叠加**，owner 的插件一个没少 |
-| C：`--setting-sources project,local` + B | owner 的个人插件**全部消失**，只剩 CLI 内置的 + 注入的那一个 |
+| 默认 | owner 的**全部**个人插件都加载进每一个 turn（家人的也是）。`--strict-mcp-config` 只挡 MCP，**不挡 skill** |
+| 只加 `--plugin-dir <某插件>` | 注入的那个出现了，但是**叠加**，隔离不成立 |
+| `--setting-sources project,local` + 上一条 | owner 的个人插件全部消失，只剩 CLI 内置的 + 注入的 |
+| `--settings '{"enabledPlugins":{"obsidian@obsidian-skills":false,...}}'` | ⭐ **能逐个关插件**（那两组 skill 整组消失，其余全在）。粒度是**每插件**不是每 skill；`~/.claude/skills/` 下的非插件 skill 不受它影响 |
 
-所以**两个 flag 必须一起上**，缺一个都白做。实现在 `server/account-plugins.ts`，
-`chat.ts` 起 turn 时调用。
-
-⚠️ **这是一次行为变化，owner 自己也受影响**：你在 cc-webui 里的 turn 从此也看不到
-个人插件了。拿回来的办法（一条软链）：
-
-```bash
-mkdir -p ~/.cc-webui/plugins/<你的用户名>
-ln -s ~/.claude/plugins/cache/<某插件> ~/.cc-webui/plugins/<你的用户名>/
-```
-
-整套关掉：`CC_WEBUI_ACCOUNT_PLUGINS=0`（⚠️ 关掉 = 家人的 turn 又能用到你的全部个人插件）。
+最后一行是做「管理员开关」最省事的落点：`enabledPlugins` 是一张
+`{"插件@市场": 布尔}` 的表，`--settings` 传一个覆盖即可，**不需要**动 `--setting-sources`，
+因此也不会误伤 hooks / permissions / env。
 
 ### §6 `ws` 之前是幻影依赖
 
@@ -342,7 +349,7 @@ ln -s ~/.claude/plugins/cache/<某插件> ~/.cc-webui/plugins/<你的用户名>/
 | **新增** | `server/devices/` | WS 注册表、一账号一设备约束、心跳 / 重连退避、掉线时挂起调用的错误返回 |
 | **改** | [`server/chat.ts`](../server/chat.ts) | 起 turn 时按 `ownerId` 查在线设备 → 动态追加 `mcpServers` 条目 + 改写 `appendSystemPrompt`；skills 侧加 `--plugin-dir` / `--setting-sources` |
 | **改** | [`server/db.ts`](../server/db.ts) | 新表：设备（account / 在线状态 / 最后心跳）、per-account 本地 MCP 配置 |
-| ~~**不用改**~~ **要改** | [`server/executors/types.ts`](../server/executors/types.ts) | `McpServerSpec` 对 MCP 那一半确实够，但决策 20 要加 `pluginDirs` / `settingSources` —— 见「实施期的修正」§5 |
+| **不用改** | [`server/executors/types.ts`](../server/executors/types.ts) | `McpServerSpec` 已经够（决策 20 撤回后这条恢复成原样，见 §5） |
 | **不用改** | [`server/mcp-context.ts`](../server/mcp-context.ts) | per-turn token 已带 `ownerId`，正好当路由键 |
 | **不用改** | `shared/permission-flow.ts` | 决策 7 复用现状 |
 | ~~**新仓库**~~ **`desktop/` 子目录** | `desktop/`（`@cc-webui/desktop`，自带 package.json） | Electron 客户端。**偏离原文**：`desktop/src/*` 要 import `server/devices/protocol.ts`（两边共享的协议契约），跨仓库共享类型是纯负担；仓库已有 `cli/subagent-mcp/` 这个带自己 package.json 的子包先例。顺带的好处：`mcp-host.ts` / `ws-client.ts` **刻意不 import electron**，所以 `server/devices/e2e.test.ts` 能直接用真实客户端代码跑端到端 |
@@ -380,4 +387,5 @@ ln -s ~/.claude/plugins/cache/<某插件> ~/.cc-webui/plugins/<你的用户名>/
 | 2026-08-29 | 初版定稿。逐问逐答评审产物，26 条决策 + 8 条否决方案，未实施 |
 | 2026-08-30 | 补更新链路。新增决策 27（下载走主进程带 cookie，修掉与「不新增公开路由」的矛盾）、决策 28（启动时自动查版本）；新增「更新链路」一节，写死 `/api/meta` 的 `desktopClient` 字段形状、semver 比较、NSIS 撞托盘常驻进程的坑；公开面清单补一条安装包下载路由 |
 | 2026-08-30 | **服务端落地**。新增「实施期的修正」一节（7 条），其中 §2「决策 19 不能靠 ownerId 实现」是实施期发现的最危险的一条。状态从「未实施」改为「服务端已实施，Electron 客户端未实施」 |
+| 2026-08-30 | **决策 20 撤回**。需求理解偏差（把「全局开关」做成了「按账号隔离」），且用户最终判断这个开关本身不必要。代码全部回退，实测事实留在 §5b |
 | 2026-08-30 | **客户端落地 + 全链路验证**。`desktop/` 子包（偏离原文的「新仓库」，理由见「要动的地方」）；`scripts/verify-local-mcp.mjs` 用**真实 claude CLI** 验证了纯透传中继（这是当时最大的未验证假设）；决策 20 用三次真实 CLI 调用实测确认（§5b）；变异测试抓到并修掉两个连接生命周期的 bug |

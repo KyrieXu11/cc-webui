@@ -20,8 +20,6 @@ import { claudeExecutor } from "./executors/claude-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
 import { availableServers } from "./devices/registry.ts";
-import { accountPlugins } from "./account-plugins.ts";
-import { getUserById } from "./auth/users.ts";
 import { LOCAL_PREFIX } from "./devices/protocol.ts";
 import {
   registerMcpSessionContext,
@@ -484,12 +482,6 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         );
       }
 
-      // 每账号一套 skill / plugin（决策 20）。实测证明必须 --plugin-dir 和
-      // --setting-sources 一起上：只加前者是**叠加**，owner 的个人插件照样漏进来。
-      // 详见 server/account-plugins.ts 的文件头（含三次真实 CLI 调用的对比结果）。
-      const owner = opts.ownerId ? getUserById(opts.ownerId) : null;
-      const plugins = accountPlugins(owner?.username);
-
       // The CLI takes a real AbortSignal, so cancelling is no longer the
       // iterator-.return() workaround the SDK forced.
       const abort = new AbortController();
@@ -512,8 +504,6 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         // timers the server owns (survive across turns, cancellable).
         disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
         appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers),
-        pluginDirs: plugins.pluginDirs,
-        settingSources: plugins.settingSources,
         mcpServers: [
           {
             name: "bash",
