@@ -202,3 +202,24 @@ export const SERVER_NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
  * 「这只手在服务器上」还是「这只手在用户的电脑上」。
  */
 export const LOCAL_PREFIX = "local-";
+
+/**
+ * `mcp__local-browser__navigate` → `mcp__local-browser__`；不是本地工具则 null。
+ *
+ * ⚠️ 用途：本地工具的权限 allowance 按 **server** 放行，不是按工具名。
+ * 实测（CLI 2.1.251）**`auto` 模式对它没见过的 MCP 工具仍然要授权**，不会自动
+ * 放行；而 playwright-mcp 这类 server 有二十来个工具名，按工具名缓存意味着家人
+ * 每开一次浏览器要点五到八张卡才安静下来 —— 那个体验会直接把功能用废。
+ *
+ * 放宽到 server 粒度**不削弱真正的控制**：这套设计里唯一的在场控制本来就是托盘
+ * 的「⏸ 暂停本机工具」（决策 8），而信任的自然单位就是「我这台机器上的这个
+ * server」，不是单个工具。
+ *
+ * ⚠️ `src/components/PermissionCard.tsx` 里有一份等价的正则用来改按钮文案
+ * （前端不 import 服务端代码）。改这里就要改那里，否则按钮上那句
+ * 「同名工具都允许」会变成谎话。
+ */
+export function localToolServerPrefix(toolName: string): string | null {
+  const m = new RegExp(`^(mcp__${LOCAL_PREFIX}[a-z0-9][a-z0-9-]*__)`).exec(toolName);
+  return m ? m[1] : null;
+}

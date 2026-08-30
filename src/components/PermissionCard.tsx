@@ -60,6 +60,12 @@ export default function PermissionCard({
   delay = 0,
   onAnswer,
 }: Props) {
+  // 本地工具（mcp__local-<server>__*）的 allowance 是按 **server** 放行的，
+  // 不是按工具名 —— 理由见 server/chat.ts 的 localToolServerPrefix 注释
+  // （一次浏览器会话有二十来个工具名，按名字点会把功能用废）。
+  // 这里必须跟着改文案，否则按钮上那句「同名工具都允许」就是谎话。
+  const localServer = /^mcp__(local-[a-z0-9][a-z0-9-]*)__/.exec(tool)?.[1] ?? null;
+
   const [reason, setReason] = useState("");
   const [showReason, setShowReason] = useState(false);
   const locked = resolved !== undefined || stale;
@@ -167,9 +173,13 @@ export default function PermissionCard({
                 ? btnLocked
                 : btnIdle
           }`}
-          title={`本次 WebUI 会话内所有 ${tool} 调用都自动放行`}
+          title={
+            localServer
+              ? `本次 WebUI 会话内，这台机器上 ${localServer} 的所有工具都自动放行`
+              : `本次 WebUI 会话内所有 ${tool} 调用都自动放行`
+          }
         >
-          同名工具都允许
+          {localServer ? `${localServer} 都允许` : "同名工具都允许"}
         </button>
         <button
           disabled={locked}
