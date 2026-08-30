@@ -1,0 +1,71 @@
+desktop/src/main.ts
+  s_1c527dc43afeed::t_69296e99a93787 1-11,13-18,20-37,41-250
+  s_1c527dc43afeed::t_306b2fc82f5435 12,19,38-40
+server/devices/protocol.ts
+  s_1c527dc43afeed::t_306b2fc82f5435 164-173
+server/client-routes.test.ts
+  s_1c527dc43afeed::t_9899f9d8d1adb3 134-142
+  s_1c527dc43afeed::t_bc6109d3557fca 1-133,143-207
+server/mcp-local-route.test.ts
+  s_1c527dc43afeed::t_31a340b7fb8e1b 1-133,141-486
+  s_1c527dc43afeed::t_5c22673e4223f0 134-140
+server/devices/registry.test.ts
+  s_1c527dc43afeed::t_d811e860ef8d57 619-672
+  s_1c527dc43afeed::t_74b9d1ea6e4509 315-325,327-328,330-334,337-344,346-362,367-370,372-373
+  s_1c527dc43afeed::t_1a31ecc86b37d2 1-93,104,113,122,126,128-184,186-190,193-245,247-258,260,264-283,285-294,296-314,326,345,363-366,371,374-375,377-389,391,395-398,400,404-415,419-578,580-596,598-613,615-618,673-677
+  s_1c527dc43afeed::t_044e3edb792b29 94-102,117
+  s_1c527dc43afeed::t_0c32fe47ec98a2 103,105-112,114-116,118-121,123-125,127,185,191-192,246,259,261-263,284,295,329,335-336,376,390,392-394,399,401-403,416-418,579,597,614
+desktop/src/updater.ts
+  s_1c527dc43afeed::t_d239c582ec238e 1-69
+desktop/src/mcp-host.ts
+  s_1c527dc43afeed::t_24d5bef72c2d06 1-170
+server/devices/ws.test.ts
+  s_1c527dc43afeed::t_3a88fad4ef0f57 51-57,59,61-62
+  s_1c527dc43afeed::t_d4db35131afe7a 1-38,40-50,58,60,63-291,293,306-307,312-317,319-327,333-420
+  s_1c527dc43afeed::t_58f35367670a8c 39,292,294-305,308-311,318,328-332
+server/devices/ws.ts
+  s_1c527dc43afeed::t_9b491a6b0d900e 93-96,102,120,140,167,194
+  s_1c527dc43afeed::t_0f82d86d8ec234 55-63,74,77,83,89
+desktop/tsconfig.json
+  s_1c527dc43afeed::t_8ab4912bda909a 1-16
+docs/desktop-client.md
+  s_1c527dc43afeed::t_c0a337ab8bcaca 216-313
+  s_1c527dc43afeed::t_1c0a04ae4ac91c 3,45,56-57,322
+  s_1c527dc43afeed::t_efdfdd8249c863 359
+server/devices/registry.ts
+  s_1c527dc43afeed::t_9b491a6b0d900e 41-53,111,150,153,168,177-180,182,185
+AGENTS.md
+  s_1c527dc43afeed::t_aab0239bd31f7e 32,68-71,344-345
+  s_1c527dc43afeed::t_86e4c669e99a83 165-202,379-381
+server/devices/store.test.ts
+  s_1c527dc43afeed::t_01819bc0332d4c 1-368
+desktop/package.json
+  s_1c527dc43afeed::t_8ab4912bda909a 1-24
+server/db.test.ts
+  s_1c527dc43afeed::t_a7b6e35eb3ef47 37,40,51-80
+  s_1c527dc43afeed::t_1de66aedadbce1 81
+server/devices/protocol.test.ts
+  s_1c527dc43afeed::t_32a3736a639ce5 1-70
+server/index.ts
+  s_1c527dc43afeed::t_0f82d86d8ec234 73-78
+server/devices/e2e.test.ts
+  s_1c527dc43afeed::t_05af4f10b252fa 1-257
+desktop/src/config.ts
+  s_1c527dc43afeed::t_1fa78f9a2f5285 1-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "6bf1233a22d4ec636e25a3446abfa1e8abe44e05",
+  "prompts": {},
+  "sessions": {
+    "s_1c527dc43afeed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "348a0962-077e-457d-932c-09de4062370e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
