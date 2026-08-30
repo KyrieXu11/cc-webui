@@ -1,0 +1,50 @@
+server/account-plugins.test.ts
+  s_1c527dc43afeed::t_ac8b36378d481a 1-84
+server/chat.ts
+  s_1c527dc43afeed::t_187590a9a6e87b 23-24,487-492,515-516
+server/devices/protocol.ts
+  s_1c527dc43afeed::t_94e49b8a4fbc9c 31-40
+desktop/src/mcp-host.ts
+  s_1c527dc43afeed::t_94e49b8a4fbc9c 19,28-38,84-95,97
+.env.example
+  s_1c527dc43afeed::t_ac8b36378d481a 65-78
+docs/desktop-client.md
+  s_1c527dc43afeed::t_430ce4dd48544e 294-316,348,383
+scripts/verify-local-mcp.mjs
+  s_1c527dc43afeed::t_671420507a03db 1-248
+desktop/src/main.ts
+  s_1c527dc43afeed::t_94e49b8a4fbc9c 53-54,58-62
+  s_1c527dc43afeed::t_c3c862006f62f1 247-251
+desktop/package.json
+  s_1c527dc43afeed::t_82c2df274c3df1 7,26-52
+  s_1c527dc43afeed::t_7c0fae360ae2fb 10,15-17,24
+desktop/build.mjs
+  s_1c527dc43afeed::t_82c2df274c3df1 1-52
+scripts/seed-local-mcp.mjs
+  s_1c527dc43afeed::t_283abf53b839bf 1-29,31-34,36-112
+  s_1c527dc43afeed::t_e2157a1e31d43b 30,35
+server/account-plugins.ts
+  s_1c527dc43afeed::t_47fa647076b6cf 1-86
+README.md
+  s_1c527dc43afeed::t_ac8b36378d481a 132-133
+desktop/src/servers/transfer.ts
+  s_1c527dc43afeed::t_8f22448d996cf9 1-137
+desktop/package-lock.json
+  s_1c527dc43afeed::t_91107a2dc43861 1-6683
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "6a7a5681b6f0c484651f2aaed4015d677ef84fce",
+  "prompts": {},
+  "sessions": {
+    "s_1c527dc43afeed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "348a0962-077e-457d-932c-09de4062370e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
