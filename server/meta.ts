@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { groupsEnabled } from "./features.ts";
 import { officeConfigured } from "./office.ts";
+import { clientRelease } from "./client-release.ts";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -131,12 +132,19 @@ metaRoute.get("/", async (c) => {
   // exists at all.
   // office=false 时前端把 Office 文件降级成只读/下载，而不是给一个点了没反应的按钮。
   const features = { groups: groupsEnabled(), office: officeConfigured() };
+  // 桌面客户端的当前版本（docs/desktop-client.md 决策 26/28）。**没发布过就整个
+  // 字段缺席**——客户端据「在不在」判断要不要比 semver，给个空对象等于逼它多写
+  // 一条判空。和 features 一样每次现算（60 秒缓存只盖 slashCommands/skills 那个
+  // Scan），所以下面**两条 return 都要带**；只加一条会让字段时有时无，而第一次
+  // 请求总是走重扫那条，本地根本复现不出来。
+  const release = clientRelease();
+  const desktopClient = release ? { desktopClient: release } : {};
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-    return c.json({ ...cached.scan, features, cached: true });
+    return c.json({ ...cached.scan, features, ...desktopClient, cached: true });
   }
   const scan = await scanClaudeCommands(cwd);
   cache.set(key, { ts: Date.now(), scan });
-  return c.json({ ...scan, features, cached: false });
+  return c.json({ ...scan, features, ...desktopClient, cached: false });
 });
 
 export { metaRoute };

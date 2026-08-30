@@ -128,6 +128,7 @@ npm run dev
 | `CC_WEBUI_OFFICE_URL` | ONLYOFFICE DocumentServer 的**浏览器可达**地址（必须公网：是用户的浏览器去取 `api.js`）。**留空 = 在线编辑关闭**，取件台里 Office 文件降级成「浏览器打开 / 下载」 | 未设置（关闭） |
 | `CC_WEBUI_OFFICE_JWT_SECRET` | 与容器 `JWT_SECRET` **必须一致**，否则容器一律拒签。同时用于签发容器取文件 / 回调的票据 | 未设置（关闭） |
 | `CC_WEBUI_SELF_INTERNAL_URL` | **容器视角**的 cc-webui 地址（容器用它取原文件、发保存回调）。不要填公网——绕一圈 nginx+frp 只是慢且多一个失败点 | `http://host.docker.internal:8789` |
+| `CC_WEBUI_CLIENT_DIR` | 桌面客户端安装包目录：放安装包 + 一个 `latest.json`（`{"version","file","notes"}`），`/api/meta` 据此下发 `desktopClient` 版本信息。目录里没有 `latest.json` = 没发布过，该字段整个不出现 | `~/.cc-webui/client` |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
 | `FEISHU_CLAUDE_APP_ID` / `_APP_SECRET` / `_ENCRYPT_KEY` / `_VERIFY_TOKEN` | 飞书 Claude 机器人凭据（详见下面「飞书机器人」一节） | 未设置则不启用 |

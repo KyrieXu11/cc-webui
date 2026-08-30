@@ -206,6 +206,51 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_file_deletions_time ON file_deletions(deleted_at DESC);
   `,
+
+  // 5 — 桌面客户端（docs/desktop-client.md）。两张表，一张记「哪台机器」，
+  // 一张记「那台机器上该起哪些 MCP server」。
+  //
+  // devices 的主键是 user_id 而不是 device_id：这就是决策 5「一账号一设备」
+  // 在 schema 层的表达。**故意不放在应用层判断** —— 两个并发连接之间的
+  // check-then-insert 正是逼着这个仓库上 SQLite 的那类竞态（见文件头 6-11 行），
+  // 也是 AGENTS.md 里群聊 startTurn TOCTOU 那条已知缺陷的同款。
+  //
+  // 在线状态（已连接 / 已暂停）**故意不落库**，理由和 groups_index 砍掉
+  // in_flight 完全一样（见迁移 1 的注释）：WS 注册表是唯一真相，落库值是死重，
+  // 而且进程崩了以后库里会留下一堆永远为「已连接」的僵尸行。
+  // 这里只放耐久事实：设备身份、给人看的名字、平台、客户端版本、最后一次心跳。
+  // db.test.ts 有一条断言把这个判断钉死，别绕过它。
+  //
+  // last_seen_ms 是耐久的：它回答「这台机器上次出现是什么时候」，
+  // 在设备离线时仍然有意义 —— 这和「现在是否连着」是两个问题。
+  `
+  CREATE TABLE devices (
+    user_id        TEXT    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    device_id      TEXT    NOT NULL,
+    label          TEXT    NOT NULL DEFAULT '',
+    platform       TEXT    NOT NULL DEFAULT '',
+    client_version TEXT    NOT NULL DEFAULT '',
+    last_seen_ms   INTEGER NOT NULL,
+    created_at     INTEGER NOT NULL
+  );
+
+  -- 决策 16：本地 MCP server 的清单由服务端下发，客户端照单 spawn。
+  -- v1 不做管理界面（配置格式头两版几乎肯定要改），所以这张表**没有任何
+  -- 自动写入路径** —— 手工 INSERT。因此读侧必须容忍「一行都没有」：
+  -- 那表示这个账号没有本地 MCP server，不是错误。
+  --
+  -- spec 存 JSON 而不是拆成列：一个 server 的启动参数是 {command, args, env,
+  -- cwd} 这种嵌套结构，拆列会在第一次要加字段时就变成又一条迁移。
+  -- 代价是列名拼错不会报错（见文件头关于 null-prototype 行的说明），
+  -- 所以读侧要自己 try/catch —— session-store.ts:473 那个先例没做，别学它。
+  CREATE TABLE local_mcp_servers (
+    user_id TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name    TEXT    NOT NULL,
+    spec    TEXT    NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, name)
+  );
+  `,
 ];
 
 let handle: Database | null = null;

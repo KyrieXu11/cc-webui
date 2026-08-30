@@ -18,7 +18,9 @@ import { relabelTasksSessionId } from "./bash-mcp.ts";
 import { relabelSessionFiles } from "./session-files.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
-import { getMcpRouteUrl } from "./codex-mcp-config.ts";
+import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
+import { availableServers } from "./devices/registry.ts";
+import { LOCAL_PREFIX } from "./devices/protocol.ts";
 import {
   registerMcpSessionContext,
   unregisterMcpSessionContext,
@@ -53,6 +55,41 @@ const SYSTEM_PROMPT_APPEND =
   "if you want the conversation to auto-resume — typically after starting a long-running " +
   `${MCP_BASH_RUN} (run_in_background=true) task. The injected prompt must be self-contained ` +
   `(no human in the loop). Cancel with ${MCP_SCHEDULE_CANCEL_WAKEUP} if you change your mind.`;
+
+/**
+ * 本机工具那一段系统提示（docs/desktop-client.md 决策 9）。
+ *
+ * ⚠️ **模型必须知道自己有没有这只手。** 工具集在 CLI spawn 的那一刻就冻结了
+ * （--mcp-config 是启动参数），设备中途上线也要等下个 turn。如果不说，模型对
+ * 「用户的电脑」这件事只能靠猜：有设备时它不知道可以用，没设备时它会去编一个
+ * 不存在的工具名然后失败。
+ *
+ * ⚠️ 两只手的边界要说死。默认的 Read/Edit/Glob/Grep/mcp__bash__run **全都在
+ * 服务器上**，`mcp__local-*` 才在用户自己的电脑上，两边是**不同的文件系统**。
+ * 不点破的话，模型会把本地浏览器下载的文件路径直接喂给服务端的 Read。
+ */
+function localToolsPrompt(servers: string[]): string {
+  if (servers.length === 0) {
+    return (
+      "\nUSER'S OWN COMPUTER: not reachable this turn — no desktop client is connected " +
+      "(or the user paused local tools from the tray). Every tool you have runs on the " +
+      "SERVER, not on the user's machine. If the task genuinely requires their computer " +
+      "(a browser session they are logged into, a file only on their disk), say so instead " +
+      "of pretending; a client that connects later only takes effect on the NEXT turn."
+    );
+  }
+  const names = servers.map((s) => `mcp__${LOCAL_PREFIX}${s}__*`).join(", ");
+  return (
+    "\nUSER'S OWN COMPUTER: you have a second set of hands. " +
+    `The tools named ${names} execute on the USER'S OWN MACHINE via their desktop client; ` +
+    "every other tool — Read/Write/Edit/Glob/Grep and mcp__bash__run — executes on the " +
+    "SERVER. These are TWO DIFFERENT FILESYSTEMS: a path you see on one does not exist on " +
+    "the other, so never hand a local path to a server tool or vice versa. To move a file " +
+    "between them, use the transfer tools rather than copying content by hand. " +
+    "Anything needing the user's own browser session, their installed apps, or their local " +
+    "files must go through the local tools."
+  );
+}
 
 const chat = new Hono();
 const KEEPALIVE_MS = 15_000;
@@ -428,6 +465,23 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         wakeupSlot,
       });
 
+      // 起 turn 前探测这个账号有没有在线设备（docs/desktop-client.md 决策 9）。
+      //
+      // ⚠️ 探测必须在这里做一次并**定死**：CLI 的工具集在 spawn 时就冻结了
+      // （--mcp-config 是启动参数），turn 中途设备上线也不会生效。所以这一行拿到
+      // 什么，这个 turn 就是什么 —— 包括要照实告诉模型（见 localToolsPrompt）。
+      //
+      // ⚠️ ownerId 是 optional（TurnOptions.ownerId?: string）。拿不到账号必须
+      // 当成「没有设备」，绝不能当成「任意设备」—— fail-closed 是全仓纪律。
+      const localServers = opts.ownerId
+        ? availableServers(opts.ownerId)
+        : [];
+      if (localServers.length > 0) {
+        console.log(
+          `[chat ${reqId}] local tools: ${localServers.join(", ")} (device online)`,
+        );
+      }
+
       // The CLI takes a real AbortSignal, so cancelling is no longer the
       // iterator-.return() workaround the SDK forced.
       const abort = new AbortController();
@@ -449,7 +503,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         // it disabled so the model only uses mcp__schedule__wakeup, whose
         // timers the server owns (survive across turns, cancellable).
         disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
-        appendSystemPrompt: SYSTEM_PROMPT_APPEND,
+        appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers),
         mcpServers: [
           {
             name: "bash",
@@ -461,6 +515,21 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
             url: getMcpRouteUrl(process.env, "schedule"),
             bearerToken: mcpToken,
           },
+          // 家人机器上的那几只手（docs/desktop-client.md）。
+          //
+          // ⚠️⚠️ **决策 19（群聊 / 飞书不得使用本地工具）就是靠「只有这一处装配」
+          // 实现的，不能靠检查 ownerId。** 飞书 turn 的 ownerId 会被
+          // auth/actor.ts 的 actorForResource 解析成一个**真实存在的管理员账号
+          // id**，而那个管理员很可能正好有在线设备 —— 任何「按 ownerId 查设备」
+          // 的黑名单都会漏过去，等于飞书群里任何人 @ 一下 bot 就能碰到家人的
+          // 电脑（飞书至今没有 sender 白名单，见 AGENTS.md）。
+          // 所以 groups/claude-runner.ts、groups/codex-runner.ts、codex-chat.ts
+          // 一律**不要**加这一段。要开，先给飞书补 sender 白名单。
+          ...localServers.map((name) => ({
+            name: `${LOCAL_PREFIX}${name}`,
+            url: localMcpRouteUrl(process.env, name),
+            bearerToken: mcpToken,
+          })),
         ],
         // Same decision logic as the SDK-era canUseTool — only the parameter
         // shape changed, so permission cards behave identically.

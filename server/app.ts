@@ -15,6 +15,8 @@ import { metaRoute } from "./meta.ts";
 import { permissionRoute } from "./permission.ts";
 import { bashTasksRoute } from "./bash-tasks.ts";
 import { mcpBashRoute } from "./mcp-bash-route.ts";
+import { mcpLocalRoute } from "./mcp-local-route.ts";
+import { clientRoute } from "./client-routes.ts";
 import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
 import { authRoutes } from "./auth-routes.ts";
@@ -48,6 +50,15 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
   app.route("/api/meta", metaRoute);
   app.route("/api/bash/tasks", bashTasksRoute);
   app.route("/api/mcp", mcpBashRoute);
+  // 桌面客户端的 MCP 中继（docs/desktop-client.md）。挂在 /api/mcp 前缀下是
+  // 有意的：AGENTS.md 部署一节要求反代把 `/api/mcp/*` 一律 404，这条路由和
+  // 那三条同性质（拿到 per-turn token 就等于一次远端执行），前缀规则自动覆盖，
+  // nginx 一行都不用改。
+  //
+  // ⚠️ 设备自己的 WebSocket 端点**不在**这里，也不在 /api/mcp 下 —— 它必须能从
+  // 公网连上，见 server/devices/ws.ts 的 DEVICE_WS_PATH。
+  app.route("/api/mcp", mcpLocalRoute);
+  app.route("/api/client", clientRoute);
   app.route("/feishu", feishu);
 
   if (opts.serveDist) {

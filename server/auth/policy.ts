@@ -215,6 +215,19 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "ALL /api/mcp/bash": { auth: "public", note: MCP_NOTE },
   "ALL /api/mcp/schedule": { auth: "public", note: MCP_NOTE },
   "ALL /api/mcp/lark": { auth: "public", note: MCP_NOTE },
+  // 桌面客户端的中继（docs/desktop-client.md）。和上面三条完全同性质：凭证是
+  // per-turn bearer token，调用方只有本机的 CLI 子进程。token 背后解析不出
+  // ownerId 时路由自己 403（fail-closed），见 server/mcp-local-route.ts。
+  "ALL /api/mcp/local/:server": { auth: "public", note: MCP_NOTE },
+
+  // ── 桌面客户端安装包 ───────────────────────────────────────────────────────
+  // ⚠️ **不是** public。决策 27：客户端主进程带 cookie 自己下载，不走
+  // shell.openExternal（家人的默认浏览器多半没登录过）。改成 public 会同时打破
+  // 公开面清单和 policy.test.ts 的断言 —— 那正是它存在的意义。
+  "GET /api/client/download/:file": {
+    auth: "user",
+    note: "serves the desktop installer from CC_WEBUI_CLIENT_DIR; the handler pins the name to a basename inside that dir",
+  },
 
   // ── Feishu ────────────────────────────────────────────────────────────────
   "ALL /feishu/:bot/events": {

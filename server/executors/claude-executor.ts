@@ -79,6 +79,11 @@ export function buildClaudeArgs(opts: ExecOptions): string[] {
   // 2.1.246). Worse when a prompt word happens to BE a tool name: no error at
   // all, the tool is just silently denied. Anything appended after this point
   // must be a flag, never a positional.
+  //
+  // ⚠️ `--mcp-config <configs...>` is variadic as well (verified on --help,
+  // CLI 2.1.251). It has never bitten us only because `--strict-mcp-config` is
+  // pushed immediately after it (:132) — delete that line, or let a positional
+  // ever follow it, and the inline JSON blob starts eating arguments.
   if (!needsStdinProtocol(opts)) args.push(opts.prompt);
 
   if (needsStdinProtocol(opts)) {
@@ -101,6 +106,22 @@ export function buildClaudeArgs(opts: ExecOptions): string[] {
   if (opts.resume) args.push("--resume", opts.resume);
   if (opts.appendSystemPrompt) {
     args.push("--append-system-prompt", opts.appendSystemPrompt);
+  }
+
+  // Per-account skill/plugin isolation (docs/desktop-client.md decision 20).
+  // Placed here on purpose: after the positional prompt (:87) and before the
+  // variadic --allowedTools/--disallowedTools (:135-140), which is the only
+  // window that is safe in BOTH directions — neither of these is variadic, so
+  // they cannot swallow the prompt, and being flags they are legal after it.
+  //
+  // Their arities differ, hence two different loops (see ExecOptions):
+  // --plugin-dir takes one value and is repeated; --setting-sources takes one
+  // comma-joined value. Empty settingSources is not "load nothing" but "no
+  // opinion" — passing an empty string would be an argument the CLI has to
+  // parse, so omit the flag entirely instead.
+  for (const d of opts.pluginDirs ?? []) args.push("--plugin-dir", d);
+  if (opts.settingSources?.length) {
+    args.push("--setting-sources", opts.settingSources.join(","));
   }
 
   const servers = opts.mcpServers ?? [];
