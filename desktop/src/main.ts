@@ -45,12 +45,34 @@ async function refreshCookie(): Promise<void> {
   }
 }
 
+/**
+ * 内置 MCP server 的真实磁盘路径（决策 23）。
+ *
+ * ⚠️ 两个坑叠在一起，都只在**打包之后**才出现，开发时跑 `electron .` 一切正常：
+ *
+ * 1. esbuild 输出到 `dist/servers/`，不是 `servers/` —— 少写一层就是文件不存在。
+ * 2. 打包后 `app.getAppPath()` 指向 `.../app.asar`，而 asar 是个归档：主进程
+ *    读它里面的文件是透明的，但 **spawn 出去的子进程拿到的是一个不存在的路径**。
+ *    所以 package.json 的 build.asarUnpack 把 `dist/servers/**` 解包出来，
+ *    真实路径在 `app.asar.unpacked/` 下，必须自己替换这一段。
+ *
+ * 症状会是：家人机器上 transfer 工具永远启动失败，而 stderr 里只有一句
+ * ENOENT —— 从那句话反推到「asar 归档里的路径 spawn 不了」并不显然。
+ */
+function bundledServersDir(): string {
+  return path.join(
+    app.getAppPath().replace(/app\.asar(?=$|[\\/])/, "app.asar.unpacked"),
+    "dist",
+    "servers",
+  );
+}
+
 // ── 本地 MCP 宿主 + 连接 ─────────────────────────────────────────────────────
 const host = new McpHost({
   // 决策 23：借 Electron 自带的 Node 跑打包进来的 MCP server，家人机器零依赖。
   // 服务端下发的 spec 里写了 command 就用它（npx 逃生口）。
   defaultCommand: process.execPath,
-  bundledDir: path.join(app.getAppPath(), "servers"),
+  bundledDir: bundledServersDir(),
   defaultEnv: () => ({
     ELECTRON_RUN_AS_NODE: "1",
     // 决策 24：浏览器 MCP server 用专属持久 profile，不碰家人日常那个。
