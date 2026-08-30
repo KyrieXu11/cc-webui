@@ -368,6 +368,74 @@ settings 文件**，不是只管插件。排掉 user 级会连带丢掉 `~/.clau
 
 ---
 
+## 部署清单（上线前逐条勾）
+
+服务端代码全部就位，但**这套东西要真跑起来还得做下面这些**。它们大多不是代码，
+所以不会有任何测试提醒你漏了哪条。
+
+### 你的 Mac（服务端）
+
+- [ ] **给每个家人建账号**（`CC_WEBUI_ADMIN` 之外的普通账号）。
+      ⚠️ 决策 5 是「一账号一设备」，所以**每人一个账号**，别共用。
+- [ ] **配每个账号的本地 MCP server**：
+      ```bash
+      node scripts/seed-local-mcp.mjs <用户名>          # 装 v1 默认三件套
+      node scripts/seed-local-mcp.mjs <用户名> --list    # 看配了什么
+      ```
+      ⚠️ 默认里 `fs` 那条写的是 `%USERPROFILE%\Desktop` 之类，**装机时按人改**。
+- [ ] **放安装包**：`~/.cc-webui/client/`（或 `CC_WEBUI_CLIENT_DIR`）下放
+      `cc-webui-setup-<版本>.exe` 和一个 `latest.json`：
+      ```json
+      { "version": "0.1.0", "file": "cc-webui-setup-0.1.0.exe", "notes": "首个版本" }
+      ```
+      没有这个文件 = `/api/meta` 不下发 `desktopClient` = 更新链路整条是空的。
+      **改完不用重启服务**（`clientRelease()` 故意不缓存）。
+- [ ] 生产实例要 `npm run build` + `launchctl kickstart -k gui/501/com.xuqiang.cc-webui`
+      （服务里**不**跑 build）。
+
+### VPS 上的 nginx
+
+- [ ] **加 `/ws/device` 的 location。** ⚠️ 不加的话家人的客户端永远连不上，
+      而现场只能看到握手失败。
+
+      ```nginx
+      location /ws/device {
+          proxy_pass http://127.0.0.1:10199;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Proto $scheme;   # cookie 的 Secure 属性靠它
+          proxy_read_timeout 1h;    # 默认 60s 会把长连接切掉
+      }
+      ```
+
+- [ ] **确认 `/api/mcp/*` 那条 404 规则没有连带命中 `/ws/device`。**
+      两者不在同一前缀正是为了避开它（见「实施期的修正」§3），但反代上如果写了
+      更宽的规则就会撞。
+
+### 家人的 Windows 机器
+
+- [ ] 装客户端（不签名，会撞 SmartScreen：「更多信息 → 仍要运行」）。
+- [ ] **装 Node** —— ⚠️ v1 的 `browser` / `fs` 走 npx（决策 23 承诺的内置打包只
+      对我们自己写的 `transfer` 成立），没有 Node 这两个 server 起不来。
+      首次运行还要联网拉包。
+- [ ] 首次让 agent 开浏览器时**在旁边**：扫码登录那类要人配合，而且
+      playwright 第一次要下载/连接系统浏览器。
+- [ ] 托盘里确认「已连接（<用户名>）」。
+
+### 上线后自查
+
+- [ ] 在网页里随便发一条消息，系统提示里应当出现 `mcp__local-*` 的说明
+      （没设备时会明说「本机工具不可用」）。
+- [ ] 让 agent 调一次本地工具，**第一次会弹权限卡**（实测：`auto` 模式对未知
+      MCP 工具仍然要授权）。点「local-browser 都允许」之后该 server 的其余工具
+      本会话不再问。
+- [ ] 托盘点一下「⏸ 暂停本机工具」，再让 agent 调一次，应当收到
+      「用户在托盘里暂停了本机工具」。
+
+---
+
 ## 本设计之外，建议另立项
 
 1. **那个「把文件工具限制在工作目录（含 `--add-dir`）」的 CLI flag** ——
