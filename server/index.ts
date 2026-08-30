@@ -70,5 +70,10 @@ const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
 // 反代那侧这条 location 需要 Upgrade / Connection 头 + 够长的 proxy_read_timeout，
 // 否则长连接会被 nginx 默认的 60s 读超时切掉。见 server/devices/ws.ts 文件头。
 server.on("upgrade", (req, socket, head) => {
-  deviceWs.handleUpgrade(req, socket, head);
+  if (deviceWs.handleUpgrade(req, socket, head)) return;
+  // ⚠️ 注册了 'upgrade' 监听器之后，node **不再**销毁无人处理的 upgrade 请求。
+  // 不自己关的话，打到任何其它路径的 upgrade 会留下一条既无响应、也不 close、
+  // 也没有超时的 TCP 连接 —— 一个端口扫描器就能把 fd 攒满。
+  socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  socket.destroy();
 });

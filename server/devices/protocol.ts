@@ -161,6 +161,16 @@ export const DEAD_AFTER_MS = HEARTBEAT_MS * 2 + 5_000;
  */
 export const RPC_TIMEOUT_MS = 5 * 60_000;
 
+/**
+ * 会话 cookie 的名字。**必须和 `server/auth/session.ts` 的 `SESSION_COOKIE` 一致。**
+ *
+ * ⚠️ 为什么在这里再写一遍而不是从 auth 里 import：这个文件是**客户端也要 import 的
+ * 共享契约**，而 `auth/session.ts` 会拉进 node:crypto、DB、users 表 —— 桌面客户端
+ * 一个都不该有。两处必须手工对齐，`server/devices/protocol.test.ts` 有一条断言
+ * 钉住它们相等，改了名字那条断言会红。
+ */
+export const SESSION_COOKIE_NAME = "cc_webui_session";
+
 /** server name 的字面约束，见 LocalMcpServerSpec.name 的注释。 */
 export const SERVER_NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 

@@ -1,0 +1,24 @@
+{
+  "name": "@cc-webui/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "cc-webui 桌面客户端：托盘常驻，把服务端的 MCP 工具调用落在这台机器上执行。设计见 ../docs/desktop-client.md",
+  "main": "dist/main.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "dev": "electron .",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3"
+  }
+}

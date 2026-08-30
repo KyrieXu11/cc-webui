@@ -52,7 +52,15 @@ function send(ws: WebSocket, frame: ServerFrame): void {
 }
 
 export type DeviceWsHandle = {
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
+  /**
+   * 返回是否接管了这次 upgrade。
+   *
+   * ⚠️ 返回值不是装饰。`server.on("upgrade", …)` 一旦注册，node **就不再**对
+   * 无人处理的 upgrade 请求执行默认的「销毁 socket」—— 于是打到任何其它路径的
+   * upgrade 会留下一条既无响应、也不 close、也没有超时的 TCP 连接，一个端口
+   * 扫描器就能把 fd 攒满。调用方必须按返回值把没人认领的连接关掉。
+   */
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean;
   close(): void;
 };
 
@@ -63,31 +71,35 @@ export function createDeviceWs(): DeviceWsHandle {
     req: IncomingMessage,
     socket: Duplex,
     head: Buffer,
-  ): void {
+  ): boolean {
     // url 在 upgrade 事件里一定是路径（不含 host），但仍然可能带查询串。
     const path = (req.url ?? "").split("?")[0];
-    if (path !== DEVICE_WS_PATH) return; // 不是给我们的，交给别的监听器/默认行为
+    if (path !== DEVICE_WS_PATH) return false; // 不是给我们的
 
     // ── 鉴权。这一段没有任何测试之外的兜底，改动前先读文件头 ──────────────
     const user = identifyCookieHeader(req.headers.cookie);
     if (!user) {
       refuse(socket, 401, "Unauthorized");
-      return;
+      return true; // 认领了，也已经关掉了
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
       attach(ws, user.id);
     });
+    return true;
   }
 
   function attach(ws: WebSocket, userId: string): void {
-    let admitted = false;
+    // admit 成功后拿到的、代表**这条连接**的 token。close/error 时必须带着它去
+    // drop，否则一条半死连接的迟到 close 会把后来重连上的那条踢掉 ——
+    // 见 registry.ts 的 Conn.connToken 注释。
+    let connToken: string | null = null;
 
     // hello 迟迟不来就断开：一条没握手的连接会一直占着「一账号一设备」的名额吗？
     // 不会 —— admit 是在收到 hello 时才做的。但它会占着一个 socket 和一个定时器，
     // 而且这种连接多半是探测流量。
     const helloDeadline = setTimeout(() => {
-      if (!admitted) {
+      if (!connToken) {
         send(ws, { t: "bye", reason: "no hello frame" });
         ws.close();
       }
@@ -105,7 +117,7 @@ export function createDeviceWs(): DeviceWsHandle {
       registry.touch(userId);
 
       if (frame.t === "hello") {
-        if (admitted) return; // 重复 hello 忽略，不重置状态
+        if (connToken) return; // 重复 hello 忽略，不重置状态
         const result = registry.admit({
           userId,
           hello: frame,
@@ -125,7 +137,7 @@ export function createDeviceWs(): DeviceWsHandle {
           ws.close();
           return;
         }
-        admitted = true;
+        connToken = result.connToken;
         clearTimeout(helloDeadline);
 
         const user = getUserById(userId);
@@ -152,7 +164,7 @@ export function createDeviceWs(): DeviceWsHandle {
       }
 
       // hello 之前的任何其它帧都不认 —— 否则一条没握手的连接可以往 registry 里写东西。
-      if (!admitted) return;
+      if (!connToken) return;
 
       switch (frame.t) {
         case "ready":
@@ -179,7 +191,7 @@ export function createDeviceWs(): DeviceWsHandle {
 
     const bye = (why: string) => {
       clearTimeout(helloDeadline);
-      if (admitted) registry.drop(userId, why);
+      if (connToken) registry.drop(userId, why, connToken);
     };
     ws.on("close", () => bye("device disconnected"));
     ws.on("error", (err) => {

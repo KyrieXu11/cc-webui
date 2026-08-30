@@ -34,8 +34,10 @@ try {
   for (const t of [
     "codex_sessions",
     "codex_turns",
+    "devices",
     "feishu_bindings",
     "groups_index",
+    "local_mcp_servers",
     "opened_projects",
   ]) {
     assert.ok(tables.includes(t), `missing table ${t}`);
@@ -45,6 +47,37 @@ try {
     db.prepare("PRAGMA table_info(groups_index)").all() as Array<{ name: string }>
   ).map((c) => c.name);
   assert.ok(!cols.includes("in_flight"), "in_flight must not be persisted");
+
+  // Same judgement, second table: a device's "connected" / "paused" state is
+  // exactly the same kind of thing as in_flight was — the live registry
+  // (server/devices/registry.ts) is the only truth, and a persisted copy would
+  // survive a crash as a row claiming a device is connected forever.
+  // `devices` therefore holds durable facts only: identity, label, platform,
+  // client version, and when this machine was last seen at all.
+  const deviceCols = (
+    db.prepare("PRAGMA table_info(devices)").all() as Array<{ name: string }>
+  ).map((c) => c.name);
+  for (const forbidden of ["connected", "online", "paused"]) {
+    assert.ok(
+      !deviceCols.includes(forbidden),
+      `${forbidden} must not be persisted — the WS registry is the only truth`,
+    );
+  }
+  // One device per account (decision 5) lives in the SCHEMA, not in an
+  // application-level check: two concurrent connections racing a
+  // check-then-insert is the very class of bug that pushed this repo onto
+  // SQLite in the first place (see server/db.ts header).
+  const devicePk = (
+    db.prepare("PRAGMA table_info(devices)").all() as Array<{
+      name: string;
+      pk: number;
+    }>
+  ).filter((c) => Number(c.pk) > 0);
+  assert.deepEqual(
+    devicePk.map((c) => c.name),
+    ["user_id"],
+    "devices must be keyed by user_id alone — that IS the one-device-per-account rule",
+  );
 
   // ── reopening is idempotent (migrations must not re-run) ─────────────────
 
