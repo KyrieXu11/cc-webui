@@ -21,17 +21,25 @@ export function getMcpRouteUrl(
   > = process.env,
   server: McpRouteName = "bash"
 ): string {
-  const explicit =
-    server === "lark"
-      ? env.CC_WEBUI_LARK_MCP_URL?.trim()
-      : env.CC_WEBUI_MCP_URL?.trim();
-  if (explicit) return explicit;
+  // lark 有自己的覆盖变量（历史原因：它先于 schedule / local 出现）。
   if (server === "lark") {
-    const bashUrl = env.CC_WEBUI_MCP_URL?.trim();
-    if (bashUrl && /\/bash\/?$/.test(bashUrl)) {
-      return bashUrl.replace(/\/bash\/?$/, "/lark");
+    const larkExplicit = env.CC_WEBUI_LARK_MCP_URL?.trim();
+    if (larkExplicit) return larkExplicit;
+  }
+
+  // ⚠️ `CC_WEBUI_MCP_URL` 指的是 **bash 那一条**路由，不是「所有 MCP 路由」。
+  // 2026-08-30 之前这里写成了「非 lark 一律原样返回它」，于是设了这个变量之后
+  // `schedule` 拿到的是 bash 的 URL —— 两条路由指向同一个端点，wakeup 工具在
+  // 那种部署下直接不可用，而现场只能看到一个 404/工具缺失。
+  // 现在统一按末段改写推导；推导不出来就回落到默认，好过返回一个确定错的 URL。
+  const bashUrl = env.CC_WEBUI_MCP_URL?.trim();
+  if (bashUrl) {
+    if (server === "bash") return bashUrl;
+    if (/\/bash\/?$/.test(bashUrl)) {
+      return bashUrl.replace(/\/bash\/?$/, `/${server}`);
     }
   }
+
   const port = Number(env.PORT) || 8787;
   return `http://127.0.0.1:${port}/api/mcp/${server}`;
 }
@@ -39,21 +47,14 @@ export function getMcpRouteUrl(
 /**
  * 桌面客户端中继路由的 URL。每个本地 MCP server 一条，所以比其它三条多一段路径。
  *
- * ⚠️ 刻意不复用 getMcpRouteUrl(env, "local")：那个函数的覆盖逻辑有个已知的坑 ——
- * `CC_WEBUI_MCP_URL` 一旦设了，**任何非 lark 的 server 名都原样返回它**（上面
- * 第 24-28 行），"schedule" 已经中招。这里自己按 bash 的 URL 改写末段，
- * 顺带把回环/PORT 的默认值仍然只留在上面那一处。
+ * 建在 getMcpRouteUrl 之上，好让「回环地址 / PORT / CC_WEBUI_MCP_URL 覆盖」这套
+ * 规则只有一处实现。
  */
 export function localMcpRouteUrl(
   env: Partial<Pick<NodeJS.ProcessEnv, "CC_WEBUI_MCP_URL" | "PORT">> = process.env,
   serverName: string,
 ): string {
-  const bashUrl = env.CC_WEBUI_MCP_URL?.trim();
-  if (bashUrl && /\/bash\/?$/.test(bashUrl)) {
-    return bashUrl.replace(/\/bash\/?$/, `/local/${serverName}`);
-  }
-  const port = Number(env.PORT) || 8787;
-  return `http://127.0.0.1:${port}/api/mcp/local/${serverName}`;
+  return `${getMcpRouteUrl(env, "local")}/${serverName}`;
 }
 
 export function createCodexMcpConfig(

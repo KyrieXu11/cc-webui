@@ -171,6 +171,19 @@ export const DEAD_AFTER_MS = HEARTBEAT_MS * 2 + 5_000;
 export const RPC_TIMEOUT_MS = 5 * 60_000;
 
 /**
+ * 要设给 CLI 子进程的 `MCP_TOOL_TIMEOUT`（毫秒）。
+ *
+ * ⚠️ **CLI 侧这个值默认只有 60 秒**（2026-08-30 实测，CLI 2.1.251：工具在第
+ * 30/60 秒各发一帧 `tool_progress`，第 60 秒回 "The operation timed out."）。
+ * 扫码登录要等人拿手机，60 秒必然不够 —— 不调这个值，旗舰场景直接跑不通。
+ *
+ * ⚠️ 刻意比 RPC_TIMEOUT_MS **大一点**：这样先超时的是我们自己的中继，模型看到的
+ * 是「设备在 300 秒内没有应答」这种能定位的话，而不是 CLI 那句放之四海而皆准的
+ * "The operation timed out."。顺序反过来就等于把诊断信息扔了。
+ */
+export const CLI_MCP_TOOL_TIMEOUT_MS = RPC_TIMEOUT_MS + 30_000;
+
+/**
  * 会话 cookie 的名字。**必须和 `server/auth/session.ts` 的 `SESSION_COOKIE` 一致。**
  *
  * ⚠️ 为什么在这里再写一遍而不是从 auth 里 import：这个文件是**客户端也要 import 的

@@ -417,7 +417,8 @@ export const claudeExecutor: Executor = {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      // extraEnv 覆盖在后：见 ExecOptions.extraEnv（唯一动机是 MCP_TOOL_TIMEOUT）。
+      env: opts.extraEnv ? { ...process.env, ...opts.extraEnv } : process.env,
     });
 
     // AbortSignal is deliberately not passed to spawn(): we need to know that

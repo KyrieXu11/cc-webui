@@ -33,7 +33,7 @@ process.env.CC_WEBUI_COOKIE_SECRET_FILE = path.join(tmp, "cookie-secret");
 const { closeDb } = await import("../server/db.ts");
 const { createUser } = await import("../server/auth/users.ts");
 const { issueSession } = await import("../server/auth/session.ts");
-const { SESSION_COOKIE_NAME } = await import("../server/devices/protocol.ts");
+const { SESSION_COOKIE_NAME, CLI_MCP_TOOL_TIMEOUT_MS } = await import("../server/devices/protocol.ts");
 const registry = await import("../server/devices/registry.ts");
 const { setLocalMcpServers } = await import("../server/devices/store.ts");
 const { createDeviceWs } = await import("../server/devices/ws.ts");
@@ -82,7 +82,11 @@ process.stdin.on("data", (c) => {
       });
     } else if (m.method === "tools/call") {
       appendFileSync(MARKER, m.params?.name + "\\n");
-      reply(m.id, { content: [{ type: "text", text: "PONG-FROM-FAMILY-MACHINE" }] });
+      const delay = Number(process.env.VERIFY_TOOL_DELAY_MS || 0);
+      const answer = () =>
+        reply(m.id, { content: [{ type: "text", text: "PONG-FROM-FAMILY-MACHINE" }] });
+      if (delay > 0) setTimeout(answer, delay);
+      else answer();
     } else if (m.id !== undefined && m.id !== null) {
       reply(m.id, {});
     }
@@ -99,6 +103,15 @@ let host = null;
 let failed = false;
 
 const log = (...a) => console.log("[verify]", ...a);
+
+// 两个可调旋钮，用来分别回答两个问题：
+//   VERIFY_PERMISSION_MODE=auto        —— `auto` 会不会放行它没见过的 MCP 工具？
+//     （不传 --permission-prompt-tool，所以「需要问」就等于「调不成」——
+//      工具没被调到 = auto 把未知 MCP 工具归到了「要问」那一档）
+//   VERIFY_TOOL_DELAY_MS=75000         —— CLI 侧的 MCP 工具超时是多少？
+//     （扫码登录要等人拿手机，这个值决定旗舰场景能不能跑通）
+const PERMISSION_MODE = process.env.VERIFY_PERMISSION_MODE || "bypassPermissions";
+const TOOL_DELAY_MS = Number(process.env.VERIFY_TOOL_DELAY_MS || 0);
 
 try {
   const user = createUser({
@@ -176,16 +189,25 @@ try {
     mcpConfig,
     "--strict-mcp-config",
     "--permission-mode",
-    "bypassPermissions",
+    PERMISSION_MODE,
     "--model",
     "haiku",
   ];
 
-  log("spawning real claude CLI…");
+  log(
+    `spawning real claude CLI… (permission-mode=${PERMISSION_MODE}, tool delay=${TOOL_DELAY_MS}ms)`,
+  );
   const out = await new Promise((resolve, reject) => {
     const proc = spawn("claude", args, {
       cwd: tmp,
       stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        VERIFY_TOOL_DELAY_MS: String(TOOL_DELAY_MS),
+        // 和 server/chat.ts 起真 turn 时做的事一样。不设的话 CLI 侧默认 60 秒
+        // （已实测），扫码那类要等人的工具必然超时。
+        MCP_TOOL_TIMEOUT: String(CLI_MCP_TOOL_TIMEOUT_MS),
+      },
     });
     let stdout = "";
     let stderr = "";
@@ -220,10 +242,16 @@ try {
 
   if (!reachedDevice || !sawResult) {
     failed = true;
-    console.log("\n--- CLI stderr（前 4000 字）---");
-    console.log(out.stderr.slice(0, 4000));
-    console.log("\n--- CLI stdout（前 4000 字）---");
-    console.log(out.stdout.slice(0, 4000));
+    console.log("\n--- CLI stderr（尾 2000 字）---");
+    console.log(out.stderr.slice(-2000));
+    // 只挑有诊断价值的帧：工具调用、权限、错误、最终结果。
+    // 打全量 stdout 没用 —— init 那一帧就有好几 KB 的 skill 列表。
+    console.log("\n--- 相关的 stream-json 帧 ---");
+    for (const line of out.stdout.split("\n")) {
+      if (!line.trim()) continue;
+      if (!/tool_use|tool_result|permission|denied|error|"type":"result"/i.test(line)) continue;
+      console.log(line.slice(0, 1200));
+    }
     console.log(
       "\n如果工具压根没出现在模型的工具表里，最可能的原因是中继的 Streamable HTTP " +
         "契约推错了（见本文件头注释）。先看 stderr 里有没有 MCP 连接失败的行。",

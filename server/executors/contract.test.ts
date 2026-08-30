@@ -106,6 +106,8 @@ const claudeCallSite: ExecOptions = {
   appendSystemPrompt: "extra rules",
   // Per-account skill/plugin isolation (docs/desktop-client.md decision 20).
   // Pinned here because the two have different arities on the wire and it is
+  // 唯一动机是 MCP_TOOL_TIMEOUT（CLI 侧默认 60 秒，实测）。
+  extraEnv: { MCP_TOOL_TIMEOUT: "330000" },
   timeoutMs: 600_000,
   onPermissionAsk: async ({ input }) => ({
     behavior: "allow",
