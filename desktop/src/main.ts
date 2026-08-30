@@ -13,7 +13,11 @@ import { app, BrowserWindow, dialog, Menu, session, shell, Tray } from "electron
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { McpHost } from "./mcp-host.ts";
-import { DeviceClient, type ConnStatus } from "./ws-client.ts";
+import {
+  DeviceClient,
+  type ConnStatus,
+  type ServerStatus,
+} from "./ws-client.ts";
 import { browserProfileDir, loadConfig, saveConfig } from "./config.ts";
 import { fetchRelease, isNewer, type Release } from "./updater.ts";
 import { SESSION_COOKIE_NAME } from "../../server/devices/protocol.ts";
@@ -24,6 +28,7 @@ const version = app.getVersion();
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let status: ConnStatus = { state: "connecting" };
+let servers: ServerStatus[] = [];
 let quitting = false;
 
 // ── cookie ───────────────────────────────────────────────────────────────────
@@ -97,9 +102,20 @@ const client = new DeviceClient({
     status = s;
     renderTray();
   },
+  onServers: (s) => {
+    servers = s;
+    renderTray();
+  },
 });
 
 // ── 托盘（决策 8 / 15 / 25 的落点）───────────────────────────────────────────
+/** 托盘菜单一行放不下太长的报错。 */
+function truncate(msg: string | undefined, max = 60): string {
+  if (!msg) return "(没给原因)";
+  const one = msg.replace(/\s+/g, " ").trim();
+  return one.length > max ? one.slice(0, max - 1) + "…" : one;
+}
+
 function statusLine(): string {
   switch (status.state) {
     case "connecting":
@@ -117,6 +133,19 @@ function renderTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: statusLine(), enabled: false },
+      // ⚠️ 这一段是给**坐在这台机器前的人**看的诊断信息。v1 的 browser / fs 走
+      // npx，没装 Node 就起不来；没有这几行的话他只会看到「已连接」而工具一个
+      // 都没有，完全没有线索。失败原因直接摊在菜单里。
+      ...(servers.length === 0
+        ? [{ label: "本机工具：无", enabled: false } as const]
+        : servers.map((s) =>
+            s.ok
+              ? ({ label: `本机工具：${s.name} ✓`, enabled: false } as const)
+              : ({
+                  label: `本机工具：${s.name} ✗ ${truncate(s.error)}`,
+                  enabled: false,
+                } as const),
+          )),
       { type: "separator" },
       {
         // 决策 8：这是决策 6+7 之后**唯一**的在场控制 —— 给机器主人一个物理闸。
