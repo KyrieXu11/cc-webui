@@ -38,6 +38,19 @@ type Pending = {
 
 type Conn = {
   userId: string;
+  /**
+   * 这条**连接**的身份（不是设备的、也不是账号的）。
+   *
+   * ⚠️ 存在的唯一理由：`drop` 只按 userId 索引，而一条半死的 TCP 的 close 事件
+   * 可能在几分钟后才到。时序是这样的 ——
+   *   ① 心跳判死 A，drop(A)，A 的 socket 收到 close 请求但对端已经不通；
+   *   ② 家人的机器醒来，客户端重连成 B，admit(B) 成功；
+   *   ③ A 的 close 事件这时才终于触发 → 如果按 userId 无条件 drop，**B 被删掉**，
+   *      而 B 的 socket 还开着 —— 服务端以为没人连，客户端以为连着，谁也不会重连。
+   * 所以 ws.ts 拿着自己这条连接的 token 来 drop，token 对不上就什么都不做。
+   * Windows 机器睡眠/唤醒正好是这条路径的高频场景，不是边缘情况。
+   */
+  connToken: string;
   deviceId: string;
   label: string;
   platform: string;
@@ -95,7 +108,7 @@ function toLive(c: Conn): LiveDevice {
 }
 
 export type AdmitResult =
-  | { ok: true; device: LiveDevice }
+  | { ok: true; device: LiveDevice; connToken: string }
   | { ok: false; reason: string };
 
 /**
@@ -134,8 +147,10 @@ export function admit(opts: {
     };
   }
 
+  const connToken = randomUUID();
   const conn: Conn = {
     userId,
+    connToken,
     deviceId: hello.deviceId,
     label: hello.label,
     platform: hello.platform,
@@ -150,7 +165,7 @@ export function admit(opts: {
   };
   conns.set(userId, conn);
   ensureHeartbeat();
-  return { ok: true, device: toLive(conn) };
+  return { ok: true, device: toLive(conn), connToken };
 }
 
 /**
@@ -159,10 +174,15 @@ export function admit(opts: {
  * ⚠️ 「立即」是刻意的，不是偷懒。等重连会让那条 SSE 流长时间没动静，而
  * 模型对「工具报错」的处理能力远强于对「工具卡住」。而且家人的 Windows 机器
  * 睡眠是**高频**场景，不是边缘情况。
+ *
+ * ⚠️ `connToken` 传了就必须对得上，否则这次 drop 被忽略。**任何由某条具体连接
+ * 的事件触发的 drop（close / error）都必须传它** —— 理由见 Conn.connToken 的注释。
+ * 不传 = 无条件踢掉当前那条，只有心跳和测试重置该这么做。
  */
-export function drop(userId: string, reason: string): void {
+export function drop(userId: string, reason: string, connToken?: string): void {
   const conn = conns.get(userId);
   if (!conn) return;
+  if (connToken !== undefined && conn.connToken !== connToken) return;
   conns.delete(userId);
   for (const [, p] of conn.pending) {
     clearTimeout(p.timer);

@@ -1,6 +1,6 @@
 # 桌面客户端 — 设计文档
 
-> **状态：设计已定稿，未实施。** 这份文档是一次逐问逐答评审的产物，记录**全部决策及其理由**、
+> **状态：服务端已实施，Electron 客户端未实施。** 这份文档是一次逐问逐答评审的产物，记录**全部决策及其理由**、
 > **本轮实测出来的事实**，以及被否掉的方案（连同否掉的原因）。
 >
 > 给接手的人/agent：
@@ -42,7 +42,7 @@
 │ Electron app（托盘常驻）      │              │ cc-webui server                 │
 │  ├ 渲染进程 = 远端 cc-webui ──┼──HTTPS──────▶│  /api/*                         │
 │  ├ 主进程：WS 客户端 ─────────┼──WSS────────▶│  设备注册表（ownerId → 1 设备）  │
-│  └ 主进程：MCP host           │              │  /api/mcp/local/<per-turn token>│◀─┐
+│  └ 主进程：MCP host           │              │  /api/mcp/local/:server         │◀─┐
 │     ├ browser（系统 Chrome/Edge）            │  spawn claude CLI ────HTTP───────┘
 │     ├ fs（本地读写）          │              └─────────────────────────────────┘
 │     └ transfer（与服务端互传）│
@@ -53,7 +53,8 @@
 
 1. 家人在 app（**或任意浏览器**）里发消息 → `POST /api/chat`
 2. 服务端查：该 `ownerId` 有没有在线设备？
-   - 有 → 在 `--mcp-config` 里追加 `local-*` 条目，URL 指向 `/api/mcp/local/<per-turn token>`
+   - 有 → 在 `--mcp-config` 里追加 `local-*` 条目，URL 指向 `/api/mcp/local/<server 名>`
+     （token 走 `Authorization: Bearer`，**不在路径里** —— 见「实施期的修正」§1）
    - 无 → 不追加，并在 `appendSystemPrompt` 里显式告诉模型「本机工具不可用」
 3. CLI spawn，初始化 MCP，`tools/list` 走 HTTP → 服务端 → WS → 设备 → 本地 stdio MCP 子进程
 4. 模型调用 `mcp__local-browser__*` 等，沿同一条链下去执行
@@ -212,6 +213,104 @@ CLI **没有「逐个 skill 开关」的 flag**。能用的抓手只有：
 
 ---
 
+## 实施期的修正（2026-08-30，服务端落地时发现）
+
+设计评审时的几处判断和代码实际情况对不上。**这一节优先于上面的决策表** ——
+上面留着原文是为了保住理由的完整性，但实现按这里走。
+
+### §1 token 走 bearer 头，不在路径里
+
+原文把中继端点写成 `/api/mcp/local/<per-turn token>`。现状是：**现有三条 MCP 路由
+（bash / schedule / lark）全部用 `Authorization: Bearer`**（`mcp-bash-route.ts:592/600/612`），
+而 `McpServerSpec` 早就有 `bearerToken` 字段，`buildMcpConfig` 会把它拼成
+`headers: { authorization: "Bearer …" }`。跟现状走更省事，公开面清单里也只多一个
+干净的路径字面量。
+
+实际形状：**`ALL /api/mcp/local/:server`**，路径参数是**本地 MCP server 名**
+（`browser` / `fs` / `transfer`），token 在头里。一个 turn 有几个本地 server 就装配
+几条 `--mcp-config` 条目，共用同一个 per-turn token。
+
+### §2 ⭐⭐ 决策 19 不能靠检查 ownerId 实现
+
+这是实施期发现的**最危险的一条**。
+
+飞书 turn 的 `ownerId` 不是空的，也不是什么特殊值 —— `auth/actor.ts` 的
+`actorForResource()` 会把它解析成 `ownerOf(gid) ?? serviceAdmin()?.id`，也就是
+**一个真实存在的管理员账号 id**。而那个管理员（今天就是你）很可能正好有在线设备。
+
+所以任何形如「起 turn 时按 ownerId 查设备，飞书的 ownerId 特殊处理」的写法都会漏，
+后果是：**飞书群里任何人 @ 一下 bot，就能在家人的电脑上执行代码**（飞书至今没有
+sender 白名单，见 AGENTS.md）。
+
+**正确的实现是结构性的**：只有 `server/chat.ts` 那一处装配 `local-*` 条目。
+`groups/claude-runner.ts`、`groups/codex-runner.ts`、`codex-chat.ts` 一律不加。
+代码里那一段有对应的 ⚠️ 注释，别删。
+
+### §3 设备 WS 端点不能放在 `/api/mcp/` 下
+
+AGENTS.md 的部署一节要求反代把 `/api/mcp/*` **一律 404**。中继路由放进去正好
+（它只被本机 CLI 子进程调用，前缀规则自动覆盖，nginx 一行不用改），但**设备自己的
+WebSocket 必须能从公网连上**。放进去的话家人的客户端永远连不上，而现场只能看到一个 404。
+
+实际路径：**`/ws/device`**。反代那条 location 需要：
+
+```nginx
+location /ws/device {
+    proxy_pass http://127.0.0.1:8789;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 1h;      # 默认 60s 会把长连接切掉
+}
+```
+
+⚠️ 开发期（`npm run dev`）前端在 8787、API 在 8788，而 vite 的代理**没有开 `ws: true`**，
+所以走 8787 的 WebSocket 会失败。开发时让客户端直连 8788。
+
+### §4 session cookie 没有服务端吊销，必须在心跳里重验
+
+`server/auth/session.ts` 的 cookie 是**无状态 HMAC**，没有服务端 session 表，TTL 30 天。
+一条只在 upgrade 时验过一次的 WS 会活过登出、活过改密码 —— 决策 14 说的「登出即断连」
+在服务端一侧**根本不成立**（`clearedSessionCookie()` 只是让浏览器丢掉 cookie，
+已建立的连接毫无感知）。
+
+所以 registry 的每次心跳都跑一遍 `revalidate()`（当前实现是 `getUserById(userId) !== null`，
+能抓到销号；要抓到登出还需要一个服务端 session 表或 token 版本号，**尚未做**）。
+`revalidate` 自己抛异常时按「不能用」处理 —— fail-closed。
+
+### §5 决策 20 需要改 `server/executors/types.ts`
+
+原文「要动的地方」表里写着这个文件不用改。那句话对**MCP 那一半**是对的
+（`McpServerSpec` 确实够用），但决策 20 的 `--plugin-dir` / `--setting-sources`
+必须在 `ExecOptions` 上加字段。已加 `pluginDirs?: string[]` 和 `settingSources?: string[]`。
+
+⚠️ 两者 arity 不同，**不能照 `allowedTools` 建模**：`--plugin-dir <path>` 取单值且可重复；
+`--setting-sources <sources>` 取一个逗号串且至多出现一次。两者都**不是** variadic。
+
+⚠️ 顺带核实到一条源码注释没写的事实：**`--mcp-config <configs...>` 也是 variadic**
+（CLI 2.1.251 的 `--help`）。它今天没炸只是因为 `--strict-mcp-config` 这个 flag
+紧跟在它后面。
+
+### §6 `ws` 之前是幻影依赖
+
+`ws@8.20.1` 一直在 `node_modules` 里，但那是 `@larksuiteoapi/node-sdk` 带进来的
+**传递依赖** —— 直接 import 属于 phantom dependency，飞书 SDK 换个版本就可能消失。
+已显式写进 `package.json` 的 `dependencies`（外加 `@types/ws`）。
+
+### §7 中继不用 MCP SDK 的 transport
+
+其它三条 MCP 路由都用 `McpServer` + `WebStandardStreamableHTTPServerTransport`，
+那套东西的用途是「在本进程里实现一个 MCP server」，要先把工具一个个 register 上去。
+中继**没有自己的工具** —— 工具在家人机器上，清单只有设备知道。用 SDK 的话得先向设备
+`tools/list`、再动态造一个 `McpServer` 把结果 register 一遍，而 `serveMcp` 的 `make`
+还是同步签名（`mcp-bash-route.ts:547`），塞不进一次 await。
+
+所以中继是**纯 JSON-RPC 透传**。一个由此产生的、要记住的细节：
+**设备不可用时，`tools/call` 回 `result + isError:true`，其它方法回 JSON-RPC error。**
+混用的话，一个 `initialize` 失败会被模型当成「工具返回了错误文本」然后一直重试。
+
+---
+
 ## 要动的地方
 
 | 动作 | 位置 | 内容 |
@@ -220,7 +319,7 @@ CLI **没有「逐个 skill 开关」的 flag**。能用的抓手只有：
 | **新增** | `server/devices/` | WS 注册表、一账号一设备约束、心跳 / 重连退避、掉线时挂起调用的错误返回 |
 | **改** | [`server/chat.ts`](../server/chat.ts) | 起 turn 时按 `ownerId` 查在线设备 → 动态追加 `mcpServers` 条目 + 改写 `appendSystemPrompt`；skills 侧加 `--plugin-dir` / `--setting-sources` |
 | **改** | [`server/db.ts`](../server/db.ts) | 新表：设备（account / 在线状态 / 最后心跳）、per-account 本地 MCP 配置 |
-| **不用改** | [`server/executors/types.ts`](../server/executors/types.ts) | `McpServerSpec` 已经够 |
+| ~~**不用改**~~ **要改** | [`server/executors/types.ts`](../server/executors/types.ts) | `McpServerSpec` 对 MCP 那一半确实够，但决策 20 要加 `pluginDirs` / `settingSources` —— 见「实施期的修正」§5 |
 | **不用改** | [`server/mcp-context.ts`](../server/mcp-context.ts) | per-turn token 已带 `ownerId`，正好当路由键 |
 | **不用改** | `shared/permission-flow.ts` | 决策 7 复用现状 |
 | **新仓库** | — | Electron 客户端（主进程：WS + MCP host + 托盘；渲染进程：远端 URL 壳） |
@@ -257,3 +356,4 @@ CLI **没有「逐个 skill 开关」的 flag**。能用的抓手只有：
 |---|---|
 | 2026-08-29 | 初版定稿。逐问逐答评审产物，26 条决策 + 8 条否决方案，未实施 |
 | 2026-08-30 | 补更新链路。新增决策 27（下载走主进程带 cookie，修掉与「不新增公开路由」的矛盾）、决策 28（启动时自动查版本）；新增「更新链路」一节，写死 `/api/meta` 的 `desktopClient` 字段形状、semver 比较、NSIS 撞托盘常驻进程的坑；公开面清单补一条安装包下载路由 |
+| 2026-08-30 | **服务端落地**。新增「实施期的修正」一节（7 条），其中 §2「决策 19 不能靠 ownerId 实现」是实施期发现的最危险的一条。状态从「未实施」改为「服务端已实施，Electron 客户端未实施」 |

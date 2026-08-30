@@ -29,7 +29,7 @@ npm install
 npm run dev        # 开发：vite 前端 :8787（HMR）+ api :8788，vite 把 /api 代理到 8788
 npm start          # 生产：vite build 后单端口 :8787 同时托管 dist/ 和 /api/*（NODE_ENV=production）
 npm run typecheck  # tsc --noEmit（提交前必过）
-npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯 assert 脚本风格）
+npm test           # tsx --test "server/**/*.test.ts"（纯 assert 脚本风格，不是 describe/it）
 ```
 
 - 端口：`PORT`（默认 8787）、`CC_WEBUI_HOST`（默认 `127.0.0.1`，放 LAN 用 `0.0.0.0`）。
@@ -65,7 +65,10 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
 | `/api/permission` | `permission.ts` | 权限卡 resolve；`shared/permission-flow.ts` 是 scope-keyed allowance |
 | `/api/meta` | `meta.ts` | 目录扫描（列 `$HOME` 候选项目） |
 | `/api/bash/tasks` | `bash-tasks.ts` | 后台 bash 任务面板的 SSE |
-| `/api/mcp` | `mcp-bash-route.ts` | **HTTP 版** bash + lark MCP（bearer-token 网关）——只给 **Codex / 飞书** 用 |
+| `/api/mcp` | `mcp-bash-route.ts` | **HTTP 版** bash + lark + schedule MCP（bearer-token 网关），Claude / Codex / 飞书都走它 |
+| `/api/mcp/local/:server` | `mcp-local-route.ts` | **桌面客户端中继**：把 CLI 的 MCP 调用透传到家人机器上的 Electron 客户端（见下「5. 桌面客户端」） |
+| `/api/client` | `client-routes.ts` | 桌面客户端安装包下载（**要鉴权**，不是公开面） |
+| `/ws/device` | `devices/ws.ts` | 设备 WebSocket。⚠️ **不是 Hono 路由** —— 挂在 http.Server 的 upgrade 事件上，绕开 authMiddleware |
 | `/api/files` | `files-routes.ts` + `session-files.ts` | **取件台**：列「本对话文件」、保存文本（乐观锁）、批量删除（真删+留痕）、上传到会话 cwd |
 | `/api/office` | `office.ts` | ONLYOFFICE：下发签名 EditorConfig（浏览器）+ 容器侧取文件/保存回调（**票据鉴权，无 cookie**） |
 | `/feishu` | `feishu/*` | 飞书机器人（见下） |
@@ -158,6 +161,44 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   流式回一张 markdown 卡片；`bridge.ts` 把 group SSE 事件桥成飞书卡片；`parse.ts` / `mentions.ts`
   解析 @；`quote.ts` 引用图片/消息缓存；`lark-mcp.ts` 提供 bot 身份主动发文件/图片/@人的 MCP 工具。
 - 绑定：`@bot /bind <gid>` 把飞书 chat 关到某个 cc-webui group。
+
+### 5. 桌面客户端 / 远端工具执行（`server/devices/` + `mcp-local-route.ts`）
+
+> **设计与全部决策见 [`docs/desktop-client.md`](./docs/desktop-client.md)。服务端已实施，
+> Electron 客户端未实施。** 那份文档末尾的「实施期的修正」一节优先于它自己的决策表。
+
+让「你 Mac 上的 agent」多一只手，落在**家人的 Windows 机器**上。runtime 和凭据一步不动，
+外移的只有**工具执行**。
+
+```
+claude CLI（你 Mac 上的子进程）
+  --HTTP--> /api/mcp/local/:server   （bearer = per-turn token，和 bash MCP 同款）
+              --WS--> /ws/device     （家人机器主动外连，NAT 穿透白送）
+                        --stdio--> 家人机器上的本地 MCP server（playwright 等）
+```
+
+- `devices/protocol.ts` —— **两边共享的线协议**。改它就是改协议，必须 bump `PROTOCOL_VERSION`。
+- `devices/registry.ts` —— 在线设备的**唯一真相**（纯内存）。刻意不 import `ws`、不 import `auth`，
+  只认一个 `Transport` 接口，所以掉线/超时这两条最难测的路径不起真 socket 就能测。
+- `devices/store.ts` —— 耐久事实（设备身份、上次出现、per-account 本地 MCP 配置）。
+  **在线状态不落库**，理由和 `groups_index` 砍掉 `in_flight` 一样，`db.test.ts` 有断言钉死。
+- `devices/ws.ts` —— upgrade 端点 + **手写的 cookie 鉴权**。
+- `mcp-local-route.ts` —— **纯 JSON-RPC 透传**，不用 `McpServer`/SDK transport（中继没有自己的工具）。
+
+**改这块前必须知道的四条：**
+
+1. ⚠️⚠️ **决策 19（群聊/飞书不得用本地工具）是靠「只有 `chat.ts` 一处装配 `local-*`」实现的，
+   不能靠检查 `ownerId`。** 飞书 turn 的 ownerId 会被 `auth/actor.ts` 解析成一个**真实存在的
+   管理员账号 id**，而那个管理员很可能正好有在线设备。任何 ownerId 黑名单都会漏，
+   后果是飞书群里任何人 @ 一下 bot 就能碰家人的电脑（飞书至今没有 sender 白名单）。
+2. ⚠️ **`/ws/device` 完全绕开 Hono 和 `authMiddleware`**：不在 `app.routes` 里，
+   `policy.ts` 管不到，`policy.test.ts` **看不见它**。这条通道上忘了验 cookie
+   **不会有任何测试变红** —— 唯一的安全网是 `devices/ws.test.ts`，别删。
+3. ⚠️ **设备 WS 绝不能挂在 `/api/mcp/` 下**：反代把那个前缀一律 404，放进去家人永远连不上，
+   而现场只能看到一个 404。中继路由放在那儿则正好（前缀规则自动覆盖，nginx 一行不用改）。
+4. ⚠️ **session cookie 是无状态 HMAC，没有服务端吊销**。握手时验过一次的 WS 会活过登出和改密码，
+   所以 registry 每次心跳都跑一遍 `revalidate()`。当前实现只能抓到销号；抓登出还需要一张
+   服务端 session 表或 token 版本号，**尚未做**。
 
 ## 关键约定 / 设计模式
 
@@ -300,7 +341,8 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   （`server/auth/`，设计与全部决策见 [`docs/user-permissions.md`](./docs/user-permissions.md)）。
   但白名单是**护栏不是隔离**——agent 有 shell，能读写服务进程那个 OS 用户能碰的一切。
   给谁开账号 = 把这台机器交给谁。
-- 公开的路由只有：登录 / 登出 / `GET /api/auth/me` / 三条 `/api/mcp/*`（per-turn capability token）
+- 公开的路由只有：登录 / 登出 / `GET /api/auth/me` / **四条** `/api/mcp/*`（per-turn capability token，
+  含桌面客户端中继 `/api/mcp/local/:server`）
   / 两条 `/api/office/{download,callback}`（签名票据）/ `/feishu/:bot/events`（固定 404）。
   **`/api/mcp/*` 拿到 token 就等于一个 shell**，它的合法调用方只有本机 CLI 子进程，
   反代上应当直接拒掉。
@@ -334,6 +376,9 @@ npm test           # tsx --test "server/**/*.test.ts"（15 个测试文件，纯
   `CC_WEBUI_DOTENV` 指到一个不含凭据的文件（如 `prod.env`），否则同一条飞书消息会被回两遍。
 - nginx 侧三条不是可选项：`/api/mcp/*` 返回 404、`/api/auth/login` 限流、
   `client_max_body_size 64m`（nginx 默认 1m，而应用层有意不做上限）。
+- 桌面客户端上线后还要第四条：`/ws/device` 的 location 必须带 `Upgrade` / `Connection "upgrade"`
+  和一个够长的 `proxy_read_timeout`（默认 60s 会把长连接切掉）。**注意它和上面那条 404 规则冲突
+  的风险**——`/ws/device` 不在 `/api/mcp/` 下正是为了避开它。
 - ⚠️ **launchd + macOS TCC**：从 launchd 起的进程读 `~/Documents` / `~/Desktop` /
   `~/Downloads` 会**永久挂起**（没有前台可以弹授权框），挂住的 libuv 线程收不回来。
   `server/fs.ts` 的 `readdirOrGiveUp` 用 800ms 超时 + 进程级黑名单兜住了，
