@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build": "node build.mjs",
     "dev": "electron .",
-    "dist:win": "electron-builder --win nsis"
+    "dist:win": "electron-builder --win nsis --x64"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
