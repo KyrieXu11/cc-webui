@@ -16,6 +16,7 @@
 // 的 Node，家人机器上零依赖）。
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import path from "node:path";
 import type { LocalMcpServerSpec } from "../../server/devices/protocol.ts";
 
 export type HostOptions = {
@@ -24,7 +25,17 @@ export type HostOptions = {
    * MCP server 脚本（配 ELECTRON_RUN_AS_NODE=1），测试里可以是 "node"。
    */
   defaultCommand: string;
-  defaultEnv?: Record<string, string>;
+  /**
+   * ⚠️ **是函数不是对象**：里面装着会变的东西（会话 cookie 会随登录/登出刷新）。
+   * 构造时定死的话，家人重新登录后传输工具还拿着上一份 cookie，表现是
+   * 「浏览器里明明登着，agent 传文件却 401」。每次 spawn 现取。
+   */
+  defaultEnv?: () => Record<string, string>;
+  /**
+   * 内置 server 的存放目录（决策 23）。`spec.bundled` 在这里解析成
+   * `<bundledDir>/<bundled>.mjs`，所以服务端的配置不用知道客户端装在哪。
+   */
+  bundledDir?: string;
   /** 收到子进程发来的一帧 JSON-RPC。宿主自己不解释内容，原样上抛。 */
   onMessage: (server: string, payload: unknown) => void;
   /** 子进程意外退出。上层据此把这个 server 标成不可用。 */
@@ -70,10 +81,20 @@ export class McpHost {
   }
 
   private start(spec: LocalMcpServerSpec): void {
-    const command = spec.command?.trim() || this.opts.defaultCommand;
-    const proc = spawn(command, spec.args ?? [], {
+    let command = spec.command?.trim() || this.opts.defaultCommand;
+    let args = spec.args ?? [];
+    // command 优先于 bundled：那是 npx 逃生口，显式给了就用它。
+    if (!spec.command?.trim() && spec.bundled) {
+      const dir = this.opts.bundledDir;
+      if (!dir) throw new Error("bundledDir 没配，解析不了 bundled server");
+      // basename 是防穿越：这个值来自服务端配置，而它会被拼成一个可执行路径。
+      const file = path.basename(spec.bundled) + ".mjs";
+      command = this.opts.defaultCommand;
+      args = [path.join(dir, file), ...args];
+    }
+    const proc = spawn(command, args, {
       cwd: spec.cwd,
-      env: { ...process.env, ...this.opts.defaultEnv, ...spec.env },
+      env: { ...process.env, ...this.opts.defaultEnv?.(), ...spec.env },
       stdio: ["pipe", "pipe", "pipe"],
       // ⚠️ Windows 上 `npx` 实际是 `npx.cmd`，不带 shell 的 spawn 直接找不到。
       // 这是经典坑，但**不能**无脑开 shell:true —— 那会让 args 里的空格和引号

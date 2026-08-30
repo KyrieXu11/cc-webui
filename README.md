@@ -129,6 +129,8 @@ npm run dev
 | `CC_WEBUI_OFFICE_JWT_SECRET` | 与容器 `JWT_SECRET` **必须一致**，否则容器一律拒签。同时用于签发容器取文件 / 回调的票据 | 未设置（关闭） |
 | `CC_WEBUI_SELF_INTERNAL_URL` | **容器视角**的 cc-webui 地址（容器用它取原文件、发保存回调）。不要填公网——绕一圈 nginx+frp 只是慢且多一个失败点 | `http://host.docker.internal:8789` |
 | `CC_WEBUI_CLIENT_DIR` | 桌面客户端安装包目录：放安装包 + 一个 `latest.json`（`{"version","file","notes"}`），`/api/meta` 据此下发 `desktopClient` 版本信息。目录里没有 `latest.json` = 没发布过，该字段整个不出现 | `~/.cc-webui/client` |
+| `CC_WEBUI_PLUGINS_DIR` | 每账号的 skill / plugin 根目录。`<root>/<用户名>/` 下每个含 `.claude-plugin/plugin.json` 的子目录会被 `--plugin-dir` 注入给那个账号的 turn | `~/.cc-webui/plugins` |
+| `CC_WEBUI_ACCOUNT_PLUGINS` | 设为 `0` 关掉上面那套隔离，回到「所有 turn 都加载服务进程那个 OS 用户的 `~/.claude` 插件」。⚠️ 关掉等于家人的 turn 能用到你的全部个人插件 | 开启 |
 | `CC_WEBUI_PERMISSION_TIMEOUT_MS` | 权限卡无响应时的超时（到时视为 deny） | `600000`（10 分钟） |
 | `NODE_ENV` | `production` 时启用静态托管 | 由 `npm start` 设置 |
 | `FEISHU_CLAUDE_APP_ID` / `_APP_SECRET` / `_ENCRYPT_KEY` / `_VERIFY_TOKEN` | 飞书 Claude 机器人凭据（详见下面「飞书机器人」一节） | 未设置则不启用 |

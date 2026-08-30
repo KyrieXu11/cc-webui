@@ -291,6 +291,29 @@ location /ws/device {
 （CLI 2.1.251 的 `--help`）。它今天没炸只是因为 `--strict-mcp-config` 这个 flag
 紧跟在它后面。
 
+### §5b 决策 20 已实测验证（不是推的）
+
+三次真实 CLI 调用（2026-08-30，CLI 2.1.250），同一个问题「列出你能用的所有 skill」：
+
+| 命令 | 结果 |
+|---|---|
+| A：默认 | owner 的**全部**个人插件都在（`mattpocock-skills:*`、`obsidian:*`、`codex:*`…）—— 确认了 AGENTS.md 记的现状问题：家人的每个 turn 现在确实拿得到 |
+| B：只加 `--plugin-dir <某插件>` | 注入的那个出现了，但是**叠加**，owner 的插件一个没少 |
+| C：`--setting-sources project,local` + B | owner 的个人插件**全部消失**，只剩 CLI 内置的 + 注入的那一个 |
+
+所以**两个 flag 必须一起上**，缺一个都白做。实现在 `server/account-plugins.ts`，
+`chat.ts` 起 turn 时调用。
+
+⚠️ **这是一次行为变化，owner 自己也受影响**：你在 cc-webui 里的 turn 从此也看不到
+个人插件了。拿回来的办法（一条软链）：
+
+```bash
+mkdir -p ~/.cc-webui/plugins/<你的用户名>
+ln -s ~/.claude/plugins/cache/<某插件> ~/.cc-webui/plugins/<你的用户名>/
+```
+
+整套关掉：`CC_WEBUI_ACCOUNT_PLUGINS=0`（⚠️ 关掉 = 家人的 turn 又能用到你的全部个人插件）。
+
 ### §6 `ws` 之前是幻影依赖
 
 `ws@8.20.1` 一直在 `node_modules` 里，但那是 `@larksuiteoapi/node-sdk` 带进来的
@@ -322,7 +345,7 @@ location /ws/device {
 | ~~**不用改**~~ **要改** | [`server/executors/types.ts`](../server/executors/types.ts) | `McpServerSpec` 对 MCP 那一半确实够，但决策 20 要加 `pluginDirs` / `settingSources` —— 见「实施期的修正」§5 |
 | **不用改** | [`server/mcp-context.ts`](../server/mcp-context.ts) | per-turn token 已带 `ownerId`，正好当路由键 |
 | **不用改** | `shared/permission-flow.ts` | 决策 7 复用现状 |
-| **新仓库** | — | Electron 客户端（主进程：WS + MCP host + 托盘；渲染进程：远端 URL 壳） |
+| ~~**新仓库**~~ **`desktop/` 子目录** | `desktop/`（`@cc-webui/desktop`，自带 package.json） | Electron 客户端。**偏离原文**：`desktop/src/*` 要 import `server/devices/protocol.ts`（两边共享的协议契约），跨仓库共享类型是纯负担；仓库已有 `cli/subagent-mcp/` 这个带自己 package.json 的子包先例。顺带的好处：`mcp-host.ts` / `ws-client.ts` **刻意不 import electron**，所以 `server/devices/e2e.test.ts` 能直接用真实客户端代码跑端到端 |
 
 ### 公开面清单
 
@@ -357,3 +380,4 @@ location /ws/device {
 | 2026-08-29 | 初版定稿。逐问逐答评审产物，26 条决策 + 8 条否决方案，未实施 |
 | 2026-08-30 | 补更新链路。新增决策 27（下载走主进程带 cookie，修掉与「不新增公开路由」的矛盾）、决策 28（启动时自动查版本）；新增「更新链路」一节，写死 `/api/meta` 的 `desktopClient` 字段形状、semver 比较、NSIS 撞托盘常驻进程的坑；公开面清单补一条安装包下载路由 |
 | 2026-08-30 | **服务端落地**。新增「实施期的修正」一节（7 条），其中 §2「决策 19 不能靠 ownerId 实现」是实施期发现的最危险的一条。状态从「未实施」改为「服务端已实施，Electron 客户端未实施」 |
+| 2026-08-30 | **客户端落地 + 全链路验证**。`desktop/` 子包（偏离原文的「新仓库」，理由见「要动的地方」）；`scripts/verify-local-mcp.mjs` 用**真实 claude CLI** 验证了纯透传中继（这是当时最大的未验证假设）；决策 20 用三次真实 CLI 调用实测确认（§5b）；变异测试抓到并修掉两个连接生命周期的 bug |
