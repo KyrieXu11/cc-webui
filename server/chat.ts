@@ -20,7 +20,11 @@ import { claudeExecutor } from "./executors/claude-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
 import { availableServers } from "./devices/registry.ts";
-import { CLI_MCP_TOOL_TIMEOUT_MS, LOCAL_PREFIX } from "./devices/protocol.ts";
+import {
+  CLI_MCP_TOOL_TIMEOUT_MS,
+  LOCAL_PREFIX,
+  localToolServerPrefix,
+} from "./devices/protocol.ts";
 import {
   registerMcpSessionContext,
   unregisterMcpSessionContext,
@@ -90,6 +94,7 @@ function localToolsPrompt(servers: string[]): string {
     "files must go through the local tools."
   );
 }
+
 
 const chat = new Hono();
 const KEEPALIVE_MS = 15_000;
@@ -562,7 +567,12 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
             // 而没有答案的放行只会让 CLI 回 "The user did not answer the
             // questions."——一次误点会把之后所有提问都变成哑火。
             const isAsk = toolName === "AskUserQuestion";
-            if (!isAsk && allowance.has(toolName)) {
+            const localPrefix = localToolServerPrefix(toolName);
+            if (
+              !isAsk &&
+              (allowance.has(toolName) ||
+                (localPrefix !== null && allowance.has(localPrefix)))
+            ) {
               return { behavior: "allow", updatedInput: input };
             }
             const inputKey = permissionInputKey(toolName, input);
@@ -637,7 +647,9 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
               };
             }
             if (decision.behavior === "allow_tool_session") {
-              allowance.add(toolName);
+              // 本地工具按 server 放行（见 localToolServerPrefix 的注释）；
+              // 其余一切照旧按工具名。
+              allowance.add(localPrefix ?? toolName);
               return { behavior: "allow", updatedInput: input };
             }
             return decision;

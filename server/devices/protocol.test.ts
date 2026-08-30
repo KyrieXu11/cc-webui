@@ -12,6 +12,7 @@ import {
   RPC_TIMEOUT_MS,
   SERVER_NAME_RE,
   SESSION_COOKIE_NAME,
+  localToolServerPrefix,
 } from "./protocol.ts";
 import { SESSION_COOKIE } from "../auth/session.ts";
 
@@ -66,5 +67,38 @@ assert.equal(`mcp__${LOCAL_PREFIX}browser__navigate`, "mcp__local-browser__navig
 
 assert.equal(typeof PROTOCOL_VERSION, "number");
 assert.ok(PROTOCOL_VERSION >= 1);
+
+// ── 本地工具的 allowance 按 server 放行 ────────────────────────────────────
+// 实测：auto 模式对未知 MCP 工具仍然要授权。按工具名缓存的话，一次浏览器会话
+// 要点五到八张卡才安静 —— 这条断言钉住「按 server 放行」这个决定。
+assert.equal(
+  localToolServerPrefix("mcp__local-browser__navigate"),
+  "mcp__local-browser__",
+);
+assert.equal(
+  localToolServerPrefix("mcp__local-browser__click"),
+  localToolServerPrefix("mcp__local-browser__navigate"),
+  "同一个 server 的两个工具必须落到同一个 allowance 键",
+);
+assert.notEqual(
+  localToolServerPrefix("mcp__local-fs__read"),
+  localToolServerPrefix("mcp__local-browser__read"),
+  "不同 server 之间不能互相放行",
+);
+// 服务端的工具一律不受影响 —— 它们仍然按工具名放行。
+for (const notLocal of [
+  "mcp__bash__run",
+  "mcp__schedule__wakeup",
+  "Read",
+  "mcp__localish__x",
+  "mcp__local-__x",
+  "mcp__local-BROWSER__x",
+]) {
+  assert.equal(
+    localToolServerPrefix(notLocal),
+    null,
+    `${notLocal} 不该被当成本地工具`,
+  );
+}
 
 console.log("protocol.test.ts: all assertions passed");
