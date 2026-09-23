@@ -251,6 +251,50 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, name)
   );
   `,
+
+  // 6 — 会话共享。`ownership` 回答「归谁」，这张表回答「还给谁看过」，
+  // 两件事分开而不是往 ownership 里塞第二个 user_id：**一个资源只能有一个
+  // owner，但可以共享给任意多人**，塞进去第一天就要拆。
+  //
+  // ⚠️ 共享**不是**所有权。读得到 ≠ 删得掉：policy 里只有显式标了
+  // `access: "reader"` 的路由认这张表，DELETE / PATCH 那些仍然只认 owner。
+  // 这个区分是本迁移的全部意义，改动前先读 server/auth/policy.ts 的 OwnsSpec。
+  //
+  // resource_id 不加外键指向 ownership：**无主资源也可以被共享**（孤儿会话按
+  // 决策 10 是管理员可见的，他应当能把其中一条转手给家人），而那种资源在
+  // ownership 里根本没有行。
+  //
+  // shared_by 只为「谁共享给我的」这句 UI 文案存在，不参与任何鉴权判断 ——
+  // 判断只看 (resource_id, user_id) 在不在。所以它没有外键：共享者的账号被
+  // 删掉之后，这条共享**依然有效**（被共享者不该因为别人离职就丢掉手里的会话），
+  // 只是署名会退化成一个查不到的 id，读侧按「未知」渲染。
+  `
+  CREATE TABLE shares (
+    resource_id TEXT    NOT NULL,
+    user_id     TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind        TEXT    NOT NULL CHECK (kind IN ('claude', 'codex', 'group')),
+    shared_by   TEXT    NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (resource_id, user_id)
+  );
+  CREATE INDEX idx_shares_user ON shares(user_id);
+  `,
+
+  // 7 — 管理员给账号设的默认模型 / effort（docs/user-permissions.md 决策 45-47）。
+  //
+  // ⚠️ 是**默认值，不是限制**：服务端没有任何地方拿它去覆盖请求里的 model /
+  // effort。它只随 /api/auth/me 下发，浏览器看到 updated_at 和自己上次套用的
+  // 不一样时套用一次，之后用户自己改的照样保留。
+  //
+  // 没有行 = 没设。「两列都清空」直接删行，所以「没设」只有一种写法。
+  `
+  CREATE TABLE user_defaults (
+    user_id    TEXT    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    model      TEXT,
+    effort     TEXT,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 let handle: Database | null = null;

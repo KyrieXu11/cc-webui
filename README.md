@@ -1,6 +1,6 @@
 # cc-webui (Web Code)
 
-一个自托管的 Code Agent 网页客户端。后端把 Claude Code SDK 和 Codex SDK 统一包成 SSE 流，前端用同一个工作台在浏览器里切换 provider、恢复会话和跟代码代理协作。
+一个自托管的 Code Agent 网页客户端。后端直接驱动本机的 `claude` / `codex` 两个 CLI，把它们的事件流统一包成 SSE；前端用同一个工作台在浏览器里切换 provider、恢复会话和跟代码代理协作。
 
 ![chat view](docs/screenshots/chat.png)
 
@@ -16,17 +16,19 @@
 - **项目管理** — 扫描 `$HOME` 列出所有候选目录，可搜索打开；最近项目按会话归类展示
 - **会话恢复** — 直接打开 `~/.claude/projects/` 里已有的历史会话并继续聊
 - **搜索** — Header 中央搜索框同时匹配 **最近项目路径** 和 **会话标题**（`summary / firstPrompt / customTitle`），↑↓ 键盘导航
-- **流式渲染** — SDK 的 token 级 deltas、工具调用时间线、tool_result 结果
+- **流式渲染** — CLI 的 token 级 deltas、工具调用时间线、tool_result 结果（Codex 侧没有 delta，一次回答一帧）
+- **排队 / 中途插话** — 上一轮还在跑时照样能按回车。消息挂在输入框上方，并且**立刻塞进正在跑的那一轮**（服务端往 claude CLI 那根已经开着的 stdin 多写一行，CLI 自己带排队——它的会话 jsonl 里那条 `queue-operation / remove / absorbed_mid_turn` 记的就是这件事），所以不用等它跑完。插不进去的情形（Codex、带图、这一轮刚好结束）就留在队列里，这一轮结束后**逐条**自动发出。按「停止」不会丢掉排队的话，只是把队列冻住，顶上出一条「继续」。换会话 / 刷新即清空。群聊侧暂时没有
 - **Provider 入口** — Composer 模型菜单里可在 Claude / Codex 之间切换；项目侧栏按当前 provider 分开列会话，主页和搜索里用小标签标识历史会话来源
 - **多 agent 群聊** — 主页"新建群聊"创建一个把 Claude 和 Codex 拉到同一个会话里的群聊。Composer 输入 `@` 弹下拉选 `claude / codex / all`：
   - `@claude` / `@codex` — 单点对话，只让那一个 agent 回复
   - `@all`（或不带 @） — 流水线协作，按群聊配置的顺序依次跑（默认 Claude → Codex），下一个 agent 在 prompt 里看到上一个 agent 的发言以 `[来自 X 的回复]` 注入
   - 每个 agent 各自配 model / mode / effort / system prompt（角色设定）/ MCP，互不干扰
-  - 群聊会话独立于单聊，canonical jsonl 落在 `~/.cc-webui/groups/<gid>/transcript.jsonl`，每次 SDK 调用都是 single-shot（不绑 native session resume），上下文由 cc-webui 现场组装
+  - 群聊会话独立于单聊，canonical jsonl 落在 `~/.cc-webui/groups/<gid>/transcript.jsonl`，上下文由 cc-webui 现场组装（底下用隐藏的 native session resume 做 prompt 缓存）
   - 权限请求按 agent 标注（`[Claude]` / `[Codex]`），允许 / 拒绝 / 本次会话允许 选项与单聊一致
-- **刷新 / 切 session 不打断生成** — SDK 请求解耦于 HTTP 连接。回复到一半刷新页面或切到别的 session，后端继续跑到 turn 完整写到 jsonl；回来后自动 `attach` 续流，看到完整结果。多 tab 打开同 session 一起同步
-- **停止生成** — 生成中，send 按钮变成红色 ■，点一下调 `response.return()` 立刻终止 SDK 迭代器。已经流出的文字保留在 UI，turn 不写 jsonl（和 ChatGPT / Claude.ai 的 Stop 语义一致）
+- **刷新 / 切 session 不打断生成** — CLI 子进程解耦于 HTTP 连接。回复到一半刷新页面或切到别的 session，后端继续跑到 turn 完整写到 jsonl；回来后自动 `attach` 续流，看到完整结果。多 tab 打开同 session 一起同步
+- **停止生成** — 生成中，send 按钮变成红色 ■，点一下 abort 掉 CLI 子进程（SIGTERM）。已经流出的文字保留在 UI，turn 不写 jsonl（和 ChatGPT / Claude.ai 的 Stop 语义一致）
 - **侧边栏 in-flight 指示** — `ProjectSidebar` 每 3s 轮询 `/api/chat/inflight`，正在生成回复的 session 前面有个琥珀色脉冲点
+- **共享会话（仅管理员）** — 顶栏「共享」按钮（次要入口：侧边栏 hover 出现的人形图标，可作用于没打开的会话），勾选要共享给的账号。对方能读全部历史、也能在同一个会话里**接着聊**，但**删不掉、也不能再共享给别人**；他发的每个 turn 仍按他自己的账号算权限（目录白名单、权限卡、bash 护栏都不变）。同一个面板里还有「转交归属」——那是换主人，不是加读者。被共享进来的会话在列表里有一枚蓝色标记
 - **Extended thinking** — 模型的思考内容以折叠块形式穿插显示，橙色 sparkle 图标 + 动词轮播（`Pondering / Thundering / Brewing / …`），Ctrl+O 全局展开
 - **Tool-call 展开** — 点每一步查看完整 input / output
   - **Edit / Write / NotebookEdit** 走专用 diff 视图：`Update /path (+24 -1)`，红底 `−` / 绿底 `+` 分行展示
@@ -45,16 +47,23 @@
   - 会话级隔离，每个 session 只看自己的任务
   - `tsx watch` 重启或收到 SIGTERM 时，所有 running 任务统一 SIGKILL，不漏孤儿 bash
 - **Ctrl+B 前台→后台转移** — 前台 bash 卡着（`sleep 60` / 长编译 / `npm run test`）时按 Ctrl+B，同一个 proc + 已累积 buffer 原地搬进新建的 BackgroundTask，foreground Promise 立即 resolve 成 `Detached to bg-XXX...` 返回给模型，它不用等了可以继续做别的
-- **文件浏览器** — 右侧栏显示 cwd 文件树，懒加载子目录，点文件以 `@relpath` 插入到 composer
+- **文件面板** — 窗口右上角按钮打开（只在项目里有），显示 cwd 文件树、懒加载子目录：
+  - 单击文件在右侧打开（文本可直接编辑，`.md` / `.html` 可切到渲染，Office 文档走 ONLYOFFICE）；⌘ / Ctrl + 单击是浮窗速览
+  - 单击文件夹＝展开，同时设为「上传」「新建文件夹」的落点
+  - 右键文件或文件夹进入多选 → 下载（多个打成 zip，文件夹不能下载）/ 删除（真删、无回收站、留痕；**文件夹只删空的**）
+  - 拖到文件夹＝移动，拖到对话框＝插入相对路径；悬停出现的铅笔＝重命名
+- **项目记忆（只读）** — 左侧竖栏的书本按钮（只在项目里有），查看 Claude CLI 给这个项目记下的记忆：`~/.claude/projects/<slug>/memory/` 的 `MEMORY.md` 索引 + 每条正文，`[[链接]]` 可跳转。**只读**：没有任何编辑入口，接口也只有 GET
 - **文件上传** — composer 支持点击 / 拖拽 / 粘贴：
   - **图片** → base64 直接作为 image content block 发给模型，1 个回合看见（等价于终端粘贴）
-  - **其他文件** → 落盘 `/tmp/cc-webui-uploads/`，路径以 `附件:` 形式带进 prompt，Claude 用 Read 访问
+  - **其他文件** → 落盘系统临时目录下的 `cc-webui-uploads/`（macOS 上是 `/var/folders/…/T/`，可用 `CC_WEBUI_UPLOAD_DIR` 改），路径以 `附件：` 形式带进 prompt 让 Claude 去读；消息气泡里只显示文件名，悬停看路径。⚠️ **macOS 会自动清掉这个目录里 3 天前的文件**（`dirhelper`），要长期用的资料请用文件面板上传进项目
 - **`@path` 原子删除** — composer 里 Backspace 到 `@path` 末尾时整段一次性删掉，不用逐字符退
 - **模型 / 模式 / Effort** — 底栏直接选：
-  - Claude：Fable 5 / Opus 4.8 / Sonnet 4.6 / Haiku 4.5
-  - Codex：GPT-5.5 / GPT-5.4 / GPT-5.4 mini / GPT-5.3-Codex / GPT-5.2
-  - 权限：Default / Accept Edits / Plan / Bypass
+  - Claude：Opus / Fable / Sonnet / Haiku（**跟随最新**，CLI 自己解析成当前版本）+ **固定版本** Opus 5 / Opus 4.8 / Sonnet 4.6（不随升级变化）
+  - Codex：GPT-5.6-Sol / GPT-5.6-Terra / GPT-5.6-Luna / GPT-5.5（仅管理员）
+  - 权限：Default / Auto / Accept Edits / Plan / Bypass（Bypass 仅管理员）
   - Effort：Low / Medium / High / xHigh / Max（不支持 `xHigh` 的模型会自动降到 High）
+  - 思考状态行里的「· xhigh effort」是**这一轮实际用的**档位，看别人正在跑的对话时也一样
+  - **账号默认值（仅管理员）**：管理 → 用户里给某个账号设默认模型 / effort。是默认值不是限制——对方下次打开页面（或切回标签页）时换成你设的，之后自己改的会保留，直到你再保存
 - **Markdown 渲染** — `react-markdown + remark-gfm`，支持标题 / 列表 / 表格 / 代码块 / 链接；中英混排下中文标点紧邻 URL 时自动分隔，autolink 不再吞中文；单 `~` 不会误触发删除线（`~~双~~` 才是）
 - **日夜主题** — 左侧栏底部太阳/月亮按钮切换，配置保存在 localStorage
 - **历史懒加载** — 首次打开一个会话只渲染最后 200 条消息，向上滚自动加更早
@@ -120,6 +129,8 @@ npm run dev
 | `PORT` | 服务端口 | `8787` |
 | `CC_WEBUI_HOST` | 服务 bind 的 host；默认 IPv4 loopback。想放 LAN 用 `0.0.0.0` | `127.0.0.1` |
 | `CC_WEBUI_CWD` | claude 的默认工作目录（UI 里也能切） | `process.cwd()` |
+| `CC_WEBUI_CLAUDE_BIN` | `claude` CLI 的路径。留空 = 从 PATH 解析（跟随本机安装的版本）；填了就钉死那一个二进制——CLI 自动更新把事情弄坏时的逃生口 | 从 PATH 解析 |
+| `CC_WEBUI_CODEX_BIN` | 同上，`codex` CLI | 从 PATH 解析 |
 | `CC_WEBUI_UPLOAD_DIR` | 文件上传落盘目录 | `os.tmpdir()/cc-webui-uploads` |
 | `CC_WEBUI_SESSION_INDEX` | 旧 Codex 会话索引文件路径，现仅用于首次启动时一次性导入进 SQLite | `~/.cc-webui/sessions.json` |
 | `CC_WEBUI_DB` | SQLite 数据库路径（索引与关系：最近项目 / 飞书绑定 / 群聊索引 / Codex 会话索引） | `~/.cc-webui/cc-webui.db` |
@@ -165,14 +176,15 @@ FEISHU_DEFAULT_CWD=/Users/yourname/code/myproj   # 可选；自动建会话用�
 
 ## 键盘快捷键
 
-- `↵` — 发送消息
+- `↵` — 发送消息（上一轮还在跑时＝排队，跑完自动发出）
 - `⇧↵` — 换行
+- `⌘K` / `Ctrl+K` — 首页：跳到搜索框
 - `Ctrl+B` — 把当前运行中的前台 bash 转成后台任务（无前台任务时忽略）
 - `Ctrl+O` — 全局展开 / 收起所有 tool_call + thinking 详情
 - `/` — 调出斜杠命令 / skill 菜单
 - `Backspace`（光标在 `@path` 末尾） — 整段删除该引用，附带一个相邻空格
 - `↑ ↓ ↵` — 在项目选择对话框 / header 搜索里导航
-- `Esc` — 关闭弹窗 / 搜索下拉
+- `Esc` — 关闭弹窗 / 搜索下拉；文件面板里退出多选
 
 对话框按钮：
 

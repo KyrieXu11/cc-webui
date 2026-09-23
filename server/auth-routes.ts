@@ -1,7 +1,12 @@
 // Login / logout / whoami. The only routes that are reachable unauthenticated.
 
 import { Hono } from "hono";
-import { authenticate, getAllowedPaths } from "./auth/users.ts";
+import {
+  authenticate,
+  getAllowedPaths,
+  getUserDefaults,
+  listUsers,
+} from "./auth/users.ts";
 import {
   clearedSessionCookie,
   issueSession,
@@ -28,7 +33,11 @@ authRoutes.post("/login", async (c) => {
     "set-cookie",
     sessionCookie(issueSession(user.id), isSecureRequest(c)),
   );
-  return c.json({ user, allowedPaths: getAllowedPaths(user.id) });
+  return c.json({
+    user,
+    allowedPaths: getAllowedPaths(user.id),
+    defaults: getUserDefaults(user.id),
+  });
 });
 
 authRoutes.post("/logout", (c) => {
@@ -55,7 +64,27 @@ authRoutes.post("/logout", (c) => {
 authRoutes.get("/me", (c) => {
   const user = identifyRequest(c);
   if (!user) return c.json({ user: null });
-  return c.json({ user, allowedPaths: getAllowedPaths(user.id) });
+  // `defaults` rides along here rather than on its own route: it is "this
+  // account's settings", and the browser already asks this on every load.
+  return c.json({
+    user,
+    allowedPaths: getAllowedPaths(user.id),
+    defaults: getUserDefaults(user.id),
+  });
+});
+
+// 「共享给谁」的选人列表。**只有 id + username + role**，没有密码哈希、没有
+// 白名单、没有 created_at —— 管理页面那份（GET /api/admin/users）才带那些，
+// 这条是给普通用户用的，故意瘦。
+//
+// 为什么不复用管理接口：普通用户也能共享自己名下的会话，而他连不上 admin 面。
+authRoutes.get("/directory", (c) => {
+  const users = listUsers().map((u) => ({
+    id: u.id,
+    username: u.username,
+    role: u.role,
+  }));
+  return c.json({ users });
 });
 
 export { authRoutes };

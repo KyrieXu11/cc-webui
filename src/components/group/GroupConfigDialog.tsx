@@ -24,7 +24,7 @@ const defaultParticipant = (id: "claude" | "codex"): GroupParticipant => {
   const model =
     id === "claude"
       ? opts.find((m) => m.id.includes("opus"))?.id ?? opts[0]?.id ?? "opus"
-      : opts[0]?.id ?? "gpt-5.5";
+      : opts[0]?.id ?? "gpt-5.6-sol";
   return {
     id,
     model,

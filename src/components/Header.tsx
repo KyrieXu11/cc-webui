@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { tildify } from "../lib/fs";
 import HeaderSearch from "./HeaderSearch";
+import ShareSessionDialog from "./ShareSessionDialog";
+import { useAuth } from "../AuthGate";
 import type { SessionSummary } from "../lib/sessions";
 import { providerLabel, type AgentProvider } from "../lib/settings";
 
@@ -21,6 +23,8 @@ interface Props {
   onNewChat?: () => void;
   onPickProject?: (cwd: string) => void;
   onPickSession?: (s: SessionSummary) => void;
+  /** 共享名单或归属变了 —— 调用方据此刷新会话列表（转交出去后那一行会消失）。 */
+  onSharesChanged?: () => void;
 }
 
 const PROVIDER_ACCENT: Record<AgentProvider, string> = {
@@ -38,9 +42,12 @@ export default function Header({
   onNewChat,
   onPickProject,
   onPickSession,
+  onSharesChanged,
   reserveRight,
 }: Props) {
   const accent = PROVIDER_ACCENT[provider];
+  const { isAdmin } = useAuth();
+  const [shareOpen, setShareOpen] = useState(false);
 
   // 搜索框：**地方不够就整块不渲染**，不靠 CSS 压缩。
   // 它的 `pl-8 pr-3` + 边框本身就是 46px，`width:0` / `min-w-0` 都压不下去（padding
@@ -178,6 +185,38 @@ export default function Header({
         <span
           className={`${tight ? "hidden" : "hidden md:inline"} w-px h-5 bg-line`}
         />
+        {/* ⚠️ 共享的**主入口**。侧边栏那一行 hover 出来的图标是次要入口 ——
+            hover-only 在一个 260px 宽的栏里根本发现不了（实测：功能上线后
+            第一个问题就是"我怎么才能共享对话呢"）。人正看着一条对话想把它
+            共享出去，手会往顶栏找。
+            **仅管理员**（决策 41）：这台机器上谁能看到什么由管理员决定，普通用户
+            没有把自己的会话分给别人的动作。真正拦住的是服务端那三条 `auth: "admin"`。
+            没有 sessionId 就不画：新对话还没有 id，没有东西可共享。 */}
+        {sessionId && isAdmin && (
+          <button
+            aria-label="共享对话"
+            title="共享给其他人 / 转交归属"
+            onClick={() => setShareOpen(true)}
+            className="h-8 px-3 rounded-md text-[12px] text-muted hover:text-fg hover:bg-fg/5 transition-colors flex items-center gap-1.5"
+          >
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+              <circle cx="5.2" cy="4.6" r="2.1" stroke="currentColor" strokeWidth="1.2" />
+              <path
+                d="M1.6 11.4c0-1.9 1.6-3.2 3.6-3.2s3.6 1.3 3.6 3.2"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+              />
+              <path
+                d="M9.8 3.1a2.1 2.1 0 0 1 0 4M10.4 8.4c1.4.35 2.2 1.4 2.2 3"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span className={tight ? "hidden" : undefined}>共享</span>
+          </button>
+        )}
         <button
           aria-label="新对话"
           onClick={onNewChat}
@@ -194,6 +233,15 @@ export default function Header({
           <span className={tight ? "hidden" : undefined}>新对话</span>
         </button>
       </div>
+
+      {shareOpen && sessionId && isAdmin && (
+        <ShareSessionDialog
+          sessionId={sessionId}
+          provider={provider}
+          onClose={() => setShareOpen(false)}
+          onChanged={() => onSharesChanged?.()}
+        />
+      )}
     </header>
   );
 }

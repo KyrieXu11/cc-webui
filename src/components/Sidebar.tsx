@@ -8,6 +8,8 @@ interface Props {
   onOpenProject?: () => void;
   onOpenHelp?: () => void;
   onOpenAdmin?: () => void;
+  /** 查看项目记忆（只读）。只在打开了项目时由 App 传进来；没传就不画这颗按钮。 */
+  onOpenMemory?: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -18,6 +20,7 @@ export default function Sidebar({
   onOpenProject,
   onOpenHelp,
   onOpenAdmin,
+  onOpenMemory,
   theme,
   onToggleTheme,
 }: Props) {
@@ -43,6 +46,16 @@ export default function Sidebar({
         >
           <PlusIcon />
         </button>
+        {onOpenMemory && (
+          <button
+            onClick={onOpenMemory}
+            aria-label="项目记忆"
+            title="项目记忆（只读）：Claude 在这个项目里记下的东西"
+            className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          >
+            <MemoryIcon />
+          </button>
+        )}
       </div>
       <div className="flex flex-col items-center gap-1">
         {/* Admin only — a plain user never sees this exists. */}
@@ -170,5 +183,18 @@ const CloseIcon = () => (
       strokeWidth="1.5"
       strokeLinecap="round"
     />
+  </svg>
+);
+
+// 一本打开的书：「记下来的东西」，和旁边几颗图标同一套线宽。
+const MemoryIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+    <path
+      d="M8 4.2C6.6 3.2 4.7 2.8 2.5 3v9.3c2.2-.2 4.1.2 5.5 1.2 1.4-1 3.3-1.4 5.5-1.2V3c-2.2-.2-4.1.2-5.5 1.2Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    <path d="M8 4.2v9.3" stroke="currentColor" strokeWidth="1.3" />
   </svg>
 );

@@ -21,6 +21,7 @@ import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
 import { authRoutes } from "./auth-routes.ts";
 import { adminRoutes } from "./admin-routes.ts";
+import { memoryRoute } from "./memory-routes.ts";
 import { groupsEnabled } from "./features.ts";
 import { authMiddleware } from "./auth/middleware.ts";
 
@@ -45,6 +46,7 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
   app.route("/api/files", filesRoute);
   app.route("/api/office", officeRoute);
   app.route("/api/sessions", sessionsRoute);
+  app.route("/api/memory", memoryRoute);
   app.route("/api/upload", uploadRoute);
   app.route("/api/permission", permissionRoute);
   app.route("/api/meta", metaRoute);
@@ -62,6 +64,31 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
   app.route("/feishu", feishu);
 
   if (opts.serveDist) {
+    // ⚠️ **故意不把 fullscreen 委派给跨源 iframe。** 这一条是「PPT 放映按一下 Esc
+    // 就退出」的全部实现，别当成安全加固删掉：
+    //   · Fullscreen API 的 Esc 是**浏览器吞掉**的，页面收不到那次 keydown ⇒ 只要
+    //     ONLYOFFICE 进了浏览器全屏，第一下 Esc 只能退全屏，放映还开着（它自己的
+    //     快捷键文档原话：第一下退全屏、第二下才退放映）。
+    //   · 而 ONLYOFFICE 的放映器**从不自动进全屏**（DocumentPreview.js 的 show()
+    //     里没有 requestFullscreen，唯一入口是那颗 ⛶ 按钮），并且
+    //     `setMode()` 里写着 `!document.fullscreenEnabled` 就把那颗按钮整个藏掉。
+    //   ⇒ 把 fullscreen 收回 self，iframe 里那颗按钮自动消失，放映永远在页面内跑，
+    //     Esc 直达放映器，一下就回编辑视图。
+    //
+    // `self` 那一半是留给**我们自己的元素**的（同源的 PDF iframe 也在这一档里），
+    // 右侧格那颗「放映」就吃这一半：它把整个文档栏 requestFullscreen，ONLYOFFICE 在
+    // 一块全屏的画布里跑，而 iframe 自己依然进不了全屏、⛶ 依然不出现。
+    // ⚠️ 代价是放映那一档 Esc 要按两下（第一下退我们的全屏、第二下退放映器），
+    //    这是**知情选择**——用户 2026-09-20 的原话是「放映没有全屏啊」。不想付这个
+    //    代价就用「最大化」+ 浏览器自己的 F11 / ⌃⌘F，那两个不是 Fullscreen API、
+    //    不吃 Esc，仍然是一下。
+    app.use("/*", async (c, next) => {
+      await next();
+      if ((c.res.headers.get("content-type") ?? "").includes("text/html")) {
+        c.header("Permissions-Policy", "fullscreen=(self)");
+      }
+    });
+
     app.use("/*", serveStatic({ root: "./dist" }));
 
     // 兜底：静态文件没命中、也没有任何路由匹配。

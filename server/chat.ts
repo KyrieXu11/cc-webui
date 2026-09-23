@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "./permission.ts";
-import { currentUser } from "./auth/middleware.ts";
+import { currentUser, isAdmin } from "./auth/middleware.ts";
 import { visibilityFor } from "./auth/scope.ts";
 import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 import { relabelTasksSessionId } from "./bash-mcp.ts";
@@ -172,6 +172,9 @@ interface InFlightChat {
   // Calls response.return() on the SDK iterator to force the for-await in
   // the detached task to exit early. Set after `query()` returns.
   cancelIterator?: () => Promise<void>;
+  // 中途插话的句柄：executor 在 CLI 起来、stdin 可写之后塞进来，这一轮不再接受
+  // 输入时置回 null（见 ExecOptions.onSteer）。POST /chat/steer 是唯一的消费者。
+  steer?: ((text: string) => boolean) | null;
 }
 
 function permissionBehavior(
@@ -182,6 +185,33 @@ function permissionBehavior(
 
 const activeChats = new Map<string, InFlightChat>();
 const activeChatsByClientTurn = new Map<string, InFlightChat>();
+
+// 从 (sessionId, clientTurnId) 找那条在途 turn。attach 和 cancel 共用。
+//
+// ⚠️⚠️ **这两个 key 完全可能指向不同的 turn**：clientTurnId 存在浏览器的
+// localStorage 里，而那儿**全局只有一条**，很容易是别的会话留下的。写成
+// `bySession(a) ?? byTurn(b)` 或者反过来，在两者不一致时就会静默串台——
+// 「A 的 turn id + B 的会话 id」接出来是 A 的流（attach）或者掐掉 A（cancel）。
+// 所以：调用方给了 sessionId 就必须对得上，对不上宁可当没找到。
+//
+// 没给 sessionId 是合法的，那正是全新会话头几秒的形状（CLI 还没吐 session_id，
+// clientTurnId 是唯一的把手）——clientTurnId 这条路径就是为它存在的。
+export function pickInFlight<T extends { sessionId: string | undefined }>(
+  args: { sessionId?: string; clientTurnId?: string },
+  bySession: (k: string) => T | undefined,
+  byTurn: (k: string) => T | undefined
+): T | undefined {
+  const { sessionId, clientTurnId } = args;
+  if (sessionId) {
+    const direct = bySession(sessionId);
+    if (direct) return direct;
+  }
+  if (!clientTurnId) return undefined;
+  const entry = byTurn(clientTurnId);
+  if (!entry) return undefined;
+  if (!sessionId) return entry;
+  return entry.sessionId === sessionId ? entry : undefined;
+}
 
 function removeEntryIfSelf(entry: InFlightChat): void {
   if (entry.sessionId && activeChats.get(entry.sessionId) === entry) {
@@ -435,6 +465,18 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
     for (const sub of entry.subscribers) sub.write(event, data);
   };
 
+  // 这一轮**实际**用的 effort，给思考状态行那句「· xhigh effort」用。
+  //
+  // ⚠️ 前端不能读自己输入框里的设置来显示它：看别人正在跑的一轮时，那是**看的人**
+  // 的设置，不是这一轮的（用户 2026-09-23：「她是 xhigh，我显示 max」）。CLI 自己的
+  // system/init 帧里只有 model 没有 effort，所以只能由这里补一帧。
+  // 放在 buffer 的**第一条**：发起者的 POST 流和之后任何 attach 的重放都先拿到它。
+  // null = 请求没带 effort（CLI 用它自己的默认），前端就不显示这一截。
+  fanout(
+    "turn_meta",
+    JSON.stringify({ type: "turn_meta", effort: opts.effort ?? null })
+  );
+
   if (opts.source === "wakeup") {
     fanout(
       "wakeup_turn_started",
@@ -495,6 +537,10 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       };
 
       const frames = claudeExecutor.exec({
+        // 插话句柄。**只存不调**——写进去的那一下由 POST /chat/steer 触发。
+        onSteer: (send) => {
+          entry.steer = send;
+        },
         prompt: opts.prompt,
         images: opts.images,
         cwd: opts.cwd ?? process.cwd(),
@@ -802,6 +848,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       // event ("done" / "error") has already been fanned out into their
       // queues; the drain loop is keyed off `!closed || queue.length > 0`.
       for (const sub of [...entry.subscribers]) sub.close();
+      entry.steer = null;
       removeEntryIfSelf(entry);
 
       // Arm the wakeup AFTER cleanup so activeChats no longer holds this
@@ -843,6 +890,24 @@ chat.post("/chat", async (c) => {
   const effort: EffortLevel | undefined = ALLOWED_EFFORTS.includes(body.effort)
     ? body.effort
     : undefined;
+
+  // 决策 12：bypass 只给管理员。
+  //
+  // 它不是「少弹几张卡」——它是唯一一个让 CLI **根本不调 canUseTool** 的 mode：
+  // 权限卡不弹，`auto` 那个安全分类器也不跑（实测：分类器只在需要确认时才回到
+  // host，bypass 下这条路整个不存在）。给普通账号开 bypass 等于把这台机器上的
+  // shell 直接交出去，而目录白名单挡不住 shell。
+  //
+  // 必须在服务端挡：ModeSelector 里不显示只是不显示，body 是客户端说了算的。
+  if (permissionMode === "bypassPermissions" && !isAdmin(c)) {
+    return c.json(
+      {
+        error: "forbidden",
+        detail: "Bypass 模式仅管理员可用，请换一个权限模式再发送。",
+      },
+      403
+    );
+  }
 
   type IncomingImage = { name?: string; mediaType?: string; data?: string };
   const rawImages: IncomingImage[] = Array.isArray(body.images)
@@ -926,9 +991,11 @@ chat.post("/chat/cancel", async (c) => {
   // turn — the user explicitly asked to stop, so don't auto-resume later.
   const cancelledWakeup = cancelPendingWakeup(sessionId);
 
-  const entry =
-    (clientTurnId ? activeChatsByClientTurn.get(clientTurnId) : undefined) ??
-    (sessionId ? activeChats.get(sessionId) : undefined);
+  const entry = pickInFlight(
+    { sessionId, clientTurnId },
+    (k) => activeChats.get(k),
+    (k) => activeChatsByClientTurn.get(k)
+  );
   if (!entry) {
     if (cancelledWakeup) {
       return c.json({ ok: true, cancelledWakeup: cancelledWakeup.id });
@@ -948,6 +1015,61 @@ chat.post("/chat/cancel", async (c) => {
     ok: true,
     ...(cancelledWakeup ? { cancelledWakeup: cancelledWakeup.id } : {}),
   });
+});
+
+// ============================================================
+// POST /chat/steer — 把一条消息塞进**正在跑的**那一轮
+// ============================================================
+//
+// 存在的理由：一轮几十秒到十几分钟，用户看着它往错方向走却只能干等到结束。
+// 底下不是我们自己造的插队机制 —— 跑的就是 claude 命令行、**它自己带排队**，
+// 起进程时就带了 `--input-format stream-json`（权限确认那一路早在用），
+// 往那根**已经开着**的 stdin 多写一行就行。整条路连同下面这些教训抄自律枢
+// `server/internal/service/steer.go`。
+//
+// ⚠️ **`clientTurnId` 是乐观锁。** 用户是冲着他**看见的那一轮**点的发送，等他点下去
+//    时那轮可能已经结束、下一轮已经开跑 —— 插进另一轮就是答非所问。所以 pickInFlight
+//    给的那条必须同时对得上 sessionId 和 clientTurnId（它本来就是这个语义）。
+// ⚠️ **插不进去不是故障。** 三种情形（这一轮刚结束 / 还没起 CLI / 不走 stdin 协议）
+//    合流成同一个 409 `steer_unavailable`，前端对它只说「这一轮刚结束，它会按顺序
+//    发出」，那条留在排队里等下一轮。**措辞不许报成错。**
+// ⚠️ **不落任何库、不进 transcript。** 消息经 CLI 自己的 stdin 进去，CLI 会把它写进
+//    `~/.claude/projects/` 的 jsonl —— 那就是本仓唯一的真相。我们再记一份必然漂。
+//    界面上那条气泡由前端本地补（`applySDKMessage` 对 user 帧只认 tool_result）。
+
+chat.post("/chat/steer", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const sessionId: string | undefined =
+    typeof body.sessionId === "string" ? body.sessionId : undefined;
+  const clientTurnId: string | undefined =
+    typeof body.clientTurnId === "string" ? body.clientTurnId : undefined;
+  const text = typeof body.text === "string" ? body.text : "";
+  if (!text.trim()) return c.json({ error: "text required" }, 400);
+
+  const entry = pickInFlight(
+    { sessionId, clientTurnId },
+    (k) => activeChats.get(k),
+    (k) => activeChatsByClientTurn.get(k)
+  );
+  const unavailable = (why: string) => {
+    // 线上只看得到一个 409 的话，永远不知道该往哪边查 —— 码合流、日志分开。
+    console.log(
+      `[chat] steer 未送达 session=${sessionId ?? "-"} turn=${clientTurnId ?? "-"} 原因=${why}`
+    );
+    return c.json(
+      {
+        error: "steer_unavailable",
+        message: "这一轮已经结束或不接受追加，稍后会按顺序发出",
+      },
+      409
+    );
+  };
+  if (!entry) return unavailable("no_entry");
+  if (entry.status !== "running") return unavailable(`already_${entry.status}`);
+  if (!entry.steer) return unavailable("no_handle");
+  if (!entry.steer(text)) return unavailable("pipe_closed");
+  console.log(`[chat ${entry.reqId}] steer 已送达（${text.length} 字）`);
+  return c.json({ ok: true });
 });
 
 // ============================================================
@@ -1019,9 +1141,11 @@ chat.get("/chat/attach", (c) => {
       await stream.writeSSE({ event: "no-inflight", data: "" });
       return;
     }
-    const entry =
-      (sessionId ? activeChats.get(sessionId) : undefined) ??
-      (clientTurnId ? activeChatsByClientTurn.get(clientTurnId) : undefined);
+    const entry = pickInFlight(
+      { sessionId, clientTurnId },
+      (k) => activeChats.get(k),
+      (k) => activeChatsByClientTurn.get(k)
+    );
     if (!entry) {
       await stream.writeSSE({ event: "no-inflight", data: "" });
       return;

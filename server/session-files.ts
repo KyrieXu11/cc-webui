@@ -148,6 +148,45 @@ export function listSessionFiles(sessionId: string): SessionFile[] {
   }));
 }
 
+// 文件被移走之后，registry 里那行要跟着走，否则取件台会一直列着一个已经不在
+// 那儿的路径（直到下一个 turn 的 prune 把它清掉，而那可能是很久以后）。
+//
+// ⚠️ **不按 sessionId 过滤**：磁盘上只有一个文件，而指着它的行可能属于任何会话
+// （同一个目录被多个会话开过是常态）。只修调用者那个会话的行，别人的列表就烂了。
+//
+// ⚠️ 先删掉目标路径上的旧行再改：主键是 (session_id, path)，目标路径上如果还留着
+// 一行陈的（文件在外面被删过、还没 prune），UPDATE 会撞唯一约束整批失败。
+export function relocateSessionFiles(
+  moves: readonly { from: string; to: string }[]
+): void {
+  if (moves.length === 0) return;
+  const db = getDb();
+  const clear = db.prepare("DELETE FROM session_files WHERE path = ?");
+  const move = db.prepare("UPDATE session_files SET path = ? WHERE path = ?");
+  // 搬/改名的如果是**目录**，它底下每一行的路径都变了。用前缀替换扫一遍。
+  // ⚠️ 用 substr 而不是 LIKE：路径里出现 % 和 _ 完全正常，LIKE 得先转义，
+  // 少转一个就会误伤别的行。
+  const clearUnder = db.prepare(
+    "DELETE FROM session_files WHERE substr(path, 1, ?) = ?"
+  );
+  const moveUnder = db.prepare(
+    `UPDATE session_files
+        SET path = ? || substr(path, ?)
+      WHERE substr(path, 1, ?) = ?`
+  );
+  transact(() => {
+    for (const m of moves) {
+      if (m.from === m.to) continue;
+      clear.run(m.to);
+      move.run(m.to, m.from);
+      const oldPrefix = m.from + "/";
+      const newPrefix = m.to + "/";
+      clearUnder.run(newPrefix.length, newPrefix);
+      moveUnder.run(newPrefix, oldPrefix.length + 1, oldPrefix.length, oldPrefix);
+    }
+  });
+}
+
 export function forgetSessionFiles(
   sessionId: string,
   paths: readonly string[]

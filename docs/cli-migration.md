@@ -4,14 +4,15 @@
 > 事实部分是实测出来的（跑过命令、读过 `node_modules` 源码），**不要重新调研**，直接用。
 > 如果你发现某条事实和现实不符，改这份文档并注明日期，不要默默绕过。
 >
-> 定稿日期：2026-08-22 · 未实施（除「已完成」一节）
+> 定稿日期：2026-08-22 · **两侧都已实施完毕（Claude 2026-08-30，Codex 2026-09-17）**
 > 相关：架构总览见 [`../AGENTS.md`](../AGENTS.md)，飞书见 [`./feishu.md`](./feishu.md)。
 > ⚠️ 不要参照 `docs/superpowers/`——那是设计期文档，AGENTS.md 已列出它与实现的漂移。
 
 ## 目标
 
 1. **群聊变成环境变量可开关**（✅ 已完成，见下）
-2. **扔掉 `@anthropic-ai/claude-agent-sdk` 和 `@openai/codex-sdk`，自己驱动 CLI 子进程**（未实施）
+2. **扔掉 `@anthropic-ai/claude-agent-sdk` 和 `@openai/codex-sdk`，自己驱动 CLI 子进程**
+   （✅ 已完成，两个依赖都已从 `package.json` 删除）
 
 ## 已完成：群聊开关
 
@@ -187,13 +188,22 @@ cc-webui 的对应实现是 `src/components/ThinkingRow.tsx`。
 **`--effort` CLI 完全不校验**——`haiku`+`xhigh`、`sonnet`+`max`、甚至 `bogustier` 这种瞎写的档位
 全部静默通过。所以 `settings.ts:186-196` 的 `XHIGH_CLAUDE_MODELS` **必须继续手维护**。
 
-**Codex 没有别名，只能精确 id**（实测 `codex`/`mini`/`gpt-5`/`gpt-5-codex`/`sonnet` 全失败，
-只有 `gpt-5.5` 跑通）。但机器上有 **`~/.codex/models_cache.json`**（296KB，每模型 38 个字段，
-含 `supported_reasoning_levels` / `visibility` / `context_window` / `supported_in_api`），
-已列出 `gpt-5.6-sol` / `-terra` / `-luna`，在仓库当前的 `gpt-5.5` 天花板之上。
-⚠️ **它是服务端拉的缓存，会坏**——调研时这台机器上它就是坏的（是从一条泄漏的 stderr
+**Codex 没有别名，只能精确 id**（实测 `codex`/`mini`/`gpt-5`/`gpt-5-codex`/`sonnet` 全失败）。
+但机器上有 **`~/.codex/models_cache.json`**（每模型 38 个字段，含 `supported_reasoning_levels` /
+`visibility` / `context_window` / `supported_in_api` / `display_name` / `description`）。
+⚠️ **它是服务端拉的缓存，会坏**——2026-08 调研时这台机器上它就是坏的（从一条泄漏的 stderr
 `codex_models_manager::cache: failed to load models cache: missing field base_instructions` 发现的），
-schema 是 Codex 内部的，`client_version` 0.148.0 还和安装的 0.144.1 不一致。**所以要回退路径。**
+schema 是 Codex 内部的。**所以要回退路径。**
+
+**2026-09-17 复测**：这份缓存这次是好的（`client_version` 0.144.1，与安装版本一致），
+`visibility: "list"` 的恰好四个：`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` / `gpt-5.5`，
+**逐个真跑一轮全部通过**；而仓库当时硬编码的五个里有四个已经死了
+（`gpt-5.4` / `gpt-5.4-mini` / `gpt-5.3-codex` / `gpt-5.2` → 400 `not supported when using Codex
+with a ChatGPT account`）。`gpt-5.6` / `gpt-5.6-codex` 这种猜的 id 也是 400。
+**缓存里的 `visibility` 和真实可用性这次完全对得上**，这就是决策 #9 那条路线的最强证据。
+顺带：5.6 那三个的 `supported_reasoning_levels` 含 `max`（sol/terra 还有 `ultra`），
+所以 `settings.ts` 里「max 是 Claude 独有、Codex 顶档是 xhigh」这句**已经不再准确**——
+executor 现在仍把 `max` 折到 `xhigh`（保持旧行为），想放开是另一件事。
 
 **两个 CLI 都无法枚举模型**：`claude models` 会被当成 prompt 真跑一轮；`codex models` →
 `Error: stdin is not a terminal`；非法值的报错也不列出合法集。`~/.claude/` 下和 SDK 包里
@@ -493,6 +503,59 @@ finally 里自己管。
 迁移验证通过后单独改掉（`registerMcpSessionContext` 加 `cwd: config.cwd`），并实测确认：
 群聊里跑 `pwd` 现在报的是群的 cwd，不再是 cc-webui。
 
+## 已接线（Codex 侧完成，2026-09-17）
+
+`server/executors/codex-executor.ts`（+ 同名 `.test.ts`）。`server/codex-chat.ts`（网页单聊）和
+`server/groups/codex-runner.ts`（群聊 / 飞书）都改为 `codexExecutor.exec()`。
+**`@openai/codex-sdk` 和 `@anthropic-ai/claude-agent-sdk` 都已从 `package.json` 删除**
+（`node_modules` 从 ~680MB 掉到 202MB——两个 SDK 各自带着一份完整 CLI 二进制）。
+
+### 实测事实（真 CLI 0.144.1，别重新调研）
+
+| 事 | 结果 |
+|---|---|
+| `--experimental-json` 在 0.144.1 上还在吗 | **在**，但 `codex exec --help` 里只列 `--json`（隐藏 flag，所以启动日志要打它） |
+| 事件形状 | 和 SDK 时代逐字节相同：`thread.started` / `turn.started` / `item.started` / `item.completed` / `turn.completed` / `turn.failed` / `error`。**`processor.ts` 零改动** |
+| 增量事件 | **没有**。一次回答就是一条 `item.completed`，没有 delta |
+| prompt 走 stdin | 是。`codex exec` 和 `codex exec resume <id>` 在不给 positional prompt 时都读 stdin（stderr 会打一行 `Reading prompt from stdin...`，是噪声，要从 stderr tail 里滤掉） |
+| 坏 thread id | **exit 1 + stdout 一帧 JSON 都没有**，原因只在 stderr：`Error: thread/resume: thread/resume failed: no rollout found for thread id … (code -32600)`。所以 Codex 侧的 `sessionNotFound` 必须查 stderr，不像 Claude 有 `result.errors` 可读 |
+| 取消 | `AbortSignal` → SIGTERM，`status: "aborted"`（thread id 仍然拿得到） |
+| MCP 往返 | `-c mcp_servers.bash.url=…` + `bearer_token_env_var` → `mcp__bash__run` 真的执行，前台事件正常 fan-out |
+| resume 保上下文 | 保：上一轮记的数字下一轮答得出来 |
+
+### 实现时的几个不显然的点
+
+1. **`resume` 是 subcommand，不是 flag。** `codex exec [OPTIONS] resume <ID>` —— 所有选项必须排在
+   `resume` **之前**（clap 允许父命令的选项出现在那里），`--image` 则排在之后（它绑到子命令）。
+   SDK 就是这么拼的，生产跑了几个月。
+2. **`-i/--image <FILE>...` 是变长的**，和 `buildClaudeArgs` 踩过的 `--disallowedTools` 同一个形状。
+   现在安全只因为 prompt 走 stdin、后面没有任何 positional。**以后要加 positional prompt，必须排在
+   它前面。**
+3. **bearer token 只走环境变量**（`mcp_servers.<name>.bearer_token_env_var`），argv 里只有变量名。
+   argv 是 `ps` 可见的，而一个 MCP token 等价于一个 shell（见 AGENTS.md 安全边界）。每个 server
+   一个变量名，因为 `McpServerSpec` 允许 per-server token。
+4. **`approval_policy` 只能是 `"never"`。** `codex exec` 没有审批通道，传别的值只会挂住或让工具被拒。
+   所以 `mode` 对 Codex 只翻译成 sandbox —— 决策 #15 的「`default` 接上真实审批」**对 Codex 不成立**。
+5. ⚠️ **`node_modules/.bin/codex` 会遮住真的 CLI。** `@openai/codex-sdk` 依赖 `@openai/codex`，后者
+   在 `.bin` 里放了一个 `codex`；而 npm scripts 会把 `node_modules/.bin` 前置到 PATH。所以在
+   `npm run dev` / `npm start` 下 `resolveCodexBin()` 解析到的是**它钉住的 0.142.5**，不是机器上的
+   0.144.1 —— 正好抵消掉「版本跟随」这个迁移动机。删掉依赖之后这个影子就没了。
+   （launchd 那条生产路径不经 npm，PATH 里 `~/.local/bin` 在前，本来就拿的是真 CLI。）
+6. **图片的所有权在 executor**：落临时文件 + `-i` 传路径 + `finally` 里删目录。两个调用方各自那份
+   temp-dir 记账都删掉了。顺带统一了两边不一致的处理：认识的图片类型但超限/不支持 → **失败**
+   （原来群聊那侧是静默跳过，等于让模型对着一张它没收到的图回答）；非图片附件仍然跳过。
+
+### 实测通过（真 CLI，隔离进程，绝不启动整个 server）
+
+| 路径 | 场景 | 结果 |
+|---|---|---|
+| executor 直调 | 普通轮 / resume / 坏 handle / 取消 / 坏图片 | `completed` / 上下文延续 / `sessionNotFound+transient` / `aborted` / `failed` |
+| `/api/codex/chat` | bash 经 HTTP MCP | `mcp__bash__run` 执行成功，回 `CODEX_MCP_OK`，`foreground_started/ended` 正常进 SSE |
+| `/api/codex/chat` | resume | 第二轮答得出第一轮跑的命令 |
+| `/api/codex/chat` | 坏 thread id | SSE 出 `error` 事件（不是挂住） |
+| 群聊引擎 | 1-participant Codex 轮 | 转录里 `GROUP_MCP_OK`，工具时间线持久化 |
+| 群聊引擎 | resume | `runtime.json` 里有 thread id，第二轮上下文延续 |
+
 ## 已落地：模型改用家族别名（决策 #9 的 Claude 半边）
 
 `src/lib/settings.ts` 的 `CLAUDE_MODEL_OPTIONS` 从钉版本改成四个别名
@@ -513,15 +576,24 @@ finally 里自己管。
 
 ## 下一步
 
-1. **Codex executor** —— 接口已经在 `server/executors/types.ts`，照 `claude-executor.ts` 写第二个实现。
-2. ~~`cli/subagent-mcp/index.ts`~~ —— **已迁移**，改用同一个 executor（typecheck 过，端到端未测）。
-3. Codex executor 做完就能从 `package.json` 删 `@anthropic-ai/claude-agent-sdk`——
-   **代码里已经零 import**，只剩 `package.json` 这一条依赖声明和它带的 ~231MB 二进制。
+全部完成。剩下的是**新工作**，不是迁移的尾巴：
+
+1. **Codex 模型列表运行时化**（决策 #9 的 Codex 半边，仍未做）。现在还是硬编码，而 Codex 没有
+   家族别名，所以它必然会再过期 —— 2026-09-17 那次就是五个里死了四个。要做的是一条服务端路由
+   读 `~/.codex/models_cache.json` 的 `visibility: "list"` 项 + 回退到硬编码（那个文件是服务端
+   拉的缓存，schema 是 Codex 内部的，调研时就坏过一次）。
+2. **Codex 的审批**。见下面「明确没定的」。
 
 ## 明确没定的
 
 - **`ended` 的新字段怎么灌回上层**：`orchestrator.ts` 和 `chat.ts` 现在按 `ok: boolean` 处理错误。
   `status` / `failureKind` 到位后要不要真的按 `aborted` / `timeout` 分开呈现（例如用户取消不显示
-  成红色错误）。
-- **Codex 侧增量事件**：`codex exec` 没有 partial-message flag，Codex 的流式粒度未验证。
-  （Codex 排在 Claude 之后，到时再验。）
+  成红色错误）。**两个 executor 都已经在产出这些字段了，只是上层还没用。**
+- ~~**Codex 侧增量事件**~~ —— 已实测：`codex exec --experimental-json` **没有** delta 级事件，
+  一次回答就是一条 `item.completed`（`item.started` 只在工具调用那类 item 上出现）。和 SDK 时代
+  完全一样（SDK 跑的就是同一条命令），所以迁移没有带来任何流式粒度上的回退；要更细的粒度只能
+  换 `codex app-server`。
+- **Codex 的审批**：`codex exec` 没有审批通道（`-a/--ask-for-approval` 只长在 TUI 上，
+  `--experimental-json` 的事件集里也没有审批请求），所以决策 #15 的「`default` 接上真实审批」
+  这半条**对 Codex 不成立**，只对 Claude 落地了。要给 Codex 做权限卡，得评估
+  `codex app-server`（另一套 JSON-RPC 协议，未调研）。

@@ -132,6 +132,17 @@ export type McpServerSpec = {
 
 // cc-webui's own vocabulary. Each executor translates into its provider's
 // flags; callers never learn provider flag names.
+/**
+ * 中途插话：往**已经开着**的那根 stdin 再写一条 user 消息，让**正在跑的这一轮**当场
+ * 收到，不等它结束。返回 false ＝ 这一刻插不进去（stdin 已关、或这次根本没走 stdin
+ * 协议），调用方据此回一个「现在插不进去」而不是报错。
+ *
+ * 不在平台侧另造插队机制：跑的就是 claude 命令行、**它自己带排队**，起进程时已经带了
+ * `--input-format stream-json`（权限确认那一路早在用），往那根管子多写一行就行。
+ * 这条路和它的全部教训抄自律枢 `service/steer.go`。
+ */
+export type SteerSend = (text: string) => boolean;
+
 export type ExecOptions = {
   prompt: string;
   cwd: string;
@@ -186,6 +197,16 @@ export type ExecOptions = {
   timeoutMs?: number;
 
   onPermissionAsk?: PermissionAsk;
+
+  /**
+   * 交出 / 收回插话句柄：子进程起来、stdin 可写之后给出 `send`，这一轮不再接受输入
+   * 时给 `null`。
+   *
+   * ⚠️ **只有 claude 这一侧有。** `codex exec` 的 stdin 不是控制协议，写进去不会被
+   * 当成新消息 —— codex-executor 刻意不调这个回调，调用方拿不到句柄自然就回
+   * 「插不进去」。
+   */
+  onSteer?: (send: SteerSend | null) => void;
 };
 
 // ─── The contract ───────────────────────────────────────────────────────────

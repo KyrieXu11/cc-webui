@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
+import ImageView from "./ImageView";
+import { HTML_SANDBOX, isHtmlFile, renderedHtmlUrl } from "../lib/filepreview";
 
 interface Position {
   x: number;
@@ -14,7 +16,7 @@ interface Size {
 interface Props {
   relPath: string;
   absPath: string;
-  kind: "text" | "image";
+  kind: "text" | "image" | "pdf";
   content: string;
   imageUrl: string | null;
   truncated: boolean;
@@ -28,8 +30,12 @@ const MIN_HEIGHT = 260;
 
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
 
+function basename(p: string): string {
+  return p.split("/").pop() ?? "";
+}
+
 function isMarkdownPath(p: string): boolean {
-  const name = p.split("/").pop() ?? "";
+  const name = basename(p);
   const dot = name.lastIndexOf(".");
   return dot >= 0 && MARKDOWN_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
@@ -58,8 +64,13 @@ export default function FilePreviewWindow({
   const initialRef = useRef(getInitial());
   const [position, setPosition] = useState<Position>(initialRef.current.position);
   const [size, setSize] = useState<Size>(initialRef.current.size);
-  // Markdown 默认渲染视图；源码视图保留行号，用来核对原文。
+  // Markdown / HTML 默认渲染视图；源码视图保留行号，用来核对原文。
   const isMarkdown = kind === "text" && isMarkdownPath(relPath);
+  // html 的渲染档是一个沙箱 iframe（和 DockFileView 同一套 —— 不做两套 UI），
+  // 拉的是 /api/fs/raw?render=1，所以要 absPath；attach 上来的图片那条路
+  // absPath 是空串，但它 kind 不是 text，走不到这儿。
+  const isHtml = kind === "text" && !!absPath && isHtmlFile(basename(relPath));
+  const renderable = isMarkdown || isHtml;
   const [rendered, setRendered] = useState(true);
   const [copied, setCopied] = useState(false);
 
@@ -199,11 +210,13 @@ export default function FilePreviewWindow({
         <span className="font-mono text-[10.5px] text-subtle tabular-nums shrink-0">
           {kind === "image"
             ? "图片"
-            : truncated
+            : kind === "pdf"
+              ? "PDF"
+              : truncated
               ? `${lineCount}行 · 截断`
               : `${lineCount}行`}
         </span>
-        {isMarkdown && (
+        {renderable && (
           <button
             data-no-drag
             onClick={() => setRendered((v) => !v)}
@@ -238,7 +251,16 @@ export default function FilePreviewWindow({
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto bg-canvas">
+      {/* 图片、PDF、渲染中的 html 都自己管滚动/缩放（ImageView 用 transform，另外
+          两个在 iframe 里由浏览器管），外层再套一层 overflow-auto 会变成两条滚动条
+          互相打架。 */}
+      <div
+        className={`flex-1 min-h-0 bg-canvas ${
+          kind === "text" && !(isHtml && rendered)
+            ? "overflow-auto"
+            : "overflow-hidden"
+        }`}
+      >
         {loading ? (
           <div className="px-4 py-6 text-[12px] text-subtle font-mono">
             加载中…
@@ -248,14 +270,28 @@ export default function FilePreviewWindow({
             {error}
           </div>
         ) : kind === "image" && imageUrl ? (
-          <div className="flex items-center justify-center min-h-full p-4 bg-[repeating-conic-gradient(rgba(127,127,127,0.08)_0%_25%,transparent_0%_50%)_50%_/_16px_16px]">
-            <img
-              src={imageUrl}
-              alt={relPath}
-              className="max-w-full max-h-full object-contain"
-              style={{ imageRendering: "auto" }}
-            />
-          </div>
+          <ImageView url={imageUrl} alt={relPath} />
+        ) : kind === "pdf" && imageUrl ? (
+          /* 浏览器自带的 PDF viewer：翻页/搜索/缩放/打印全都有。
+             ⚠️ 用 <iframe> 而不是 <object>/<embed>：后两者在 PDF 加载失败时是
+             一片空白（连 fallback 内容都不一定渲染），而 iframe 会把服务端那句
+             JSON 报错显示出来——文件超过 RAW_MAX_BYTES 时用户至少看得见原因。 */
+          <iframe
+            src={imageUrl}
+            title={relPath}
+            className="w-full h-full border-0 bg-canvas"
+          />
+        ) : isHtml && rendered ? (
+          /* 沙箱档位见 lib/filepreview.ts 的 HTML_SANDBOX：**allow-scripts 和
+             allow-same-origin 一起给等于没有沙箱** —— 拿到同源身份的脚本能把父
+             文档上这个 iframe 的 sandbox 属性抹掉再重载，自己把自己放出来。
+             这里的内容是 agent 写的文件，放出来就等于本站的同源 XSS。 */
+          <iframe
+            src={renderedHtmlUrl(absPath)}
+            title={relPath}
+            sandbox={HTML_SANDBOX}
+            className="w-full h-full border-0 bg-white"
+          />
         ) : isMarkdown && rendered ? (
           <div className="px-4 py-3 text-[14px] leading-[1.75] text-fg md-body">
             {truncated && (

@@ -6,6 +6,7 @@
 // were built when there was exactly one user.
 
 import { canAccessResource, ownerOf, resourceIdsOwnedBy } from "./ownership.ts";
+import { resourceIdsSharedWith } from "./sharing.ts";
 import type { User } from "./users.ts";
 
 // One query up front rather than one per row.
@@ -17,7 +18,10 @@ export function visibilityFor(
     return () => true;
   }
   const owned = resourceIdsOwnedBy(user.id);
-  return (id) => !!id && owned.has(id);
+  // 共享进来的也算「看得见」。注意这是**只读**的可见性：能出现在列表里、能打开
+  // 读，不代表能删 —— 删走的是 policy 里那条没标 access 的 owns 检查。
+  const shared = resourceIdsSharedWith(user.id);
+  return (id) => !!id && (owned.has(id) || shared.has(id));
 }
 
 // A bash task's session id is either a plain session UUID (web chat) or the
@@ -28,6 +32,8 @@ export function taskSessionOwner(sessionId: string | undefined): string | null {
   return ownerOf(colon === -1 ? sessionId : sessionId.slice(0, colon));
 }
 
+// `reader`：被共享者能在这条会话里续聊，那些 turn 起的后台 bash 任务挂的正是这条
+// 会话的 id —— 按 owner 判定的话，她会看不到自己刚刚跑起来的任务。
 export function canSeeTaskSession(
   user: User,
   sessionId: string | undefined,
@@ -36,5 +42,9 @@ export function canSeeTaskSession(
   // A task with no session cannot be attributed, so only admins see it.
   if (!sessionId) return false;
   const colon = sessionId.indexOf(":");
-  return canAccessResource(user, colon === -1 ? sessionId : sessionId.slice(0, colon));
+  return canAccessResource(
+    user,
+    colon === -1 ? sessionId : sessionId.slice(0, colon),
+    "reader",
+  );
 }

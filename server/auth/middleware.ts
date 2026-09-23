@@ -25,6 +25,13 @@ export function currentUser(c: Context): User | null {
   return user;
 }
 
+// Role check for the handful of decisions that are not route-level and so
+// cannot live in policy.ts — currently only "which permission modes may this
+// caller pick" (决策 12). Route-level admin gating belongs in the table.
+export function isAdmin(c: Context): boolean {
+  return currentUser(c)?.role === "admin";
+}
+
 // The route this request will actually reach. Hono populates matchedRoutes
 // before the middleware chain runs; the middleware's own catch-all entry is
 // excluded.
@@ -133,7 +140,7 @@ async function checkOwnership(
   if (spec.uuid !== false && !UUID_RE.test(id)) {
     return c.json({ error: `malformed ${spec.key}` }, 400);
   }
-  if (!canAccessResource(user, id)) {
+  if (!canAccessResource(user, id, spec.access ?? "owner")) {
     // 404 rather than 403: whether a resource exists is itself information.
     return c.json({ error: "not found" }, 404);
   }

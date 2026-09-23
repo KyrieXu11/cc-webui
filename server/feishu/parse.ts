@@ -54,7 +54,7 @@ export const HELP_TEXT = [
   "  /new           保留目录、清空历史、起新会话",
   "  /new <path>    换目录 + 清空历史 (彻底重开)",
   "  /model         显示当前 bot 对应 agent 的模型",
-  "  /model <name>  切换模型（Claude: opus[=4.8]/opus4.7/sonnet/haiku；Codex: codex/mini；或完整 ID）",
+  "  /model <name>  切换模型（Claude: opus/fable/sonnet/haiku；Codex: sol/terra/luna/full；或完整 ID）",
   "  /effort        显示当前 thinking effort",
   "  /effort <lvl>  切换 effort (low / medium / high / xhigh / max)",
   "  /mode          显示当前权限模式",

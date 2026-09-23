@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { clampPaneWidth } from "../lib/pane-width";
 
 // 可拖拽的竖分隔条。**照搬律枢 `app/src/components/Splitter.tsx` 的机制**（配色是我们
 // 自己的）。四条都是它踩出来的，别按"看起来更简单"的写法改回去：
@@ -24,11 +25,17 @@ export function applyPaneWidth(
   min: number,
   maxRatio: number,
   /** 上限按谁的宽度算。内层分隔条要传所在容器的宽度，不能用窗口宽度。 */
-  spanWidth: number = window.innerWidth
+  spanWidth: number = window.innerWidth,
+  /** 同一行里必须留给别人的像素（定宽兄弟 + 主栏下限），见 lib/pane-width.ts。 */
+  reserve = 0
 ): number {
-  const max = Math.max(min, spanWidth * maxRatio);
-  const w = Math.min(Math.max(px, min), max);
-  document.documentElement.style.setProperty(cssVar, `${w}px`);
+  const w = clampPaneWidth(px, min, maxRatio, spanWidth, reserve);
+  // 只在真变了的时候写：重夹现在也挂在 ResizeObserver 上，会跟着过渡逐帧触发。
+  const next = `${w}px`;
+  const root = document.documentElement;
+  if (root.style.getPropertyValue(cssVar) !== next) {
+    root.style.setProperty(cssVar, next);
+  }
   return w;
 }
 
@@ -54,6 +61,14 @@ interface Props {
    * 「树栏第一次打开总是最窄」（实测 0.34×352=120 → 夹到 min 180）。
    */
   defaultPx?: number;
+  /**
+   * 同一行里那根**定宽**兄弟的选择器（如左侧栏）。给了就实测它的宽度并计进上限，
+   * 还会 observe 它 —— 侧栏开合**不发 resize**，但它确实改变了主栏能用的宽度。
+   * ⚠️ maxRatio 这一条单独是不够的，理由见 lib/pane-width.ts 顶部。
+   */
+  reserveSelector?: string;
+  /** 这条线另一侧（主栏）的可用宽度下限，和 reserveSelector 一起构成 reserve。 */
+  reserveMin?: number;
   title?: string;
 }
 
@@ -66,6 +81,8 @@ export default function Splitter({
   maxRatio,
   defaultRatio,
   defaultPx,
+  reserveSelector,
+  reserveMin = 0,
   title = "拖动调整宽度",
 }: Props) {
   const self = useRef<HTMLDivElement>(null);
@@ -80,6 +97,12 @@ export default function Splitter({
     const { left, width } = span();
     return edge === "right" ? left + width - clientX : clientX - left;
   };
+  // 拖动那两个回调也要用同一个 reserve，否则拖的时候能越界、松手才被夹回去。
+  const reserveNow = () => {
+    if (!reserveSelector) return reserveMin;
+    const el = document.querySelector<HTMLElement>(reserveSelector);
+    return (el?.offsetWidth ?? 0) + reserveMin;
+  };
 
   useEffect(() => {
     const saved = Number(localStorage.getItem(storageKey));
@@ -91,11 +114,17 @@ export default function Splitter({
         Number(localStorage.getItem(storageKey)) || w,
         min,
         maxRatio,
-        span().width
+        span().width,
+        reserveNow()
       );
     reclamp();
 
     window.addEventListener("resize", reclamp);
+    // ⚠️ 退出全屏也要重夹一次。macOS 上元素进全屏＝整个窗口进全屏，窗口更宽，于是
+    //    能拖出一个更大的绝对像素值；退出时 resize 是在收缩动画里逐帧发的，最后一帧
+    //    未必等于稳定态。多挂这一条比事后解释「为什么退出全屏后布局是坏的」便宜。
+    //    （用户 2026-09-17 报的就是这条路径：看 PPT 进了一次全屏，出来主栏就没了。）
+    document.addEventListener("fullscreenchange", reclamp);
     // ⚠️ 内层分隔条还要跟着**父容器**的宽度重夹，不只是窗口。三个理由，都实测过：
     //   ① `.dockcol` 的宽度有 140ms 过渡，挂载那一刻量到的还是过渡前的窄档宽度 ⇒
     //      min / maxRatio 会按那个错的跨度去夹（实测树栏第一次打开总是 180→211px，
@@ -103,23 +132,53 @@ export default function Splitter({
     //   ② 外层那条线一拖，内层的上限就变了；
     //   ③ 存的是绝对像素，父容器变窄后不重夹会把另一栏挤没。
     const parent = self.current?.parentElement;
+    const hasRO = typeof ResizeObserver !== "undefined";
     let ro: ResizeObserver | null = null;
-    if (originFrom === "parent" && parent && typeof ResizeObserver !== "undefined") {
+    if (originFrom === "parent" && parent && hasRO) {
       // 不会自激：父容器是 `flex:none; width:var(--dockw)`，宽度不由子元素决定。
       ro = new ResizeObserver(reclamp);
       ro.observe(parent);
     }
+    // 侧栏开合没有任何事件可听（不是 resize，也不改窗口宽度），只能 observe 它本身。
+    // 同样不会自激：它是 shrink-0 的定宽列，宽度和 --dockw 无关。
+    let sideRo: ResizeObserver | null = null;
+    const sideEl = reserveSelector
+      ? document.querySelector<HTMLElement>(reserveSelector)
+      : null;
+    if (sideEl && hasRO) {
+      sideRo = new ResizeObserver(reclamp);
+      sideRo.observe(sideEl);
+    }
     return () => {
       window.removeEventListener("resize", reclamp);
+      document.removeEventListener("fullscreenchange", reclamp);
       ro?.disconnect();
+      sideRo?.disconnect();
     };
-  }, [cssVar, storageKey, min, maxRatio, defaultRatio, defaultPx, originFrom]);
+  }, [
+    cssVar,
+    storageKey,
+    min,
+    maxRatio,
+    defaultRatio,
+    defaultPx,
+    originFrom,
+    reserveSelector,
+    reserveMin,
+  ]);
 
   const onDown = (e: React.MouseEvent) => {
     e.preventDefault();
     document.body.classList.add("resizing");
     const move = (ev: MouseEvent) =>
-      applyPaneWidth(cssVar, widthAt(ev.clientX), min, maxRatio, span().width);
+      applyPaneWidth(
+        cssVar,
+        widthAt(ev.clientX),
+        min,
+        maxRatio,
+        span().width,
+        reserveNow()
+      );
     const up = (ev: MouseEvent) => {
       document.body.classList.remove("resizing");
       window.removeEventListener("mousemove", move);
@@ -127,7 +186,14 @@ export default function Splitter({
       localStorage.setItem(
         storageKey,
         String(
-          applyPaneWidth(cssVar, widthAt(ev.clientX), min, maxRatio, span().width)
+          applyPaneWidth(
+            cssVar,
+            widthAt(ev.clientX),
+            min,
+            maxRatio,
+            span().width,
+            reserveNow()
+          )
         )
       );
     };
@@ -143,7 +209,8 @@ export default function Splitter({
       defaultPx ?? Math.round(span().width * defaultRatio),
       min,
       maxRatio,
-      span().width
+      span().width,
+      reserveNow()
     );
   };
 

@@ -7,6 +7,8 @@ import {
 import { getInflightSessions } from "../lib/api";
 import { tildify } from "../lib/fs";
 import { providerLabel, type AgentProvider } from "../lib/settings";
+import { useAuth } from "../AuthGate";
+import ShareSessionDialog from "./ShareSessionDialog";
 
 const INFLIGHT_POLL_MS = 3000;
 
@@ -26,6 +28,36 @@ function basename(p: string) {
   return parts[parts.length - 1] || p;
 }
 
+// 两个人形。共享过的会话上常驻，被共享进来的会话上也常驻（配不同的 title）。
+function ShareIcon({ className = "", label }: { className?: string; label?: string }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 14 14"
+      fill="none"
+      className={className}
+      role={label ? "img" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    >
+      <circle cx="5.2" cy="4.6" r="2.1" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M1.6 11.4c0-1.9 1.6-3.2 3.6-3.2s3.6 1.3 3.6 3.2"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.8 3.1a2.1 2.1 0 0 1 0 4M10.4 8.4c1.4.35 2.2 1.4 2.2 3"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export default function ProjectSidebar({
   cwd,
   home,
@@ -39,7 +71,9 @@ export default function ProjectSidebar({
   const [limit, setLimit] = useState(15);
   const [loading, setLoading] = useState(true);
   const [inflight, setInflight] = useState<Set<string>>(() => new Set());
+  const [sharing, setSharing] = useState<SessionSummary | null>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
+  const { isAdmin } = useAuth();
 
   // Poll for which sessions have an active SDK turn. Powers the pulsing dot
   // next to each entry so users can see "still generating" after switching
@@ -94,9 +128,15 @@ export default function ProjectSidebar({
 
   const shown = sessions.slice(0, limit);
 
+  // 删成功才从列表里拿掉。乐观地先抹掉再说，会让「其实没删掉」一直到下次刷新才暴露。
   const remove = async (s: SessionSummary, e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteSessionApi(s.sessionId, s.cwd, s.provider);
+    try {
+      await deleteSessionApi(s.sessionId, s.cwd, s.provider);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "删除失败");
+      return;
+    }
     setSessions((xs) =>
       xs.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider)
     );
@@ -152,6 +192,13 @@ export default function ProjectSidebar({
                 <button
                   key={`${s.provider}:${s.sessionId}`}
                   onClick={() => onOpenSession(s)}
+                  title={
+                    s.sharedBy
+                      ? `${s.sharedBy} 共享给你的会话 —— 可以接着聊，但删不掉`
+                      : s.sharedCount
+                        ? `已共享给 ${s.sharedCount} 人`
+                        : undefined
+                  }
                   className={`group w-full text-left px-3.5 py-2 flex items-center gap-2 transition-colors min-w-0 ${
                     active
                       ? "bg-surface text-fg"
@@ -173,20 +220,60 @@ export default function ProjectSidebar({
                   <span className="text-[12.5px] truncate flex-1">
                     {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
                   </span>
-                  <button
-                    onClick={(e) => remove(s, e)}
-                    aria-label="删除"
-                    className="opacity-0 group-hover:opacity-100 text-subtle hover:text-fg transition-opacity shrink-0"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M3 3L9 9M9 3L3 9"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
-                        strokeLinecap="round"
+                  {/* 常驻标记。只在**有动作按钮要顶上来**时 hover 隐藏，
+                      否则一行挤三个图标；被共享进来的行没有动作按钮，
+                      藏掉它只会让标记在鼠标下凭空消失。 */}
+                  {(() => {
+                    const canManage = !!s.mine || isAdmin;
+                    const hideOnHover = canManage ? " group-hover:hidden" : "";
+                    if (s.sharedBy) {
+                      return (
+                        <ShareIcon
+                          className={`text-blue shrink-0${hideOnHover}`}
+                          label={`由 ${s.sharedBy} 共享`}
+                        />
+                      );
+                    }
+                    if (!s.sharedCount) return null;
+                    return (
+                      <ShareIcon
+                        className={`text-subtle shrink-0${hideOnHover}`}
+                        label={`已共享给 ${s.sharedCount} 人`}
                       />
-                    </svg>
-                  </button>
+                    );
+                  })()}
+                  {/* 共享是**管理员专属**（决策 41）；删除是「自己的（或管理员）」——
+                      两条守卫不一样，别合并。真正拦住的都是服务端：共享那三条是
+                      `auth: "admin"`，DELETE 是不带 access 的 owns。 */}
+                  {isAdmin && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSharing(s);
+                      }}
+                      aria-label="共享"
+                      title="共享给其他人 / 转交归属"
+                      className="hidden group-hover:block text-subtle hover:text-fg transition-colors shrink-0"
+                    >
+                      <ShareIcon />
+                    </button>
+                  )}
+                  {(s.mine || isAdmin) && (
+                    <button
+                      onClick={(e) => remove(s, e)}
+                      aria-label="删除"
+                      className="opacity-0 group-hover:opacity-100 text-subtle hover:text-fg transition-opacity shrink-0"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                        <path
+                          d="M3 3L9 9M9 3L3 9"
+                          stroke="currentColor"
+                          strokeWidth="1.3"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
                 </button>
               );
             })}
@@ -202,6 +289,23 @@ export default function ProjectSidebar({
           </>
         )}
       </div>
+
+      {sharing && (
+        <ShareSessionDialog
+          sessionId={sharing.sessionId}
+          provider={sharing.provider}
+          label={
+            sharing.customTitle || sharing.summary || sharing.firstPrompt || undefined
+          }
+          onClose={() => setSharing(null)}
+          onChanged={() => {
+            // 名单或归属变了就重拉：转交出去之后这一行可能整条消失。
+            listSessions(200, cwd, currentProvider)
+              .then(setSessions)
+              .catch(() => {});
+          }}
+        />
+      )}
     </aside>
   );
 }

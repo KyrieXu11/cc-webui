@@ -96,6 +96,36 @@ async function readdirOrGiveUp(
   }
 }
 
+// ⚠️ **`Dirent.isDirectory()` 对符号链接恒为 false。** readdir(withFileTypes) 给的是
+// lstat 语义：软链只有 `isSymbolicLink()` 为真。不管它的话，指向目录的软链在树里被
+// 标成 file、展不开，在项目扫描里直接被跳过（用户 2026-09-17 报的 `design ->
+// ~/code/python/quant/design`）。
+//
+// ⚠️ 跟随软链要跑一次 stat，所以**必须带超时**，理由和 readdirOrGiveUp 一模一样：
+// 软链可以指向 ~/Documents 那种在 launchd 下永久挂起的目录，一次挂起就永久占掉一个
+// libuv 线程池线程。坏链（stat 抛 ENOENT）当普通文件，别让树炸掉。
+async function isDirFollowingLinks(
+  full: string,
+  e: import("node:fs").Dirent,
+): Promise<boolean> {
+  if (e.isDirectory()) return true;
+  if (!e.isSymbolicLink()) return false;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const st = await Promise.race([
+      fs.stat(full),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), READDIR_TIMEOUT_MS);
+      }),
+    ]);
+    return st !== null && st.isDirectory();
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function walkDirs(
   root: string,
   maxDepth = 3,
@@ -114,11 +144,17 @@ async function walkDirs(
     const entries = await readdirOrGiveUp(dir);
     if (!entries) continue;
     for (const e of entries) {
-      if (!e.isDirectory()) continue;
+      // 先按名字筛：shouldKeep 是纯字符串判断，放前面能省掉对被忽略项的 stat。
       if (!shouldKeep(e.name)) continue;
       const full = path.join(dir, e.name);
+      if (!(await isDirFollowingLinks(full, e))) continue;
       results.push(full);
-      if (depth + 1 < maxDepth) queue.push({ dir: full, depth: depth + 1 });
+      // ⚠️ **不跟着软链往下走**：软链可以成环（a/link -> a），BFS 就绕不出来了。
+      // 深度/条数/超时三道闸都拦不住一个转得飞快的环 —— 它每一圈都在产出新结果。
+      // 软链本身仍然是一条可选项，只是不替你展开它下面的子树。
+      if (!e.isSymbolicLink() && depth + 1 < maxDepth) {
+        queue.push({ dir: full, depth: depth + 1 });
+      }
       if (results.length >= maxItems) break;
     }
   }
@@ -141,9 +177,12 @@ const TREE_IGNORE = new Set([
 ]);
 
 const READ_MAX_BYTES = 256 * 1024; // 256 KB cap for diff-context reads
-const RAW_MAX_BYTES = 10 * 1024 * 1024; // 10 MB cap for image preview
+// 图片 + PDF 都走这条路由。上限抬到 50MB 是为了 PDF：扫描件动辄十几兆，
+// 卡在 10MB 的话前端那个 <iframe> 里显示的是一段 JSON 报错，看着像坏了。
+// ⚠️ 这里是 readFile 整个读进内存的，不是流式——单用户自托管才敢这么写。
+const RAW_MAX_BYTES = 50 * 1024 * 1024;
 
-const IMAGE_MIME: Record<string, string> = {
+const RAW_MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
@@ -153,7 +192,16 @@ const IMAGE_MIME: Record<string, string> = {
   bmp: "image/bmp",
   ico: "image/x-icon",
   avif: "image/avif",
+  // 必须显式给出：octet-stream 会让浏览器直接下载，内置 PDF viewer 根本不出场。
+  pdf: "application/pdf",
 };
+
+// HTML 预览的沙箱档位。**iframe 上的 sandbox 属性和下面那条 CSP 必须写成同一套**：
+// 两者同时生效时浏览器取的是**交集**，CSP 只给 `allow-scripts` 的话，iframe 上写的
+// allow-modals / allow-forms 会被一起削掉（`alert()` 静默失效、表单提不出去），
+// 而人是照着 iframe 那行去 debug 的，根本想不到是响应头把它砍了。
+// 前端那份写在 src/lib/filepreview.ts 的 HTML_SANDBOX，改一处就得改两处。
+const HTML_SANDBOX = "allow-scripts allow-popups allow-forms allow-modals";
 
 fsRoute.get("/read", async (c) => {
   const p = c.req.query("path");
@@ -196,15 +244,43 @@ fsRoute.get("/raw", async (c) => {
       return c.json({ error: `file too large (> ${RAW_MAX_BYTES} bytes)` }, 413);
     }
     const ext = path.extname(p).slice(1).toLowerCase();
-    const mime = IMAGE_MIME[ext] ?? "application/octet-stream";
+    // `?render=1` 是**唯一**能让这条路由回 text/html 的开关，而且只认 .html/.htm。
+    // 为什么不干脆按扩展名无条件回 text/html：这条路由是**同源**的，回了 text/html
+    // 就等于给这台机器开了一个同源 XSS —— agent 有 shell，往白名单里落一个 .html，
+    // 用户在新标签页点开它，脚本就跑在本站源上，能读登录 cookie / localStorage、
+    // 能以登录身份打所有 /api/*。这仓库是多用户的，那等于横向越权。
+    const render = (ext === "html" || ext === "htm") && c.req.query("render") === "1";
+    // charset 显式钉 utf-8：agent 产出的 html 就是 utf-8，而不给 charset 的话
+    // 没写 <meta> 的页面会按浏览器区域设置猜，中文直接乱码。
+    const mime = render
+      ? "text/html; charset=utf-8"
+      : (RAW_MIME[ext] ?? "application/octet-stream");
+    const headers: Record<string, string> = {
+      "content-type": mime,
+      "cache-control": "private, max-age=60",
+      "content-length": String(stat.size),
+      // 类型已经显式给了就别让浏览器再去猜 —— 它猜错的方向恰好是「当成 HTML 执行」。
+      "x-content-type-options": "nosniff",
+    };
+    if (render) {
+      // ⚠️ **这条不是给 iframe 用的**（iframe 那侧自己带 sandbox 属性），是给
+      // 「用户/agent 直接导航到这个 URL」那条路兜底的：`?render=1` 谁都能拼，
+      // 没有它的话直接打开就是一个**同源**文档，前端那个 sandbox 等于白设。
+      // CSP 的 sandbox 让它在顶层导航下也拿到一个 opaque origin：脚本照跑，
+      // 但 cookie / localStorage / 同源 fetch 一样都够不着本站。
+      headers["content-security-policy"] = `sandbox ${HTML_SANDBOX}`;
+      // agent 随时会重写这个文件，而 max-age=60 会让「刚改完再打开」看到上一版。
+      // 这条路由读的是本机文件，省那一次 IO 换来的是让人怀疑人生的一分钟。
+      headers["cache-control"] = "private, no-store";
+    } else if (ext === "svg") {
+      // 顺手堵掉同一类的老洞：SVG 是**可以带 `<script>` 的文档格式**，而它一直回
+      // image/svg+xml，直接导航打开就在本站源上执行。加 sandbox（连 allow-scripts
+      // 都不给）即可；CSP 响应头对 `<img>` 拉到的图片是被忽略的，所以 ImageView
+      // 那条路一点不受影响。
+      headers["content-security-policy"] = "sandbox";
+    }
     const data = await fs.readFile(p);
-    return new Response(data, {
-      headers: {
-        "content-type": mime,
-        "cache-control": "private, max-age=60",
-        "content-length": String(stat.size),
-      },
-    });
+    return new Response(data, { headers });
   } catch (err) {
     return c.json(
       { error: err instanceof Error ? err.message : String(err) },
@@ -229,13 +305,19 @@ fsRoute.get("/tree", async (c) => {
         504,
       );
     }
-    const result = entries
-      .filter((e) => !TREE_IGNORE.has(e.name))
-      .map((e) => ({
-        name: e.name,
-        path: path.join(dir, e.name),
-        type: e.isDirectory() ? "dir" : "file",
-      }))
+    const result = (
+      await Promise.all(
+        entries
+          .filter((e) => !TREE_IGNORE.has(e.name))
+          .map(async (e) => {
+            const full = path.join(dir, e.name);
+            const type: "dir" | "file" = (await isDirFollowingLinks(full, e))
+              ? "dir"
+              : "file";
+            return { name: e.name, path: full, type };
+          }),
+      )
+    )
       .sort((a, b) => {
         if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
         return a.name.localeCompare(b.name);

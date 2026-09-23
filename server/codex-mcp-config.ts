@@ -1,15 +1,13 @@
-export const CODEX_MCP_TOKEN_ENV = "CC_WEBUI_MCP_TOKEN";
-
-type CodexConfigValue =
-  | string
-  | number
-  | boolean
-  | CodexConfigValue[]
-  | { [key: string]: CodexConfigValue };
-type CodexConfigObject = { [key: string]: CodexConfigValue };
+// URL 推导：cc-webui 自己那几条 HTTP MCP 路由（server/mcp-bash-route.ts +
+// mcp-local-route.ts）。
+//
+// 文件名里的 "codex" 是历史遗留：这套东西最早只有 Codex 在用。现在两个 executor
+// 都走它，剩下的内容也只有 URL 推导了 —— SDK 时代那两个 `createCodexMcp*`
+// 构造器随 @openai/codex-sdk 一起删掉了（Codex 的 MCP 配置现在由
+// server/executors/codex-executor.ts 直接渲染成 `-c` 覆盖）。
 
 // Named for the HTTP MCP routes in server/mcp-bash-route.ts. Not Codex-only
-// any more — the CLI-driven Claude executor reaches the same routes.
+// any more — both CLI executors reach the same routes.
 export type McpRouteName = "bash" | "lark" | "schedule" | "local";
 
 export function getMcpRouteUrl(
@@ -55,40 +53,4 @@ export function localMcpRouteUrl(
   serverName: string,
 ): string {
   return `${getMcpRouteUrl(env, "local")}/${serverName}`;
-}
-
-export function createCodexMcpConfig(
-  input: string | { bashUrl: string; larkUrl?: string }
-): CodexConfigObject {
-  const bashUrl = typeof input === "string" ? input : input.bashUrl;
-  const larkUrl = typeof input === "string" ? undefined : input.larkUrl;
-  const mcpServers: CodexConfigObject = {
-    bash: {
-      url: bashUrl,
-      bearer_token_env_var: CODEX_MCP_TOKEN_ENV,
-      default_tools_approval_mode: "approve",
-    },
-  };
-  if (larkUrl) {
-    mcpServers.lark = {
-      url: larkUrl,
-      bearer_token_env_var: CODEX_MCP_TOKEN_ENV,
-      default_tools_approval_mode: "approve",
-    };
-  }
-  return {
-    mcp_servers: mcpServers,
-  };
-}
-
-export function createCodexMcpEnv(
-  token: string,
-  baseEnv: NodeJS.ProcessEnv = process.env
-): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(baseEnv)) {
-    if (value !== undefined) env[key] = value;
-  }
-  env[CODEX_MCP_TOKEN_ENV] = token;
-  return env;
 }

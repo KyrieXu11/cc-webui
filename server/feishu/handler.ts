@@ -40,10 +40,16 @@ const MODEL_ALIASES: Record<BotConfig["agentId"], Record<string, string>> = {
     sonnet: "sonnet",
     haiku: "haiku",
   },
+  // Codex has no family aliases of its own, so these are exact slugs and they
+  // DO go stale — `mini` used to point at `gpt-5.1-codex-mini`, which the API
+  // has since stopped accepting (400 "not supported … with a ChatGPT
+  // account"). Keep them on the same ids src/lib/settings.ts offers.
   codex: {
-    codex: "gpt-5.5",
+    codex: "gpt-5.6-sol",
+    sol: "gpt-5.6-sol",
+    terra: "gpt-5.6-terra",
+    luna: "gpt-5.6-luna",
     full: "gpt-5.5",
-    mini: "gpt-5.1-codex-mini",
   },
 };
 

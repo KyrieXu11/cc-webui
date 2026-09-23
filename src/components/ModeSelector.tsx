@@ -1,5 +1,6 @@
 import Popover from "./Popover";
-import { MODE_OPTIONS, modeLabel, type PermissionMode } from "../lib/settings";
+import { modeOptionsFor, modeLabel, type PermissionMode } from "../lib/settings";
+import { useAuth } from "../AuthGate";
 
 interface Props {
   value: PermissionMode;
@@ -14,6 +15,8 @@ export default function ModeSelector({
   direction = "up",
   align = "left",
 }: Props) {
+  const { isAdmin } = useAuth();
+  const options = modeOptionsFor(isAdmin);
   return (
     <Popover
       align={align}
@@ -29,7 +32,7 @@ export default function ModeSelector({
     >
       {({ close }) => (
         <div className="p-1">
-          {MODE_OPTIONS.map((m) => (
+          {options.map((m) => (
             <button
               key={m.id}
               onClick={() => {

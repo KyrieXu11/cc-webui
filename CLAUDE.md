@@ -7,7 +7,7 @@
 
 ## 最重要的几条（详见 AGENTS.md）
 
-- 提交前跑 `npm run typecheck` 和 `npm test`（后者是 `tsx --test "server/**/*.test.ts"`）。
+- 提交前跑 `npm run typecheck` 和 `npm test`（后者是 `tsx --test "server/**/*.test.ts" "src/**/*.test.ts"`）。
 - **Bash MCP 只剩 HTTP 一套**：`server/mcp-bash-route.ts`，Claude / Codex / 飞书都走它（CLI 迁移前是两套，旧文档里还写着「进程内」）。
 - 新增/改模型只动 `src/lib/settings.ts`。
 - `docs/superpowers/` 是**设计期**文档，已与实现漂移，别当现状读（漂移清单在 AGENTS.md 末尾）。

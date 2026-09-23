@@ -6,6 +6,8 @@ import { startFeishuChannels } from "./feishu/index.ts";
 import { countUsers, seedAdminFromEnv } from "./auth/users.ts";
 import { groupsEnabled } from "./features.ts";
 import { createDeviceWs, DEVICE_WS_PATH } from "./devices/ws.ts";
+import { claudeExecutor } from "./executors/claude-executor.ts";
+import { codexExecutor, CODEX_JSON_FLAG } from "./executors/codex-executor.ts";
 
 // .env first: it carries CC_WEBUI_ADMIN and the Feishu credentials, and
 // everything below reads config.
@@ -65,6 +67,19 @@ const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
     console.log(`[cc-webui] feishu: ${bots} bot(s) connected`);
   }
   console.log(`[cc-webui] devices: ws endpoint at ${DEVICE_WS_PATH}`);
+  // ⚠️ 这两行不是装饰。两个 CLI 的控制协议 / JSON 事件流**没有版本协商、没有
+  // 文档**（docs/cli-migration.md「控制协议」「模型」两节），所以 CLI 自动更新
+  // 把权限卡、MCP 或事件形状改坏时，日志里这一行是唯一的线索 —— 这正是
+  // Executor.describe() 存在的理由。`codex exec --experimental-json` 连
+  // `--help` 里都没有，一并打出来。
+  void Promise.all([claudeExecutor.describe(), codexExecutor.describe()]).then(
+    ([claude, codex]) => {
+      console.log(`[cc-webui] claude cli: ${claude.version} (${claude.bin})`);
+      console.log(
+        `[cc-webui] codex cli: ${codex.version} (${codex.bin}, ${CODEX_JSON_FLAG})`,
+      );
+    },
+  );
 });
 
 // 反代那侧这条 location 需要 Upgrade / Connection 头 + 够长的 proxy_read_timeout，

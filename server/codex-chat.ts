@@ -1,24 +1,13 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { SSEStreamingApi } from "hono/streaming";
-import {
-  Codex,
-  type ApprovalMode,
-  type Input,
-  type ModelReasoningEffort,
-  type SandboxMode,
-  type UserInput,
-} from "@openai/codex-sdk";
 import os from "node:os";
 import path from "node:path";
-import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { appendCodexTurn } from "./session-store.ts";
-import {
-  createCodexMcpConfig,
-  createCodexMcpEnv,
-  getMcpRouteUrl,
-} from "./codex-mcp-config.ts";
+import { codexExecutor } from "./executors/codex-executor.ts";
+import type { ExecResult } from "./executors/types.ts";
+import { getMcpRouteUrl } from "./codex-mcp-config.ts";
 import {
   registerMcpSessionContext,
   unregisterMcpSessionContext,
@@ -36,20 +25,11 @@ import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 
 const codexChat = new Hono();
 const KEEPALIVE_MS = 15_000;
-const MAX_CODEX_IMAGE_BYTES = 10 * 1024 * 1024;
 const CODEX_RUNTIME_PROMPT =
   "WEBUI RUNTIME: For shell commands, prefer the MCP bash tools. " +
   "Use mcp__bash__run with run_in_background=true for long-running commands; " +
   "poll with mcp__bash__output, terminate with mcp__bash__kill, and discover existing tasks with mcp__bash__list. " +
   "Foreground mcp__bash__run commands can be detached by the UI.";
-
-const IMAGE_EXT_BY_MIME: Record<string, string> = {
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/jpg": ".jpg",
-  "image/gif": ".gif",
-  "image/webp": ".webp",
-};
 
 type BufferedMsg = { event: string; data: string };
 
@@ -187,79 +167,26 @@ async function attachStreamToEntry(
   }
 }
 
-function mapPermissionMode(mode: string | undefined): {
-  sandboxMode: SandboxMode;
-  approvalPolicy: ApprovalMode;
-} {
-  if (mode === "bypassPermissions") {
-    return { sandboxMode: "danger-full-access", approvalPolicy: "never" };
-  }
-  if (mode === "plan") {
-    return { sandboxMode: "read-only", approvalPolicy: "never" };
-  }
-  return { sandboxMode: "workspace-write", approvalPolicy: "never" };
-}
-
-function mapEffort(effort: string | undefined): ModelReasoningEffort {
-  if (effort === "low" || effort === "medium" || effort === "high") {
-    return effort;
-  }
-  if (effort === "xhigh" || effort === "max") return "xhigh";
-  return "medium";
+// The cc-webui runtime preamble Codex needs (it has no --append-system-prompt
+// equivalent, so it rides in the prompt itself). Images travel as ExecOptions
+// attachments now — the executor spills them to disk and cleans up, so the
+// temp-dir bookkeeping that used to live here is gone.
+function composePrompt(prompt: string): string {
+  return prompt.trim()
+    ? `${CODEX_RUNTIME_PROMPT}\n\nUSER REQUEST:\n${prompt}`
+    : CODEX_RUNTIME_PROMPT;
 }
 
 type IncomingImage = { name?: string; mediaType?: string; data?: string };
 
-async function createCodexInput(
-  prompt: string,
-  images: IncomingImage[]
-): Promise<{ input: Input; cleanup: () => Promise<void> }> {
-  const validImages = images.filter(
+function validImages(images: IncomingImage[]) {
+  return images.filter(
     (img): img is { name?: string; mediaType: string; data: string } =>
       typeof img?.mediaType === "string" &&
       img.mediaType.startsWith("image/") &&
       typeof img.data === "string" &&
       img.data.length > 0
   );
-  if (validImages.length === 0) {
-    return {
-      input: `${CODEX_RUNTIME_PROMPT}\n\nUSER REQUEST:\n${prompt}`,
-      cleanup: async () => {},
-    };
-  }
-
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cc-webui-codex-"));
-  const input: UserInput[] = [
-    {
-      type: "text",
-      text: prompt.trim()
-        ? `${CODEX_RUNTIME_PROMPT}\n\nUSER REQUEST:\n${prompt}`
-        : CODEX_RUNTIME_PROMPT,
-    },
-  ];
-
-  for (const img of validImages) {
-    const ext = IMAGE_EXT_BY_MIME[img.mediaType.toLowerCase()];
-    if (!ext) {
-      throw new Error(`unsupported image type: ${img.mediaType}`);
-    }
-    const buf = Buffer.from(img.data, "base64");
-    if (buf.length === 0 || buf.length > MAX_CODEX_IMAGE_BYTES) {
-      throw new Error(
-        `image ${img.name ?? ""} exceeds ${MAX_CODEX_IMAGE_BYTES} bytes`
-      );
-    }
-    const file = path.join(dir, `${randomUUID()}${ext}`);
-    await fs.writeFile(file, buf, { mode: 0o600 });
-    input.push({ type: "local_image", path: file });
-  }
-
-  return {
-    input,
-    cleanup: async () => {
-      await fs.rm(dir, { recursive: true, force: true });
-    },
-  };
 }
 
 function fanoutFactory(entry: InFlightCodexChat) {
@@ -341,7 +268,6 @@ codexChat.post("/chat", async (c) => {
   const fanout = fanoutFactory(entry);
 
   (async () => {
-    let cleanupInput: (() => Promise<void>) | undefined;
     let unsubscribeForeground: (() => void) | undefined;
     const mcpToken = randomUUID();
     let taskSessionId = threadId ?? clientTurnId ?? `codex-turn-${reqId}`;
@@ -368,31 +294,41 @@ codexChat.post("/chat", async (c) => {
         }
       });
 
-      const codex = new Codex({
-        config: createCodexMcpConfig(getMcpRouteUrl()),
-        env: createCodexMcpEnv(mcpToken),
-      });
-      const { input, cleanup } = await createCodexInput(prompt, rawImages);
-      cleanupInput = cleanup;
-      const { sandboxMode, approvalPolicy } = mapPermissionMode(permissionMode);
-      const threadOptions = {
-        model,
-        workingDirectory: cwd,
-        skipGitRepoCheck: true,
-        sandboxMode,
-        approvalPolicy,
-        modelReasoningEffort: mapEffort(effort),
-      };
-      const thread = threadId
-        ? codex.resumeThread(threadId, threadOptions)
-        : codex.startThread(threadOptions);
-      const { events } = await thread.runStreamed(input, {
+      // CLI-driven now (was @openai/codex-sdk, which spawned the very same
+      // `codex exec --experimental-json` — just a version-pinned bundled copy
+      // of it). See server/executors/codex-executor.ts.
+      const frames = codexExecutor.exec({
+        prompt: composePrompt(prompt),
+        images: validImages(rawImages),
+        cwd: cwd ?? process.cwd(),
         signal: entry.abort.signal,
+        model,
+        effort,
+        mode: permissionMode,
+        ...(threadId ? { resume: threadId } : {}),
+        // ⚠️ bash only — deliberately NOT the `schedule` server Claude gets,
+        // and deliberately NOT the desktop-client `local-*` ones
+        // (docs/desktop-client.md 决策 19: only server/chat.ts assembles those).
+        mcpServers: [
+          {
+            name: "bash",
+            url: getMcpRouteUrl(process.env, "bash"),
+            bearerToken: mcpToken,
+          },
+        ],
       });
 
       let eventCount = 0;
-      for await (const ev of events) {
+      let ended: ExecResult | null = null;
+      for await (const frame of frames) {
+        if (frame.kind === "ended") {
+          ended = frame.result;
+          break;
+        }
         if (entry.cancelRequested) break;
+        // `payload` is the CLI's own JSONL frame, verbatim — the same shape the
+        // SDK yielded, which is why everything below is unchanged.
+        const ev = frame.payload as any;
         // Drop the benign model-mismatch advisory (see codex-events.ts) so it
         // doesn't surface as a "[错误] …" message or land in the saved session.
         if (isCodexModelMismatchNotice(ev)) continue;
@@ -421,8 +357,17 @@ codexChat.post("/chat", async (c) => {
       }
 
       console.log(
-        `[codex ${reqId}] ${entry.cancelRequested ? "cancelled" : "done"} events=${eventCount} in ${elapsed()}`
+        `[codex ${reqId}] ${entry.cancelRequested ? "cancelled" : (ended?.status ?? "done")}` +
+          ` events=${eventCount} in ${elapsed()}` +
+          (ended?.error ? ` error=${JSON.stringify(ended.error)}` : "")
       );
+      // A cancelled turn is not an error (the executor reports `aborted`, which
+      // it can only know because it did the killing — the exit code alone says
+      // "failed"). Everything else that isn't `completed` is surfaced to the
+      // user, since the SDK used to throw on exactly those.
+      if (ended && ended.status !== "completed" && ended.status !== "aborted") {
+        throw new Error(ended.error ?? `run ${ended.status}`);
+      }
       entry.status = "done";
     } catch (err) {
       if (entry.cancelRequested) {
@@ -456,9 +401,6 @@ codexChat.post("/chat", async (c) => {
         );
       } else {
         fanout("done", "");
-      }
-      if (cleanupInput) {
-        await cleanupInput().catch(() => {});
       }
       unsubscribeForeground?.();
       unregisterMcpSessionContext(mcpToken);
