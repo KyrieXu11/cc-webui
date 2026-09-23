@@ -14,6 +14,7 @@ const {
   listClaudeSessions,
   getClaudeSessionMessages,
   deleteClaudeSession,
+  summarize,
 } = await import("./claude-sessions.ts");
 
 const userLine = (text: string, extra: Record<string, unknown> = {}) => ({
@@ -143,6 +144,68 @@ try {
   assert.equal(await deleteClaudeSession(sid, { dir: "/tmp/proj" }), true);
   assert.equal(await deleteClaudeSession(sid, { dir: "/tmp/proj" }), false, "already gone");
   assert.deepEqual(await listClaudeSessions({ limit: 10, dir: "/tmp/proj" }), []);
+
+  // ── 头部被巨大的 bookkeeping 行顶满 ──────────────────────────────────────
+  //
+  // 2026-09-07 用户报的「怎么看不到 rebecca 的会话了」就是这个：CLI 把
+  // `queue-operation`（排队中的消息，带附件时一条上百 KB —— 现场最长的一行
+  // 1.84MB）写在文件最前面，两条就填满头部 256KB 的窗口，于是窗口里一个 cwd、
+  // 一个 user 行都不剩，`summaryFor` 返回 null，**整条会话在侧栏和顶栏搜索里
+  // 消失**，而文件好好地躺在盘上。
+  const qDir = path.join(tmp, projectSlug("/tmp/queued"));
+  await fs.mkdir(qDir, { recursive: true });
+  const qSid = "99999999-8888-4777-8666-555555555555";
+  const fat = (n: number) =>
+    JSON.stringify({ type: "queue-operation", n, blob: "x".repeat(200_000) });
+  await fs.writeFile(
+    path.join(qDir, `${qSid}.jsonl`),
+    [
+      // 两条各 200KB，加起来越过 HEAD_BYTES（256KB）—— 快路径必然空手而归。
+      fat(1),
+      fat(2),
+      JSON.stringify({
+        type: "user",
+        uuid: "u-1",
+        sessionId: qSid,
+        timestamp: "2026-09-07T00:00:00.000Z",
+        cwd: "/tmp/queued",
+        message: { role: "user", content: [{ type: "text", text: "帮我做课件" }] },
+      }),
+    ].join("\n") + "\n",
+  );
+
+  const queued = await listClaudeSessions({ limit: 10, dir: "/tmp/queued" });
+  assert.equal(queued.length, 1, "头部窗口捞不到时必须回退到按行扫，而不是丢掉这条会话");
+  assert.equal(queued[0].sessionId, qSid);
+  assert.equal(queued[0].cwd, "/tmp/queued");
+  assert.equal(queued[0].firstPrompt, "帮我做课件");
+
+  // 反面：真的只有 bookkeeping、一条消息都没有的文件仍然不进列表 —— 那是「起了
+  // 个会话、一个 turn 都没跑完」的残桩，列出来是一行空白。
+  const stubSid = "77777777-6666-4555-8444-333333333333";
+  await fs.writeFile(
+    path.join(qDir, `${stubSid}.jsonl`),
+    [
+      JSON.stringify({ type: "last-prompt" }),
+      JSON.stringify({ type: "mode", mode: "default" }),
+      JSON.stringify({ type: "cost-state" }),
+    ].join("\n") + "\n",
+  );
+  assert.deepEqual(
+    (await listClaudeSessions({ limit: 10, dir: "/tmp/queued" })).map((x) => x.sessionId),
+    [qSid],
+    "只有 bookkeeping 的残桩不列",
+  );
+
+  // 没有 ai-title 时标题退回第一条消息：带附件的那种不能把临时目录路径当标题。
+  const att = "附件：\n- /var/folders/48/x/T/cc-webui-uploads/mu-笔记.pdf  (笔记.pdf)\n\n做成 PPT";
+  assert.equal(summarize(att), "做成 PPT", "title uses the message, not the upload path");
+  assert.equal(
+    summarize("附件：\n- /t/a-x.pdf  (x.pdf)\n- /t/b-y.pdf  (y.pdf)"),
+    "x.pdf、y.pdf",
+    "attachment-only message → file names",
+  );
+  assert.equal(summarize("普通 的\n消息"), "普通 的 消息", "no attachment: unchanged");
 
   console.log("claude-sessions.test.ts: all assertions passed");
 } finally {

@@ -1,4 +1,5 @@
 import type { Role } from "./auth";
+import type { UserDefaults } from "./user-defaults";
 
 export type AdminUser = {
   id: string;
@@ -10,6 +11,8 @@ export type AdminUser = {
   allowedPaths: string[];
   workspace: { dir: string; pattern: string } | null;
   ownedResources: number;
+  // 管理员给这个账号设的默认模型 / effort，没设是 null。
+  defaults: UserDefaults | null;
 };
 
 export type OpenedRecord = {
@@ -63,6 +66,8 @@ export async function patchAdminUser(
     allowedPaths?: string[];
     removeWorkspace?: boolean;
     createWorkspace?: boolean;
+    // 两项都给 null = 清空。
+    defaults?: { model: string | null; effort: string | null };
   },
 ): Promise<void> {
   await json(

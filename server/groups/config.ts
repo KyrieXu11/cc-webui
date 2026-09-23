@@ -37,6 +37,13 @@ export type GroupConfig = {
   pipeline: AgentId[];
 };
 
+// 决策 12：bypass 只给管理员。刻意**不**放进 validateConfig —— 那是一个纯校验器，
+// 不认识调用者；而这条规则是「谁在调」的规则，不是「配置是否合法」的规则。
+// （同一个理由，飞书那边不查：它的 turn 本来就跑在管理员身份下。）
+export function usesBypass(participants: readonly Participant[]): boolean {
+  return participants.some((p) => p?.mode === "bypassPermissions");
+}
+
 export function validateConfig(c: GroupConfig): void {
   if (!c.id || typeof c.id !== "string") {
     throw new Error("config.id required");
@@ -115,7 +122,7 @@ export function defaultParticipant(id: AgentId): Participant {
   }
   return {
     id: "codex",
-    model: "gpt-5.5",
+    model: "gpt-5.6-sol",
     effort: "xhigh",
     systemPrompt: "",
     skills: [],

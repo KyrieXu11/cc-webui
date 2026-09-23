@@ -128,6 +128,33 @@ export async function deleteFiles(
   return (await res.json()) as DeleteResult;
 }
 
+// 下载（决策 18）。一个文件直接下，多个由服务端打成一个 zip。
+//
+// **不做「连续触发 N 次下载」**：浏览器把第二个之后的下载当弹窗拦（Chrome 会问
+// 「是否允许下载多个文件」），用户误点一次「阻止」之后，此后所有下载都**静默**
+// 失败——页面这边收不到任何事件，看着就是按钮坏了。一次请求一个文件没有这个问题。
+//
+// 用 <a download> 而不是 fetch → blob：blob 要把整个文件先读进浏览器内存，而取件台
+// 里可能是几百 MB 的产出；交给浏览器还白拿原生的进度条和「继续下载」。代价是服务端
+// 出错时（文件正好被 agent 删了）浏览器会把那段 JSON 存成文件，但那一份小得一眼能
+// 认出来，比一个吃内存的实现划算。
+//
+// ⚠️ `download` 属性必须留空字符串，不能省：省了的话出错响应（没有
+// content-disposition）会让浏览器**导航**过去，整个页面就没了；留空则文件名仍然
+// 取服务端的 content-disposition（同源时它优先于这个属性）。
+export function downloadFiles(paths: string[]): void {
+  if (paths.length === 0) return;
+  const qs = paths.map((p) => `path=${encodeURIComponent(p)}`).join("&");
+  const a = document.createElement("a");
+  a.href = `/api/files/download?${qs}`;
+  a.download = "";
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 // 上传到「本文件夹」。目标目录走 query —— 白名单检查读的是那儿（见
 // server/files-routes.ts 的 ⚠️）。
 export async function uploadToDir(
@@ -147,4 +174,76 @@ export async function uploadToDir(
   return (await res.json()) as {
     files: { path: string; name: string; size: number }[];
   };
+}
+
+/** 在 dir 下建一个文件夹。名字不合法/重名时服务端会拒，理由原样带回来给用户看。 */
+export async function createFolder(
+  dir: string,
+  name: string
+): Promise<{ ok: true; path: string } | { ok: false; message: string }> {
+  const res = await fetch("/api/files/mkdir", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dir, name }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    path?: string;
+    error?: string;
+    detail?: string;
+  };
+  if (!res.ok) {
+    // detail 是目录白名单中间件给的那句（「这个目录不在你账号可以打开的范围内」），
+    // 它常常是唯一能解释发生了什么的一句话。
+    return { ok: false, message: body.detail || body.error || `HTTP ${res.status}` };
+  }
+  return { ok: true, path: body.path! };
+}
+
+/**
+ * 把若干文件/文件夹移动到 dest。逐个成败——和删除一样是**部分成功**的语义：
+ * 同名冲突、白名单外的路径都只让那一条失败，不会把整批回滚。
+ */
+export async function moveFiles(
+  paths: string[],
+  dest: string
+): Promise<{ moved: { from: string; to: string }[]; failed: { path: string; error: string }[] }> {
+  const res = await fetch("/api/files/move", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ paths, dest }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    moved?: { from: string; to: string }[];
+    failed?: { path: string; error: string }[];
+    error?: string;
+    detail?: string;
+  };
+  if (!res.ok) {
+    // 整条请求就被拒了（目标目录不在白名单里等），把它摊成「每个都失败」，
+    // 调用方只需要处理一种形状。
+    const message = body.detail || body.error || `HTTP ${res.status}`;
+    return { moved: [], failed: paths.map((p) => ({ path: p, error: message })) };
+  }
+  return { moved: body.moved ?? [], failed: body.failed ?? [] };
+}
+
+/** 原地改名（文件和文件夹都行）。失败时把服务端那句理由原样带回来。 */
+export async function renameEntry(
+  path: string,
+  name: string
+): Promise<{ ok: true; path: string } | { ok: false; message: string }> {
+  const res = await fetch("/api/files/rename", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, name }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    path?: string;
+    error?: string;
+    detail?: string;
+  };
+  if (!res.ok) {
+    return { ok: false, message: body.detail || body.error || `HTTP ${res.status}` };
+  }
+  return { ok: true, path: body.path! };
 }

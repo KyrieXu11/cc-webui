@@ -5,6 +5,7 @@
 // is shared with the user's own terminal sessions.
 
 import { getDb, transact } from "../db.ts";
+import { dropShare, isSharedWith } from "./sharing.ts";
 
 export type ResourceKind = "claude" | "codex" | "group";
 
@@ -47,15 +48,65 @@ export function resourceIdsOwnedBy(
   return new Set(rows.map((r) => r.id));
 }
 
+// 两级：`owner` = 能改能删，`reader` = 只能读（owner ∪ 被共享者）。
+//
+// ⚠️ 缺省是 `owner`，也就是**严格**的那一级。新路由不写 access 就落在严格侧,
+// 和整张 policy 表 fail-closed 的取向一致 —— 反过来（缺省宽松、危险的路由记得
+// 收紧）正是 policy.ts 文件头说的那种失败模式。
+export type AccessLevel = "owner" | "reader";
+
 // An UNOWNED resource is visible to admins only (decision 10): the orphans
 // include the machine owner's own terminal sessions, which should not show up
 // in a colleague's list.
 export function canAccessResource(
   user: { id: string; role: "admin" | "user" },
   resourceId: string,
+  level: AccessLevel = "owner",
 ): boolean {
   if (user.role === "admin") return true; // decision 11
-  return ownerOf(resourceId) === user.id;
+  if (ownerOf(resourceId) === user.id) return true;
+  return level === "reader" && isSharedWith(resourceId, user.id);
+}
+
+// 换 owner。和 recordOwner 是两件事：那个是 `ON CONFLICT DO NOTHING`（"第一个
+// 声明的人赢"，因为它跑在每个 turn 里，不能被后来者改写），这个是显式的转交动作。
+//
+// 顺手删掉新 owner 名下的共享行：他现在直接拥有这条资源，那行共享既是死数据，
+// 又会让共享面板显示成「已共享给自己」。
+export function transferOwner(
+  resourceId: string,
+  kind: ResourceKind,
+  userId: string,
+): void {
+  transact(() => {
+    getDb()
+      .prepare(
+        `INSERT INTO ownership(resource_id, kind, user_id, created_at)
+              VALUES (?, ?, ?, ?)
+         ON CONFLICT(resource_id) DO UPDATE SET user_id = excluded.user_id`,
+      )
+      .run(resourceId, kind, userId, Date.now());
+    dropShare(resourceId, userId);
+  });
+}
+
+// 一次查询取回整张归属表。
+//
+// 会话列表最多要标注 SEARCH_WINDOW(1000) 条，而 `IN (…)` 在 SQLite 上有 999 个
+// 参数的上限 —— 与其分批，不如整表拿：这张表一条会话一行，量级和用户建过的会话
+// 总数相同（本机是两位数）。真到了需要分页的规模，改这一个函数就够。
+export function ownerMap(): Map<string, string> {
+  const rows = getDb()
+    .prepare("SELECT resource_id AS id, user_id AS userId FROM ownership")
+    .all() as Array<{ id: string; userId: string }>;
+  return new Map(rows.map((r) => [r.id, r.userId]));
+}
+
+export function kindOf(resourceId: string): ResourceKind | null {
+  const row = getDb()
+    .prepare("SELECT kind FROM ownership WHERE resource_id = ?")
+    .get(resourceId) as { kind?: ResourceKind } | undefined;
+  return row?.kind ?? null;
 }
 
 // Re-key when a provider hands back a different id than we asked for (Claude

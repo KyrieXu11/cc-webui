@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Popover from "./Popover";
 import {
   modelLabel,
@@ -45,33 +46,42 @@ export default function ModelSelector({
               当前会话仅支持本 provider 的模型
             </span>
           </div>
-          {models.map((m) => {
+          {models.map((m, i) => {
             const active = value === m.id;
+            // 跟随最新的别名在上，固定版本在下，中间隔一道线——两类的区别
+            // （会不会自己变）正是选它时最该知道的事。
+            const firstPinned = m.pinned && !models[i - 1]?.pinned;
             return (
-              <button
-                key={m.id}
-                onClick={() => {
-                  onChange(m.id);
-                  close();
-                }}
-                className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md text-left hover:bg-fg/5 transition-colors"
-              >
-                <div>
-                  <div
-                    className={`font-mono text-[12.5px] ${
-                      active ? "text-fg" : "text-muted"
-                    }`}
-                  >
-                    {m.label}
+              <Fragment key={m.id}>
+                {firstPinned && (
+                  <div className="mx-2.5 mt-1 mb-0.5 pt-2 border-t border-line text-[10.5px] text-subtle/70">
+                    固定版本
                   </div>
-                  <div className="text-[10.5px] text-subtle mt-0.5">
-                    {m.hint}
-                  </div>
-                </div>
-                {active && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue" />
                 )}
-              </button>
+                <button
+                  onClick={() => {
+                    onChange(m.id);
+                    close();
+                  }}
+                  className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md text-left hover:bg-fg/5 transition-colors"
+                >
+                  <div>
+                    <div
+                      className={`font-mono text-[12.5px] ${
+                        active ? "text-fg" : "text-muted"
+                      }`}
+                    >
+                      {m.label}
+                    </div>
+                    <div className="text-[10.5px] text-subtle mt-0.5">
+                      {m.hint}
+                    </div>
+                  </div>
+                  {active && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue" />
+                  )}
+                </button>
+              </Fragment>
             );
           })}
         </div>

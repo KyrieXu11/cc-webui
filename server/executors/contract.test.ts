@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 
-// Interface-only test: no CLI is spawned. It proves two things before any real
-// executor exists —
+// Interface-only test: no CLI is spawned. Written before either real executor
+// existed; both now do (claude-executor.ts / codex-executor.ts), and this file
+// stays as the contract's own guard rail. It proves two things —
 //   1. both providers CAN implement the contract (compile-time, via the
 //      `Executor` annotations on the two stubs below), and
 //   2. every option the current SDK call sites pass is expressible in

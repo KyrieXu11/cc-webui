@@ -142,6 +142,61 @@ export function setAllowedPaths(userId: string, patterns: string[]): void {
   });
 }
 
+// ─── defaults ───────────────────────────────────────────────────────────────
+//
+// The model / effort an admin picked for this account (decisions 45-47). A
+// default, not a limit: nothing on the server reads these to override a
+// request. The browser applies them once per `updatedAt`, and whatever the
+// user changes afterwards sticks until the admin saves again.
+
+export type UserDefaults = {
+  model: string | null;
+  effort: string | null;
+  updatedAt: number;
+};
+
+export function getUserDefaults(userId: string): UserDefaults | null {
+  const row = getDb()
+    .prepare(
+      `SELECT model, effort, updated_at AS updatedAt
+         FROM user_defaults WHERE user_id = ?`,
+    )
+    .get(userId) as UserDefaults | undefined;
+  if (!row) return null;
+  return {
+    model: row.model ?? null,
+    effort: row.effort ?? null,
+    updatedAt: Number(row.updatedAt),
+  };
+}
+
+// Both null deletes the row, so "not set" has exactly one representation.
+// Saving always moves `updatedAt`, which is what makes every browser of that
+// account apply it again — including a re-save of the same values.
+export function setUserDefaults(
+  userId: string,
+  value: { model: string | null; effort: string | null },
+): UserDefaults | null {
+  const db = getDb();
+  if (!value.model && !value.effort) {
+    db.prepare("DELETE FROM user_defaults WHERE user_id = ?").run(userId);
+    return null;
+  }
+  // Strictly increasing per account, even for two saves inside one
+  // millisecond: an equal stamp would read as "already applied".
+  const prev = getUserDefaults(userId)?.updatedAt ?? 0;
+  const updatedAt = Math.max(Date.now(), prev + 1);
+  db.prepare(
+    `INSERT INTO user_defaults(user_id, model, effort, updated_at)
+          VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE
+        SET model = excluded.model,
+            effort = excluded.effort,
+            updated_at = excluded.updated_at`,
+  ).run(userId, value.model, value.effort, updatedAt);
+  return { model: value.model, effort: value.effort, updatedAt };
+}
+
 // ─── bootstrap ──────────────────────────────────────────────────────────────
 
 // CC_WEBUI_ADMIN=user:pass seeds the first admin. Only ever creates — never

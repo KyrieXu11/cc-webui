@@ -234,9 +234,15 @@ export default function HomeView({
     else if (g.sessions[0]) onOpenSession(g.sessions[0]);
   };
 
+  // 同 ProjectSidebar：删成功才从列表里拿掉（见 lib/sessions.ts 里那段注释）。
   const onRemove = async (s: SessionSummary, e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteSessionApi(s.sessionId, s.cwd, s.provider);
+    try {
+      await deleteSessionApi(s.sessionId, s.cwd, s.provider);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "删除失败");
+      return;
+    }
     const gone = (x: SessionSummary) =>
       x.sessionId !== s.sessionId || x.provider !== s.provider;
     setSessions((xs) => xs.filter(gone));
@@ -601,6 +607,7 @@ function ProjectBlock({
   onOpenSession: (s: SessionSummary) => void;
   onRemove: (s: SessionSummary, e: React.MouseEvent) => void;
 }) {
+  const { isAdmin } = useAuth();
   const searching = query.trim() !== "";
   return (
     <div className="group/proj border-b border-line last:border-b-0 py-4">
@@ -648,25 +655,38 @@ function ProjectBlock({
               <span className="text-[13px] text-muted group-hover/conv:text-fg truncate transition-colors">
                 <Highlighted text={titleOf(s)} query={query} />
               </span>
+              {s.sharedBy && (
+                <span
+                  className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.1em] text-blue border border-blue/40 rounded px-1 py-px"
+                  title={`${s.sharedBy} 共享给你的会话 —— 可以接着聊，但删不掉`}
+                >
+                  共享
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0 pl-3">
               <span className="text-[11.5px] text-subtle">
                 {timeAgo(s.lastModified)}
               </span>
-              <button
-                onClick={(e) => onRemove(s, e)}
-                aria-label="删除对话"
-                className="opacity-0 group-hover/conv:opacity-100 text-subtle hover:text-fg transition-opacity p-1"
-              >
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M3 3L9 9M9 3L3 9"
-                    stroke="currentColor"
-                    strokeWidth="1.3"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+              {/* 共享进来的会话删不掉（policy 里 DELETE 是 owner 级），所以按钮
+                  直接不画：留着就是一个点了只会弹错的 X。（deleteSession 现在会
+                  如实抛错了，但"看得见却删不掉"本身仍然只该出现在意外路径上。） */}
+              {(s.mine || isAdmin) && (
+                <button
+                  onClick={(e) => onRemove(s, e)}
+                  aria-label="删除对话"
+                  className="opacity-0 group-hover/conv:opacity-100 text-subtle hover:text-fg transition-opacity p-1"
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M3 3L9 9M9 3L3 9"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
           </button>
         ))}

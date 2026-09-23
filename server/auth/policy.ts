@@ -10,7 +10,7 @@
 // one is covered. A new route is therefore broken until it is classified, which
 // is the opposite of silently public.
 
-import type { ResourceKind } from "./ownership.ts";
+import type { AccessLevel, ResourceKind } from "./ownership.ts";
 
 // Where to read a value out of the request.
 export type ValueSource = "param" | "query" | "body";
@@ -28,6 +28,15 @@ export type OwnsSpec = {
   // `DELETE /api/groups/%2e%2e%2f%2e%2e` reach fs.rm(recursive) on $HOME.
   // Set false only for an id that genuinely is not a UUID.
   uuid?: false;
+  // "owner" (default) — only the owner may pass.
+  // "reader"          — the owner, OR someone the owner shared it with
+  //                     (server/auth/sharing.ts).
+  //
+  // ⚠️ Read-shaped routes only. A share is permission to READ and to keep the
+  // conversation going; it is NOT ownership, so DELETE and the config-mutating
+  // routes must stay on the default. Leaving `access` off is always the safe
+  // choice, which is why the default is the strict one.
+  access?: AccessLevel;
 };
 
 export type PathSpec = {
@@ -72,6 +81,13 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "POST /api/auth/login": { auth: "public", note: "the way in" },
   "POST /api/auth/logout": { auth: "public", note: "clearing a cookie needs no identity" },
   "GET /api/auth/me": { auth: "public", note: "returns {user:null} when anonymous" },
+  // 共享面板的选人列表：只有 id + username + role。
+  //
+  // 跟着决策 41 一起是 admin —— 只有管理员发起共享，就没有理由让普通用户看到
+  // 这台机器上有哪些账号。**故意不复用 `GET /api/admin/users`**：那条回的是
+  // 管理页面要的东西（白名单、工作区、资源计数），共享面板不该依赖它的形状，
+  // 而且哪天共享放开给普通用户，这里改一个词就够。
+  "GET /api/auth/directory": { auth: "admin", note: "id + username roster, no secrets" },
 
   // ── admin management ──────────────────────────────────────────────────────
   // No owns/paths specs: these routes are ABOUT users and mappings, not about
@@ -86,23 +102,47 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "PUT /api/admin/feishu-senders": { auth: "admin", note: "the admin surface" },
 
   // ── web single chat (Claude) ──────────────────────────────────────────────
+  // `owns` on the resume id is NOT decoration: body.sessionId goes straight into
+  // the CLI's `resume:` (server/chat.ts), so without it any account could carry
+  // on someone else's conversation just by knowing its id — the path whitelist
+  // is the only thing that ever stood in the way, and it lines up by
+  // construction for two accounts pointed at the same folder.
+  //
+  // `reader`, not `owner`: continuing a shared conversation is the point of
+  // sharing it. Safe because every permission decision inside the turn is
+  // re-derived from the CALLER, not from the session's owner — the cwd check
+  // right below, the permission cards (chat.ts passes `ownerId`), and the bash
+  // MCP path guardrail all read the account that sent this request.
   "POST /api/chat": {
     auth: "user",
+    owns: {
+      from: "body",
+      key: "sessionId",
+      kind: "claude",
+      optional: true,
+      access: "reader",
+    },
     paths: [{ from: "body", key: "cwd", optional: true, fallback: "serverCwd" }],
   },
   "POST /api/chat/cancel": {
     auth: "user",
-    owns: { from: "body", key: "sessionId", kind: "claude", optional: true },
+    owns: { from: "body", key: "sessionId", kind: "claude", optional: true, access: "reader" },
+  },
+  // 插话（往正在跑的那一轮里塞一条消息）。和 cancel 同一档：被共享者能续聊，
+  // 自然也能插话 —— turn 里每个权限判断本来就是按**调用者**重新推导的。
+  "POST /api/chat/steer": {
+    auth: "user",
+    owns: { from: "body", key: "sessionId", kind: "claude", optional: true, access: "reader" },
   },
   "GET /api/chat/inflight": { auth: "user", handlerScoped: true },
   "GET /api/chat/wakeups": { auth: "user", handlerScoped: true },
   "POST /api/chat/wakeups/cancel": {
     auth: "user",
-    owns: { from: "body", key: "sessionId", kind: "claude" },
+    owns: { from: "body", key: "sessionId", kind: "claude", access: "reader" },
   },
   "GET /api/chat/attach": {
     auth: "user",
-    owns: { from: "query", key: "sessionId", kind: "claude", optional: true },
+    owns: { from: "query", key: "sessionId", kind: "claude", optional: true, access: "reader" },
   },
 
   // ── web single chat (Codex) ───────────────────────────────────────────────
@@ -119,12 +159,12 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   },
   "POST /api/codex/chat/cancel": {
     auth: "user",
-    owns: { from: "body", key: "sessionId", kind: "codex", optional: true },
+    owns: { from: "body", key: "sessionId", kind: "codex", optional: true, access: "reader" },
   },
   "GET /api/codex/chat/inflight": { auth: "user", handlerScoped: true },
   "GET /api/codex/chat/attach": {
     auth: "user",
-    owns: { from: "query", key: "sessionId", kind: "codex", optional: true },
+    owns: { from: "query", key: "sessionId", kind: "codex", optional: true, access: "reader" },
   },
 
   // ── group chat (only mounted when CC_WEBUI_GROUPS_ENABLED) ────────────────
@@ -134,7 +174,13 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
     paths: [{ from: "body", key: "cwd", optional: true, fallback: "serverCwd" }],
   },
   "GET /api/groups/inflight/all": { auth: "user", handlerScoped: true },
-  "GET /api/groups/:gid": { auth: "user", owns: { from: "param", key: "gid", kind: "group" } },
+  // Reading a group config accepts a share; every mutating route below stays on
+  // the default. There is no UI for sharing a group yet — this is here so the
+  // rule is uniform when there is.
+  "GET /api/groups/:gid": {
+    auth: "user",
+    owns: { from: "param", key: "gid", kind: "group", access: "reader" },
+  },
   "PATCH /api/groups/:gid/config": {
     auth: "user",
     owns: { from: "param", key: "gid", kind: "group" },
@@ -158,6 +204,9 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "GET /api/fs/read": { auth: "user", paths: [{ from: "query", key: "path" }] },
   "GET /api/fs/raw": { auth: "user", paths: [{ from: "query", key: "path" }] },
   "GET /api/fs/tree": { auth: "user", paths: [{ from: "query", key: "path" }] },
+  // 项目记忆（只读）。能看哪个项目的记忆 = 能不能打开这个项目：白名单查的是 cwd，
+  // 读哪些文件由服务端 readdir 决定，不收调用方给的文件名（见 memory-routes.ts）。
+  "GET /api/memory": { auth: "user", paths: [{ from: "query", key: "cwd" }] },
   "GET /api/fs/scan": { auth: "user", handlerScoped: true },
 
   // ── 取件台（本对话文件）─────────────────────────────────────────────────────
@@ -169,8 +218,19 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   // paths 是**数组**，而 valueFrom 只认字符串字段 —— 声明 paths 会静默取不到值。
   // 所以白名单在处理器里逐个查（files-routes.ts 那段 ⚠️ 写了原因）。
   "POST /api/files/delete": { auth: "user", handlerScoped: true },
+  // 同样是 handlerScoped，但成因不同：`path` 是**可重复的 query**，而 valueFrom
+  // 只取第一个值 —— 声明 paths 会让第二个之后的路径完全不过检查（files-routes.ts）。
+  "GET /api/files/download": { auth: "user", handlerScoped: true },
   // 目标目录走 query：multipart body 用 c.req.json() 解析不出来。
   "POST /api/files/upload": { auth: "user", paths: [{ from: "query", key: "dir" }] },
+  // 建文件夹的落点也要过目录白名单——它是「写」，和上传同级。
+  "POST /api/files/mkdir": { auth: "user", paths: [{ from: "body", key: "dir" }] },
+  // 移动：源是数组（中间件的 valueFrom 只读得到一个字符串），而且**源和目标要各查
+  // 一次**——所以整条交给 handler 自己查，和 delete / download 同理。
+  "POST /api/files/move": { auth: "user", handlerScoped: true },
+  // 改名：源和改完之后的名字**各查一次**（白名单是 glob，同目录换后缀也能越界）。
+  // 两次都在 handler 里，所以整条 handlerScoped。
+  "POST /api/files/rename": { auth: "user", handlerScoped: true },
 
   // ── ONLYOFFICE ────────────────────────────────────────────────────────────
   // config 是浏览器要的，走正常登录 + 路径白名单。
@@ -188,8 +248,24 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
 
   // ── session history ───────────────────────────────────────────────────────
   "GET /api/sessions": { auth: "user", handlerScoped: true },
-  "GET /api/sessions/:id/messages": { auth: "user", owns: { from: "param", key: "id" } },
+  "GET /api/sessions/:id/messages": {
+    auth: "user",
+    owns: { from: "param", key: "id", access: "reader" },
+  },
+  // Deliberately NOT `reader`: being shown a conversation is not permission to
+  // destroy it, and this delete is a real unlink of the CLI's own jsonl.
   "DELETE /api/sessions/:id": { auth: "user", owns: { from: "param", key: "id" } },
+  // 决策 41：**发起共享是管理员动作**。不是"owner 管自己的会话"——
+  // 一个普通用户能共享的对象只有管理员（对方本来就全看得见）或另一个普通用户，
+  // 后者是在管理员背后重新分配可见性。这台机器上谁能看到什么，由管理员决定。
+  //
+  // ⚠️ `auth: "admin"` **不能替掉 `owns`**：中间件的 UUID 格式守卫长在 owns 里，
+  // 而它是刻意跑在管理员 bypass **之前**的（`DELETE /api/groups/%2e%2e%2f%2e%2e`
+  // 摸到 fs.rm(recursive) 那次就是这么来的）。管理员靠 bypass 过归属检查，
+  // 但格式检查照样要过。两个都留着。
+  "GET /api/sessions/:id/shares": { auth: "admin", owns: { from: "param", key: "id" } },
+  "PUT /api/sessions/:id/shares": { auth: "admin", owns: { from: "param", key: "id" } },
+  "POST /api/sessions/:id/transfer": { auth: "admin", owns: { from: "param", key: "id" } },
 
   // ── misc ──────────────────────────────────────────────────────────────────
   "POST /api/upload": { auth: "user", note: "writes only into the upload dir, name sanitised" },

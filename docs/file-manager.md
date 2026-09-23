@@ -9,8 +9,23 @@
 界面只该承载**人自己动手比让 agent 动手更快或更可信**的那部分：校对错字、决定要不要发出去。
 真实用户是不写代码的老师（`workspaces/rebecca`），不是开发者。
 
-**v1 做**：列本对话文件、预览、文本编辑、Office 编辑、批量删除、上传到本文件夹。
+**v1 做**：列本对话文件、预览、文本编辑、Office 编辑、批量删除、下载、上传到本文件夹。
 **v1 不做**：重命名、新建文件/文件夹、移动、多选拖拽、目录树导航、群聊会话的文件、回收站。
+
+> **v1 之后补上的（2026-09-10）**：**新建文件夹**（`POST /api/files/mkdir`）和
+> **移动**（`POST /api/files/move`）。两条都长在项目文件面板（`FileExplorer.tsx`）上，
+> 不是取件台列表。移动的手势就是**拖拽**：拖到文件夹＝移动（悬停 600ms 自动展开，
+> 拖到树的空白处＝移回根目录），拖到对话框＝插入相对路径（顺带取代了那颗 `@` 按钮的
+> 一半用途）。一度做过的「选中 → 移动按钮 → 目录选择弹窗」已经删掉——拖拽覆盖了它，
+> 而那条工具条在 180px 下放不下第五颗按钮。同一批还加了**重命名**
+> （`POST /api/files/rename`，悬停出现的铅笔 → 行内输入框，文件和文件夹都行），
+> 并**删掉了「@ 插入路径」那颗按钮**（拖到对话框是同一件事）。仍然不做：回收站。
+>
+> **删空文件夹（2026-09-23）**：文件夹行也能右键进多选，`POST /api/files/delete` 对目录
+> 只用 **`rmdir`**（不递归）——它自己拒绝非空目录，「空不空」和「删」是同一个系统调用，
+> 所以非空的一律原样留下并回「文件夹不是空的」。只剩 Finder 塞的 `.DS_Store` 算空；
+> 白名单规则的根目录本身不删。**递归删目录仍然不做**（这个仓库出过事故的形状）。
+> 选中里有文件夹时「下载」灰掉（`/download` 只收文件）。测试在 `server/files-delete-dir.test.ts`。
 
 ## 决策表
 
@@ -41,6 +56,8 @@
 | 15 | 打开的 tab ＝内存态，刷新即清 | 取件台是「进去取件、改完出来」，不欠「tab 指向的文件被删了」这类状态债 |
 | 16 | 列表刷新＝turn 结束自动刷 + 手动按钮，**不上 watcher** | 递归 watcher 在 launchd + macOS TCC 的雷区里（见 AGENTS.md） |
 | 17 | 去掉预览窗的「@ 插入」 | 用户定的 |
+| 18 | **下载＝右键多选里的一颗按钮**；选一个下那个文件，选多个由**服务端**打成一个 zip（`server/zip.ts`，store 不压缩、data descriptor、全程流式） | 用户原话「右键增加一个下载功能吧，现在只能删除不能下载呢」——操作挂在右键那套多选上（决策 13a），不另开一层右键菜单。**不做「连着触发 N 次下载」**：浏览器会把第二个之后的当弹窗拦，用户误点一次「阻止」之后所有下载都**静默**失败、页面这边收不到任何事件。zip 自己写而不加依赖，是因为只需要「把几个盘上的文件塞进一个壳」；不压缩是因为取件台里多半是 xlsx/docx/png（自身已压过），换来的是不用管压缩流的背压 |
+| 19 | **幻灯片多一颗「放映」按钮：最大化 + 真·全屏（Fullscreen API 打在我们自己的容器上）**，只对 `.pptx/.ppt/.odp` 且 ONLYOFFICE 在跑时出现；「最大化」保持原样（只铺满窗口） | 用户 2026-09-20 的原话「放映没有全屏啊」——原来只有「最大化」这一档，放映跑在右侧那一格里，16:9 的幻灯片按那格宽度缩成一小块、上下两条大黑边。**分成两颗而不是升级那一颗**：编辑 docx 时把地址栏一起吞掉只会碍事，而全屏这一层是有代价的——Esc 要按两下（容器自己的 zh.json 写着：「第一次按 Esc 键会退出浏览器全屏模式，第二次按 Esc 键会退出放映模式」），只让放映付。⚠️ **「开始放映」那一下只能用户自己点 ONLYOFFICE 工具栏的「开始幻灯片放映」**：api.js 的公开方法表里没有任何启动放映的命令（整表查过），跨源也没法替它按键——所以进去之后有一行 6 秒的提示。⚠️ 退出全屏时**只摘全屏、`maxed` 留着**：那时放映器多半还开着，这就缩回右侧那格等于又变回用户报的那张图 |
 
 ## 数据模型
 
@@ -96,7 +113,11 @@ turn 开始时记 `turnStartMs`；turn 收尾扫一遍 cwd，**`mtime >= turnSta
 | `GET /api/files?sessionId=` | 本对话文件列表 | 白名单外的行过滤掉 |
 | `PUT /api/files/content` | 保存文本 | 带 `ifMatch: {mtimeMs,size}`，不匹配回 409 |
 | `POST /api/files/delete` | 批量删除 | 真删 + 写 `file_deletions`；⚠️ 白名单在处理器里逐个查（见下） |
+| `GET /api/files/download?path=&path=` | 下载 | 一个＝原文件，多个＝zip；⚠️ `path` 可重复，而中间件只看第一个 → 白名单在处理器里逐个查（见下） |
 | `POST /api/files/upload` | 上传到会话 cwd | multipart |
+| `POST /api/files/mkdir` | 新建文件夹 | 落点过白名单（policy 声明 `paths: body.dir`）。**名字不合法就拒、重名回 409**——和上传的「消毒改名 + 加序号」刻意不同：上传的名字来自文件系统，这里的名字是用户刚敲的 |
+| `POST /api/files/rename` | 原地改名 | ⚠️ **同目录换名字也可能越界**（白名单是 glob，`x/*.md` 下 a.md→a.txt 就掉出去了），所以源和「改完之后」各查一次。撞名回 409（`fs.rename` 会静默覆盖）；名字没变当成功。目录改名时 `session_files` 里**它底下每一行**都跟着改（前缀替换） |
+| `POST /api/files/move` | 移动（可多选） | ⚠️ **源和目标各查一次白名单**（只查一头都能穿）；`paths` 是数组 → handlerScoped。⚠️ **`fs.rename` 会静默覆盖同名文件**，所以同名一律拒；跨设备 EXDEV 回退成 `cp` 成功后再 `rm`。`session_files` 里的路径跟着改（`relocateSessionFiles`，**不按 sessionId 过滤**——磁盘上只有一个文件） |
 | `GET /api/office/config?path=` | 下发 EditorConfig | cookie 鉴权，JWT 签名 |
 | `GET /api/office/download?ticket=` | **容器**取文件 | 票据鉴权（容器没有 cookie） |
 | `POST /api/office/callback?ticket=` | **容器**回调 | 验 JWT，只认 `status=6` |
@@ -132,7 +153,7 @@ cc-webui **没有实现那条路**，所以也**没有**这个环境变量——
 ```
 src/components/RightDock.tsx          App 层唯一一份，Splitter + 内部 tab 栏
 src/components/FileExplorer.tsx       右侧格「项目」标签：目录树 + 操作（多选删除、上传到当前
-                                      文件夹、刷新、@插入、单击在右侧打开、⌘+单击浮窗速览）
+                                      文件夹、刷新、@插入、下载、单击在右侧打开、⌘+单击浮窗速览）
                                       （原 files/FilesPanel.tsx 已删——决策 4 撤下）
 src/components/files/TextEditor.tsx   CodeMirror 6（动态 import）
 src/components/files/OfficeEditor.tsx ONLYOFFICE iframe

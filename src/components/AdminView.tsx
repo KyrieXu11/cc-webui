@@ -14,6 +14,13 @@ import {
   type SenderMapping,
 } from "../lib/admin";
 import type { Role } from "../lib/auth";
+import {
+  EFFORT_OPTIONS,
+  availableEffortOptions,
+  clampEffort,
+  modelOptionsForProvider,
+  type EffortLevel,
+} from "../lib/settings";
 
 interface Props {
   onClose: () => void;
@@ -154,7 +161,7 @@ function UsersSection({
     <>
       <SectionHead
         title="用户"
-        hint="目录白名单决定用户能在哪些文件夹里工作。它是使用便利，不是安全隔离——agent 有 shell，能读写服务进程用户能碰的一切。"
+        hint="目录白名单决定用户能在哪些文件夹里工作。它是使用便利，不是安全隔离——agent 有 shell，能读写服务进程用户能碰的一切。默认模型 / effort 只是默认值：对方下次打开页面（或切回这个标签页）时会换成你设的，之后自己改的会保留，直到你再保存。"
       />
 
       <div className="border border-line rounded-lg overflow-hidden mb-7">
@@ -294,6 +301,8 @@ function UserRow({
         )
       )}
 
+      <DefaultsRow user={user} busy={busy} onRun={onRun} />
+
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -382,6 +391,89 @@ function UserRow({
           删除
         </button>
       </div>
+    </div>
+  );
+}
+
+// 默认模型 / effort（决策 45-47）。只有 Claude 的模型：Codex 只有管理员能用，
+// 给普通账号设一个它选不了的模型没有意义。
+function DefaultsRow({
+  user,
+  busy,
+  onRun,
+}: {
+  user: AdminUser;
+  busy: boolean;
+  onRun: (fn: () => Promise<void>) => Promise<void>;
+}) {
+  const savedModel = user.defaults?.model ?? "";
+  const savedEffort = user.defaults?.effort ?? "";
+  const [model, setModel] = useState(savedModel);
+  const [effort, setEffort] = useState<string>(savedEffort);
+  useEffect(() => {
+    setModel(savedModel);
+    setEffort(savedEffort);
+  }, [savedModel, savedEffort]);
+
+  // 没指定模型时对方用什么模型都有可能，所以五档全给；指定了就只给那个模型有的档。
+  const efforts = model ? availableEffortOptions(model) : EFFORT_OPTIONS;
+  const dirty = model !== savedModel || effort !== savedEffort;
+
+  const pickModel = (next: string) => {
+    setModel(next);
+    // 换到没有当前这一档的模型（Sonnet 没有 xHigh）就往下落，和输入框里换模型同一条规则。
+    if (next && effort && !availableEffortOptions(next).some((o) => o.id === effort)) {
+      setEffort(clampEffort(effort as EffortLevel, next));
+    }
+  };
+
+  const selectClass =
+    "h-8 px-2 rounded-md bg-surface border border-line-strong text-[12.5px] text-fg outline-none";
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 mt-2.5">
+      <label className="flex items-center gap-1.5 text-[12px] text-muted">
+        默认模型
+        <select
+          value={model}
+          onChange={(e) => pickModel(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">不设置</option>
+          {modelOptionsForProvider("claude").map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.pinned ? m.label : `${m.label}（跟随最新）`}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1.5 text-[12px] text-muted">
+        默认 effort
+        <select
+          value={effort}
+          onChange={(e) => setEffort(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">不设置</option>
+          {efforts.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Ghost
+        disabled={busy || !dirty}
+        onClick={() =>
+          onRun(() =>
+            patchAdminUser(user.id, {
+              defaults: { model: model || null, effort: effort || null },
+            }),
+          )
+        }
+      >
+        保存默认
+      </Ghost>
     </div>
   );
 }

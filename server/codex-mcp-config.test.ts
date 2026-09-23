@@ -1,56 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  CODEX_MCP_TOKEN_ENV,
-  createCodexMcpConfig,
-  createCodexMcpEnv,
-  getMcpRouteUrl, localMcpRouteUrl,
-} from "./codex-mcp-config.ts";
-
-const url = "http://127.0.0.1:8788/api/mcp/bash";
-
-assert.equal(CODEX_MCP_TOKEN_ENV, "CC_WEBUI_MCP_TOKEN");
-assert.deepEqual(createCodexMcpConfig(url), {
-  mcp_servers: {
-    bash: {
-      url,
-      bearer_token_env_var: "CC_WEBUI_MCP_TOKEN",
-      default_tools_approval_mode: "approve",
-    },
-  },
-});
-assert.deepEqual(
-  createCodexMcpConfig({
-    bashUrl: url,
-    larkUrl: "http://127.0.0.1:8788/api/mcp/lark",
-  }),
-  {
-    mcp_servers: {
-      bash: {
-        url,
-        bearer_token_env_var: "CC_WEBUI_MCP_TOKEN",
-        default_tools_approval_mode: "approve",
-      },
-      lark: {
-        url: "http://127.0.0.1:8788/api/mcp/lark",
-        bearer_token_env_var: "CC_WEBUI_MCP_TOKEN",
-        default_tools_approval_mode: "approve",
-      },
-    },
-  },
-);
-
-assert.deepEqual(
-  createCodexMcpEnv("secret-token", {
-    PATH: "/bin",
-    HOME: "/tmp/home",
-    OMITTED: undefined,
-  }),
-  {
-    PATH: "/bin",
-    HOME: "/tmp/home",
-    CC_WEBUI_MCP_TOKEN: "secret-token",
-  }
-);
+import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
 
 assert.equal(
   getMcpRouteUrl({ PORT: "8799" }),

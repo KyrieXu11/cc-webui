@@ -2,13 +2,28 @@ import { useCallback, useEffect, useState } from "react";
 import Markdown from "../Markdown";
 import TextEditor from "./TextEditor";
 import OfficeEditor from "./OfficeEditor";
-import { isImageFile, isTextFile, rawFileUrl } from "../../lib/filepreview";
+import {
+  HTML_SANDBOX,
+  isHtmlFile,
+  isImageFile,
+  isPdfFile,
+  isTextFile,
+  rawFileUrl,
+  renderedHtmlUrl,
+} from "../../lib/filepreview";
+import ImageView from "../ImageView";
 import { readFileVersioned, saveFile } from "../../lib/files";
 
 // 右侧格里的一份文件：渲染 / 源码（可编辑）两种形态，一个开关切换。
 //
-// 和下午做的 FilePreviewWindow 合流的地方：**渲染 = Markdown.tsx，源码 =
-// CodeMirror**。不做两套 UI。
+// 和下午做的 FilePreviewWindow 合流的地方：**渲染 = Markdown.tsx / 沙箱 iframe，
+// 源码 = CodeMirror**。不做两套 UI。
+//
+// html 走的是 iframe，而且是 `/api/fs/raw?render=1` 这个 **URL**、不是把 draft
+// 塞进 srcdoc：srcdoc 只能拿到 /api/fs/read 那 256KB 的截断内容，而 agent 产出的
+// 单文件 html 内联了图表数据/base64 图片，过 256KB 是常态，截断后渲染出来是半张
+// 坏页面。代价是**渲染的是磁盘上那一版、不是编辑器里的草稿** —— 工具栏那行状态
+// 会把这件事说出来。
 //
 // 乐观锁的状态就在这里：打开时记下 mtimeMs+size，保存时带回去；409 就把「已被
 // agent 改过」摆在最显眼的地方，并且**不清掉用户的编辑**——那是他刚写的东西，
@@ -36,8 +51,12 @@ export default function DockFileView({
   onReload,
 }: Props) {
   const isMd = /\.(md|markdown|mdx)$/i.test(name);
+  const isHtml = isHtmlFile(name);
+  // 两种「有渲染档」的文件都默认落在渲染那一档：点开一个 .html 想看的是页面本身，
+  // 想看源码的人会自己切过去。
+  const previewable = isMd || isHtml;
   const editable = isTextFile(name);
-  const [rendered, setRendered] = useState(isMd);
+  const [rendered, setRendered] = useState(previewable);
   const [loaded, setLoaded] = useState<string | null>(null);
   const [draft, setDraft] = useState<string>("");
   const [version, setVersion] = useState<Version | null>(null);
@@ -90,16 +109,19 @@ export default function DockFileView({
     setConflict(r.message);
   }, [dirty, draft, path, truncated, version]);
 
-  // 图片：直接给 raw。
+  // 图片：和弹出式预览共用同一个查看器（缩放/旋转/拖动）。
   if (isImageFile(name)) {
+    return <ImageView url={rawFileUrl(path)} alt={name} />;
+  }
+
+  // PDF：浏览器自带的 viewer（见 lib/filepreview.ts 里 isPdfFile 的注释）。
+  if (isPdfFile(name)) {
     return (
-      <div className="h-full overflow-auto flex items-center justify-center p-4">
-        <img
-          src={rawFileUrl(path)}
-          alt={name}
-          className="max-w-full max-h-full object-contain"
-        />
-      </div>
+      <iframe
+        src={rawFileUrl(path)}
+        title={name}
+        className="w-full h-full border-0 bg-canvas"
+      />
     );
   }
 
@@ -146,7 +168,7 @@ export default function DockFileView({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line shrink-0">
-        {isMd && (
+        {previewable && (
           <button
             onClick={() => setRendered((v) => !v)}
             className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
@@ -158,7 +180,11 @@ export default function DockFileView({
           {truncated
             ? "文件过大，只读前 256KB —— 不可保存"
             : dirty
-              ? "未保存"
+              ? // 渲染 html 的 iframe 拉的是磁盘上那份，所以「未保存」在这一档
+                // 还意味着「你现在看到的不是你刚改的那版」，得说出来。
+                isHtml && rendered
+                ? "未保存 · 渲染的是磁盘上那版"
+                : "未保存"
               : savedAt
                 ? "已保存"
                 : "已同步"}
@@ -210,6 +236,16 @@ export default function DockFileView({
         <div className="p-4 text-[12px] text-red font-mono">{err}</div>
       ) : loaded === null ? (
         <div className="p-4 text-[12px] text-subtle">加载中…</div>
+      ) : rendered && isHtml ? (
+        // 沙箱见 lib/filepreview.ts 的 HTML_SANDBOX：**给了 allow-scripts 就绝不能
+        // 再给 allow-same-origin**，否则里面的脚本能把自己的沙箱拆掉，然后就站在
+        // 本站源上了。URL 用 version.mtimeMs 做 cache buster，保存完立刻能看到新的。
+        <iframe
+          src={renderedHtmlUrl(path, version?.mtimeMs)}
+          title={name}
+          sandbox={HTML_SANDBOX}
+          className="flex-1 min-h-0 w-full border-0 bg-white"
+        />
       ) : rendered ? (
         <div className="flex-1 min-h-0 overflow-auto px-4 py-3 text-[14px] leading-[1.75] text-fg md-body">
           <Markdown text={draft} />

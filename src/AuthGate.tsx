@@ -14,11 +14,13 @@ import {
   type AuthUser,
   type Me,
 } from "./lib/auth";
+import type { UserDefaults } from "./lib/user-defaults";
 
 type AuthValue = {
   user: AuthUser;
   allowedPaths: string[];
   isAdmin: boolean;
+  defaults: UserDefaults | null;
   signOut: () => void;
 };
 
@@ -61,6 +63,30 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
 
+  // 管理员改了这个账号的默认模型 / effort 之后，开着不动的标签页要能拿到新值
+  // （决策 46）——切回这个标签页时重新问一次。
+  //
+  // 两个「只」：
+  // · 只接受带着 user 的结果。getMe() 把网络失败也报成 {user:null}，照单全收的话
+  //   笔记本合盖醒来、或者服务正在重启的那几秒，切回标签页就会被踢到登录页。
+  //   真过期了下一次 /api 调用会 401，那条路径（上面）会处理。
+  // · 只在内容真的变了才 setMe，否则每次切回来整个工作台都要重渲染一遍。
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      getMe().then((next) => {
+        if (!next.user) return;
+        setMe((cur) =>
+          cur !== "loading" && JSON.stringify(cur) === JSON.stringify(next)
+            ? cur
+            : next,
+        );
+      });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   const signOut = useCallback(() => {
     void postLogout().then(() => setMe({ user: null }));
   }, []);
@@ -79,6 +105,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         user: me.user,
         allowedPaths: me.allowedPaths ?? [],
         isAdmin: me.user.role === "admin",
+        defaults: me.defaults ?? null,
         signOut,
       }}
     >

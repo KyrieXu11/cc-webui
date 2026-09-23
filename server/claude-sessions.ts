@@ -7,10 +7,12 @@
 // Layout: ~/.claude/projects/<slug>/<sessionId>.jsonl, append-only, one JSON
 // object per line. cc-webui only ever reads (and deletes whole sessions).
 
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
+import { createInterface } from "node:readline";
 import path from "node:path";
 import os from "node:os";
 import type { SessionSummary } from "./session-store.ts";
+import { splitAttachments } from "../src/lib/attachments.ts";
 
 // Overridable for tests, mirroring CODEX_SESSIONS_DIR / CC_WEBUI_GROUPS_DIR.
 export function projectsDir(): string {
@@ -49,6 +51,16 @@ export type ClaudeSessionMessage = {
   message: unknown;
   timestamp?: string;
   parent_tool_use_id: string | null;
+  /**
+   * 这一行里那个 content block 在 API 消息里的**真实下标**。
+   *
+   * ⚠️ CLI 把一条 API 消息拆成**一行一个 block** 写进 jsonl（实测 2.1.267：
+   * `[thinking]` / `[text]` / `[tool_use]` 三行共用同一个 `message.id`，每行
+   * content 长度都是 1），所以行内下标恒为 0 —— 真实下标只剩这个字段记着。
+   * 前端拿它拼事件 id，好和流式那一侧的 `stream_event.event.index` 对齐；
+   * 丢了它，同一段话会被渲染两遍（见 src/lib/processor.ts 的注释）。
+   */
+  api_block_index?: number;
 };
 
 // Everything else on a line is bookkeeping cc-webui does not render
@@ -68,6 +80,7 @@ const ECHO_PREFIXES = [
 
 type RawLine = {
   type?: unknown;
+  apiBlockIndex?: unknown;
   sessionId?: unknown;
   uuid?: unknown;
   timestamp?: unknown;
@@ -130,11 +143,21 @@ function toMessage(o: RawLine): ClaudeSessionMessage | null {
     session_id: typeof o.sessionId === "string" ? o.sessionId : "",
     message: o.message,
     timestamp: typeof o.timestamp === "string" ? o.timestamp : undefined,
+    api_block_index:
+      typeof o.apiBlockIndex === "number" ? o.apiBlockIndex : undefined,
   };
 }
 
-function summarize(prompt: string): string {
-  const compact = prompt.replace(/\s+/g, " ").trim();
+// 没有 ai-title 时，标题退回第一条消息。那条消息如果带着附件，开头是一整段
+// 「附件：- /var/folders/…/cc-webui-uploads/…」（Composer 写给 agent 看的），直接压成
+// 标题就是一行临时目录路径（用户 2026-09-23 截图里侧栏那条）。所以先剥掉附件那段：
+// 有正文用正文，只发了附件就用文件名。
+export function summarize(prompt: string): string {
+  const { files, body } = splitAttachments(prompt);
+  const text = files.length
+    ? body.trim() || files.map((f) => f.name).join("、")
+    : prompt;
+  const compact = text.replace(/\s+/g, " ").trim();
   return compact.length > 80 ? compact.slice(0, 79) + "..." : compact;
 }
 
@@ -198,45 +221,98 @@ async function findSessionFile(
   return null;
 }
 
-// Enough of the head to find the first user prompt without reading a
-// multi-megabyte transcript.
+// 头部要找的两样东西：`cwd` 和第一条**真**用户消息（meta / 注入的不算）。
+type Head = { cwd?: string; firstPrompt: string };
+
+// 吃一行，返回「两样都齐了」。两条读法共用它。
+function takeHead(head: Head, line: string): boolean {
+  const o = parseLine(line);
+  if (o) {
+    if (!head.cwd && typeof o.cwd === "string") head.cwd = o.cwd;
+    if (
+      !head.firstPrompt &&
+      o.type === "user" &&
+      !isHiddenUserLine(o) &&
+      !isInjectedUserLine(o)
+    ) {
+      head.firstPrompt = firstUserText(o.message).trim();
+    }
+  }
+  return !!head.cwd && !!head.firstPrompt;
+}
+
+// 快路径：一次 pread 读头 256KB。实测本机 979 个 jsonl 里 975 个在这一窗里就齐了，
+// 所以这条路径决定了列表和顶栏搜索的耗时（978 条全拿 ≈ 840ms）。
 const HEAD_BYTES = 256 * 1024;
+
+async function readHeadWindow(file: string): Promise<Head> {
+  const head: Head = { firstPrompt: "" };
+  const fh = await fs.open(file, "r");
+  let text: string;
+  try {
+    const buf = Buffer.alloc(HEAD_BYTES);
+    const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);
+    text = buf.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await fh.close();
+  }
+  for (const line of text.split("\n")) {
+    if (takeHead(head, line)) break;
+  }
+  return head;
+}
+
+// 慢路径，只在上面那一窗**什么都没捞到**时走（979 里 4 个）。
+//
+// ⚠️⚠️ 为什么需要它（2026-09-07 用户报的「怎么看不到 rebecca 的会话了」）：CLI 把
+// `queue-operation` 写在文件最前面——那是排队中的消息，带图片附件时**一条就上百
+// KB**，两条就填满 256KB 的窗口。于是窗口里一个 cwd、一个 user 行都不剩 →
+// `summaryFor` 返回 null → **这条会话在侧栏和顶栏搜索里彻底消失**，而文件好好地
+// 躺在盘上（本机中招 3 条，最大那条 7.2MB 正是用户天天在用的）。
+// 所以兜底的这条按**行**扫、拿到就停，不再有「固定窗口」这个前提。
+//
+// 行数/字节数只是上界，防的是「一个几十 MB、从头到尾没有任何消息行的文件被整读」。
+const MAX_HEAD_LINES = 500;
+const MAX_HEAD_BYTES = 8 * 1024 * 1024;
+
+async function scanHead(file: string): Promise<Head> {
+  const head: Head = { firstPrompt: "" };
+  const stream = createReadStream(file, { encoding: "utf-8" });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  let lines = 0;
+  let bytes = 0;
+  try {
+    for await (const line of rl) {
+      lines++;
+      bytes += line.length + 1;
+      if (takeHead(head, line)) break;
+      // 上界的检查放在处理**之后**：哪怕第一行自己就超了预算，它也已经被看过
+      // 一眼——带 cwd 的往往正是那一行。
+      if (lines >= MAX_HEAD_LINES || bytes >= MAX_HEAD_BYTES) break;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return head;
+}
 
 async function summaryFor(
   file: string,
   mtimeMs: number
 ): Promise<SessionSummary | null> {
   const sessionId = path.basename(file, ".jsonl");
-  let head: string;
+  let head: Head;
   try {
-    const fh = await fs.open(file, "r");
-    try {
-      const buf = Buffer.alloc(HEAD_BYTES);
-      const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);
-      head = buf.subarray(0, bytesRead).toString("utf8");
-    } finally {
-      await fh.close();
-    }
+    head = await readHeadWindow(file);
+    if (!head.cwd && !head.firstPrompt) head = await scanHead(file);
   } catch {
+    // readdir 与读之间文件消失了。
     return null;
   }
-
-  let cwd: string | undefined;
-  let firstPrompt = "";
-  for (const line of head.split("\n")) {
-    const o = parseLine(line);
-    if (!o) continue;
-    if (!cwd && typeof o.cwd === "string") cwd = o.cwd;
-    if (
-      !firstPrompt &&
-      o.type === "user" &&
-      !isHiddenUserLine(o) &&
-      !isInjectedUserLine(o)
-    ) {
-      firstPrompt = firstUserText(o.message).trim();
-    }
-    if (cwd && firstPrompt) break;
-  }
+  const { cwd, firstPrompt } = head;
+  // 两样都没有 = 文件里除了 bookkeeping 什么都没有（起了个会话、一个 turn 都没
+  // 跑完）。没有可显示的东西，不进列表。
   if (!cwd && !firstPrompt) return null;
 
   // The CLI writes its generated conversation title as `ai-title` lines — one

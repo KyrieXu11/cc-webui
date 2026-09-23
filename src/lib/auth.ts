@@ -1,3 +1,5 @@
+import type { UserDefaults } from "./user-defaults";
+
 export type Role = "admin" | "user";
 
 export type AuthUser = {
@@ -7,7 +9,12 @@ export type AuthUser = {
   createdAt: number;
 };
 
-export type Me = { user: AuthUser | null; allowedPaths?: string[] };
+export type Me = {
+  user: AuthUser | null;
+  allowedPaths?: string[];
+  // 管理员给这个账号设的默认模型 / effort；没设是 null（见 user-defaults.ts）。
+  defaults?: UserDefaults | null;
+};
 
 export async function getMe(): Promise<Me> {
   try {

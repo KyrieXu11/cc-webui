@@ -583,6 +583,22 @@ export function sessionMessagesToEvents(
       const content = msg?.content;
       if (Array.isArray(content)) {
         const messageId = msg?.id ?? claudeMsg.uuid;
+        // ⚠️⚠️ **jsonl 里一行只有一个 content block**（实测 CLI 2.1.267：一条 API
+        // 消息的 thinking / text / tool_use 各写一行，共用同一个 message.id，每行
+        // content 长度都是 1），所以行内下标 `i` 恒为 0，真实下标在 `apiBlockIndex`。
+        //
+        // 事件 id 必须用**真实下标**，否则和流式那一侧（`stream_event` 用的是
+        // `event.index`）对不上：历史里的正文是 `a-<mid>-0`，重放出来的是
+        // `a-<mid>-1`，两个事件、同一段话，界面上就是**同一句话出现两遍**。
+        // 触发条件很日常：**打开一个正在跑的会话** —— openSession 先灌整段历史，
+        // 紧接着 attach 又把整个 buffer 重放一遍（用户 2026-09-10 报的那张图）。
+        // 刷新页面反而不会，因为那条路会用 beforeMs 把本 turn 的历史截掉。
+        //
+        // 老 CLI 的记录没有这个字段，退回 `i`（那时候 content 是完整数组，i 就是真值）。
+        const blockBase =
+          typeof claudeMsg.api_block_index === "number"
+            ? claudeMsg.api_block_index
+            : 0;
         const thinkingTokens =
           typeof msg?.usage?.output_tokens_details?.thinking_tokens === "number"
             ? msg.usage.output_tokens_details.thinking_tokens
@@ -590,13 +606,13 @@ export function sessionMessagesToEvents(
         content.forEach((b, i) => {
           if (b?.type === "text" && b.text) {
             events.push({
-              id: `a-${messageId}-${i}`,
+              id: `a-${messageId}-${blockBase + i}`,
               type: "assistant",
               text: b.text,
             });
           } else if (b?.type === "thinking" && b.thinking) {
             events.push({
-              id: `t-${messageId}-${i}`,
+              id: `t-${messageId}-${blockBase + i}`,
               type: "thinking",
               text: b.thinking,
             });
@@ -605,7 +621,7 @@ export function sessionMessagesToEvents(
             // message's usage kept the token count, so history can still show
             // the same status row the live stream did.
             events.push({
-              id: `t-${messageId}-${i}`,
+              id: `t-${messageId}-${blockBase + i}`,
               type: "thinking",
               text: "",
               tokens: thinkingTokens,

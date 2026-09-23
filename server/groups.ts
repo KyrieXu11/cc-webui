@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { currentUser } from "./auth/middleware.ts";
+import { currentUser, isAdmin } from "./auth/middleware.ts";
 import { recordOwner } from "./auth/ownership.ts";
 import { visibilityFor } from "./auth/scope.ts";
 import type { Context } from "hono";
@@ -21,8 +21,13 @@ import {
   readConfig,
   writeConfig,
   validateConfig,
+  usesBypass,
   type GroupConfig,
 } from "./groups/config.ts";
+
+// 决策 12（详见 server/chat.ts 里那段注释）：bypass 让 CLI 连 canUseTool 都不调，
+// 权限卡和 auto 的分类器一起消失。
+const BYPASS_DETAIL = "Bypass 模式仅管理员可用，请给这个 agent 换一个权限模式。";
 import { createGroup, clearSessionsForModelChanges } from "./groups/lifecycle.ts";
 import {
   startTurn,
@@ -74,6 +79,9 @@ groups.post("/", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const cwd =
     expandHome(body.cwd) || process.env.CC_WEBUI_CWD || process.cwd();
+  if (Array.isArray(body.participants) && usesBypass(body.participants) && !isAdmin(c)) {
+    return c.json({ error: "forbidden", detail: BYPASS_DETAIL }, 403);
+  }
   const id = await createGroup({
     title: body.title || "新群聊",
     cwd,
@@ -123,6 +131,9 @@ groups.patch("/:gid/config", async (c) => {
     createdAt: old.createdAt,
     updatedAt: Date.now(),
   };
+  if (usesBypass(merged.participants) && !isAdmin(c)) {
+    return c.json({ error: "forbidden", detail: BYPASS_DETAIL }, 403);
+  }
   validateConfig(merged);
   await writeConfig(merged);
   // A model change invalidates the resumed native session (it was recorded

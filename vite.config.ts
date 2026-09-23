@@ -13,6 +13,12 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 8787,
+    // 和生产同款（server/app.ts 里那条 middleware 有完整理由）：不把 fullscreen
+    // 委派给 ONLYOFFICE 的跨源 iframe，这样 PPT 放映按一下 Esc 就退出。
+    // ⚠️ 开发期少了这一条，放映的行为会和生产不一样（要按两下），很难当场看出来。
+    headers: {
+      "Permissions-Policy": "fullscreen=(self)",
+    },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8788",

@@ -8,12 +8,19 @@ import {
   deleteUser,
   getAllowedPaths,
   getUserById,
+  getUserDefaults,
   listUsers,
   setAllowedPaths,
   setPassword,
   setRole,
+  setUserDefaults,
   type Role,
 } from "./auth/users.ts";
+import {
+  EFFORT_OPTIONS,
+  availableEffortOptions,
+  modelOptionsForProvider,
+} from "../src/lib/settings.ts";
 import { claimUnowned, resourceIdsOwnedBy } from "./auth/ownership.ts";
 import { listAllOpenedProjects } from "./opened-projects.ts";
 import {
@@ -46,6 +53,39 @@ function asPatterns(v: unknown): string[] | undefined {
   return v.filter((x): x is string => typeof x === "string");
 }
 
+type DefaultsInput = { model: string | null; effort: string | null };
+
+// PATCH body `defaults` → what to store, or why not. Checked against the same
+// option table the composer offers (src/lib/settings.ts), so the admin page
+// can never store a model the picker would not show, or an effort that model
+// does not have (Sonnet has no xhigh). "" and absent both mean "not set".
+function parseDefaults(
+  raw: unknown,
+): { ok: true; value: DefaultsInput } | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, error: "defaults must be an object" };
+  }
+  const blank = (v: unknown) => v === undefined || v === null || v === "";
+  const { model, effort } = raw as { model?: unknown; effort?: unknown };
+  if (
+    !blank(model) &&
+    !modelOptionsForProvider("claude").some((o) => o.id === model)
+  ) {
+    return { ok: false, error: "unknown model" };
+  }
+  const m = blank(model) ? null : (model as string);
+  if (!blank(effort)) {
+    const allowed = m ? availableEffortOptions(m) : EFFORT_OPTIONS;
+    if (!allowed.some((o) => o.id === effort)) {
+      return {
+        ok: false,
+        error: m ? "effort not available for this model" : "unknown effort",
+      };
+    }
+  }
+  return { ok: true, value: { model: m, effort: blank(effort) ? null : (effort as string) } };
+}
+
 // How many admins remain if `excludingId` were removed or demoted. Guards below
 // use it so the last admin cannot lock everyone out — there is no password
 // reset channel on a single-machine deployment, so that mistake is permanent
@@ -67,6 +107,7 @@ adminRoutes.get("/users", (c) => {
       allowedPaths: all.filter((p) => p !== managed),
       workspace: managed ? { dir: workspaceDirFor(u.username), pattern: managed } : null,
       ownedResources: resourceIdsOwnedBy(u.id).size,
+      defaults: getUserDefaults(u.id),
     };
   });
   return c.json({ users });
@@ -146,6 +187,15 @@ adminRoutes.patch("/users/:id", async (c) => {
   if (!target) return c.json({ error: "not found" }, 404);
   const body = await c.req.json().catch(() => ({}));
 
+  // Validated before anything below writes: a bad `defaults` must not leave
+  // the role / password half of the same request applied.
+  let defaults: DefaultsInput | undefined;
+  if (body.defaults !== undefined) {
+    const parsed = parseDefaults(body.defaults);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    defaults = parsed.value;
+  }
+
   if (isRole(body.role) && body.role !== target.role) {
     if (target.role === "admin" && otherAdminCount(id) === 0) {
       return c.json({ error: "cannot demote the last admin" }, 409);
@@ -188,6 +238,8 @@ adminRoutes.patch("/users/:id", async (c) => {
     setAllowedPaths(id, keep ? [keep, ...manual] : manual);
   }
 
+  if (defaults) setUserDefaults(id, defaults);
+
   const all = getAllowedPaths(id);
   const managed = workspacePatternIn(target.username, all);
   return c.json({
@@ -197,6 +249,7 @@ adminRoutes.patch("/users/:id", async (c) => {
       workspace: managed
         ? { dir: workspaceDirFor(target.username), pattern: managed }
         : null,
+      defaults: getUserDefaults(id),
     },
   });
 });

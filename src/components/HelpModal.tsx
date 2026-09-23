@@ -1,43 +1,97 @@
 import { useEffect } from "react";
+import { useAuth } from "../AuthGate";
 
 interface Props {
   onClose: () => void;
 }
 
-const SHORTCUTS: Array<[string, string]> = [
-  ["↵", "发送消息"],
-  ["⇧↵", "换行"],
-  ["Ctrl+B", "把当前运行中的前台 bash 转成后台任务（无前台任务时忽略）"],
-  ["Ctrl+O", "展开 / 收起所有 tool_call + thinking"],
-  ["/", "调出斜杠命令 / skill 菜单"],
-  ["↑ ↓ ↵", "在搜索 / 菜单 / 对话框中导航"],
-  ["Esc", "关闭弹窗 / 菜单 / 预览浮窗"],
-  ["Backspace（@path 末尾）", "整段删除引用"],
-];
+// 操作手册。**写的是现在真实的交互**，改了哪个手势就回来改这里 ——
+// 上一版还写着「单击文件 → 插入 @路径」，而那颗行为早就变成「在右侧打开」了。
+type Section = {
+  title: string;
+  rows: Array<[string, string]>;
+  note?: string;
+  /** 只给管理员看：普通账号根本碰不到这些入口，写出来只会让人找不到。 */
+  adminOnly?: boolean;
+};
 
-const COMPOSER_ACTIONS: Array<[string, string]> = [
-  ["蓝色 ↑", "发送（未生成时）"],
-  ["红色 ■", "停止当前生成（仅丢弃未完成的文本，已流出的保留显示）"],
-  ["+", "附加图片 / 文件"],
-];
-
-const FILE_TREE: Array<[string, string]> = [
-  ["单击文件", "把 @相对路径 插入到对话框"],
-  ["Ctrl / ⌘ + 单击文件", "打开文件预览浮窗（文本 / 图片）"],
-  ["单击对话图片", "在浮窗中放大预览对话中的图片"],
-  ["浮窗标题栏拖拽", "移动预览浮窗"],
-  ["浮窗右下角拖拽", "调整预览浮窗大小"],
-  ["浮窗 @ 插入按钮", "把当前预览文件插入对话框（仅文件树预览）"],
-];
-
-const LOCAL_COMMANDS: Array<[string, string]> = [
-  ["/skills", "打开 skill 选择器，点击后插入 /<skill>"],
-  ["/help", "打开这个帮助窗"],
-  ["/clear", "开启新会话（保留当前项目）"],
-  ["/exit", "关闭项目，返回主页"],
+const SECTIONS: Section[] = [
+  {
+    title: "键盘快捷键",
+    rows: [
+      ["↵", "发送；上一轮还在跑时＝排队，这一轮跑完自动发出"],
+      ["⇧↵", "换行"],
+      ["⌘K / Ctrl+K", "首页：跳到搜索框"],
+      ["Ctrl+O", "展开 / 收起所有工具步骤和思考"],
+      ["Ctrl+B", "把正在跑的前台 bash 转成后台任务（没有前台任务时忽略）"],
+      ["/", "调出斜杠命令 / skill 菜单"],
+      ["↑ ↓ ↵", "在搜索 / 菜单 / 对话框里上下选、回车打开"],
+      ["Esc", "关闭弹窗 / 菜单 / 预览；文件面板里退出多选"],
+      ["Backspace（@路径 末尾）", "整段删掉这个路径引用"],
+    ],
+  },
+  {
+    title: "对话框",
+    rows: [
+      ["蓝色 ↑", "发送"],
+      ["红色 ■", "停止当前生成：已经出来的文字保留；排队的消息不丢，只是先停住"],
+      ["排队里的「发送」", "不等这一轮跑完，现在就插进正在跑的这一轮（Claude 才有）"],
+      ["+", "附加图片 / 文件（也可以直接粘贴、拖进来）"],
+      ["底栏 模型 · 模式 · effort", "模型分两组：「跟随最新」会随官方升级自动换新版；「固定版本」一直是那一版"],
+      ["思考状态行「· xhigh effort」", "这一轮实际用的档位（看别人的对话时也是对方那一轮的）"],
+    ],
+  },
+  {
+    title: "附件",
+    rows: [
+      ["图片", "直接发给模型看"],
+      ["其他文件（PDF、Word…）", "气泡里只显示文件名，鼠标停在上面能看到完整路径"],
+    ],
+    note:
+      "⚠️ 通过对话框「+」上传的文件放在临时目录，大约 3 天后会被系统自动清掉。需要反复用的资料，请用文件面板的「上传」放进项目里。",
+  },
+  {
+    title: "文件面板（右上角按钮打开，只在项目里有）",
+    rows: [
+      ["单击文件", "在右侧打开：文本可以直接改，.md / .html 可以切到渲染看，Office 文档在右侧打开"],
+      ["⌘ / Ctrl + 单击文件", "浮窗速览"],
+      ["单击文件夹", "展开 / 收起，同时把它设为「上传」「新建文件夹」的位置"],
+      ["右键文件或文件夹", "进入多选（再右键或勾选继续加选）"],
+      ["多选 → 下载", "一个文件直接下载，多个打包成 zip（文件夹不能下载）"],
+      ["多选 → 删除", "真删、没有回收站；文件夹只能删空的，不空的会原样留下"],
+      ["拖到文件夹 / 拖到对话框", "拖到文件夹＝移动；拖到对话框＝插入文件路径"],
+      ["悬停出现的铅笔", "重命名"],
+    ],
+  },
+  {
+    title: "项目记忆",
+    rows: [
+      ["左侧竖栏的书本图标", "查看 Claude 在这个项目里记下的偏好和经验（只读，不能改）：左边按索引列出每一条，右边看正文，正文里的链接可以跳到相关的那条"],
+    ],
+  },
+  {
+    title: "本地命令（cc-webui）",
+    rows: [
+      ["/skills", "打开 skill 选择器，点击后插入 /<skill>"],
+      ["/help", "打开这个手册"],
+      ["/clear", "开启新会话（保留当前项目）"],
+      ["/exit", "关闭项目，返回主页"],
+    ],
+    note: "输入 / 可以看到所有命令：上面这几条由 cc-webui 自己处理，其余的原样交给 claude 命令行。",
+  },
+  {
+    title: "管理员",
+    adminOnly: true,
+    rows: [
+      ["管理 → 用户 → 默认模型 / effort", "给某个账号设默认值：对方下次打开页面（或切回标签页）时换成你设的，之后对方自己改的会保留，直到你再保存"],
+      ["顶栏「共享」", "把会话共享给别的账号：对方能看、能接着聊，但删不掉、也不能再共享"],
+      ["管理 → 用户 → 目录白名单", "决定对方能在哪些文件夹里工作（是使用上的便利，不是安全隔离）"],
+    ],
+  },
 ];
 
 export default function HelpModal({ onClose }: Props) {
+  const { isAdmin } = useAuth();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -48,17 +102,15 @@ export default function HelpModal({ onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] bg-black/55 backdrop-blur-[2px] flex items-start justify-center pt-[12vh] p-4"
+      className="fixed inset-0 z-[100] bg-black/55 backdrop-blur-[2px] flex items-start justify-center pt-[10vh] p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[560px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[640px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-          <h3 className="text-fg text-[15px] font-semibold tracking-tight">
-            快捷键 & 命令
-          </h3>
+          <h3 className="text-fg text-[15px] font-semibold tracking-tight">操作手册</h3>
           <button
             onClick={onClose}
             aria-label="关闭"
@@ -74,84 +126,28 @@ export default function HelpModal({ onClose }: Props) {
             </svg>
           </button>
         </div>
-        <div className="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
-          <section>
-            <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
-              键盘快捷键
-            </h4>
-            <dl className="text-[13px]">
-              {SHORTCUTS.map(([key, desc]) => (
-                <div
-                  key={key}
-                  className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
-                >
-                  <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">
-                    {key}
-                  </dt>
-                  <dd className="text-muted">{desc}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-          <section>
-            <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
-              对话框按钮
-            </h4>
-            <dl className="text-[13px]">
-              {COMPOSER_ACTIONS.map(([key, desc]) => (
-                <div
-                  key={key}
-                  className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
-                >
-                  <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">
-                    {key}
-                  </dt>
-                  <dd className="text-muted">{desc}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-          <section>
-            <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
-              文件树 & 预览
-            </h4>
-            <dl className="text-[13px]">
-              {FILE_TREE.map(([key, desc]) => (
-                <div
-                  key={key}
-                  className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
-                >
-                  <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">
-                    {key}
-                  </dt>
-                  <dd className="text-muted">{desc}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-          <section>
-            <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
-              本地命令（cc-webui）
-            </h4>
-            <dl className="text-[13px]">
-              {LOCAL_COMMANDS.map(([cmd, desc]) => (
-                <div
-                  key={cmd}
-                  className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
-                >
-                  <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">
-                    {cmd}
-                  </dt>
-                  <dd className="text-muted">{desc}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="text-[12px] text-subtle mt-3 leading-relaxed">
-              输入 <span className="font-mono">/</span> 可看到所有可用命令,
-              其中 SDK 提供的命令会被原样发给 claude-agent-sdk;
-              以上本地命令由 cc-webui 拦截执行。
-            </p>
-          </section>
+        <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          {SECTIONS.filter((s) => !s.adminOnly || isAdmin).map((s) => (
+            <section key={s.title}>
+              <h4 className="text-[11px] font-mono text-subtle uppercase tracking-[0.08em] mb-2">
+                {s.title}
+              </h4>
+              <dl className="text-[13px]">
+                {s.rows.map(([key, desc]) => (
+                  <div
+                    key={key}
+                    className="flex items-baseline gap-4 py-1.5 border-b border-line last:border-b-0"
+                  >
+                    <dt className="font-mono text-[12px] text-fg w-[180px] shrink-0">{key}</dt>
+                    <dd className="text-muted leading-relaxed">{desc}</dd>
+                  </div>
+                ))}
+              </dl>
+              {s.note && (
+                <p className="text-[12px] text-subtle mt-2.5 leading-relaxed">{s.note}</p>
+              )}
+            </section>
+          ))}
         </div>
       </div>
     </div>

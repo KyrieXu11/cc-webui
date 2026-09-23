@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Extension } from "@codemirror/state";
 import { appSyntaxHighlighting } from "./highlight";
+import { isStaleChunkError, reloadIfStaleBuild } from "../../lib/stale-build";
 
 // CodeMirror 6 的薄包装。**动态 import**：主 bundle 不为一个校对场景涨 200KB
 // （决策 7），只有真正打开编辑器时才拉那个 chunk。
@@ -213,7 +214,10 @@ export default function TextEditor({
         });
         view = v;
       } catch (err) {
-        // 懒加载的 chunk 拉不到（离线、缓存坏了）不该只剩一块白板。
+        // 最常见的一种「拉不到」是**页面比服务端旧**（部署换了 chunk 文件名），
+        // 那种情况唯一的修法是重新加载，报错文案再准也没用。
+        if (reloadIfStaleBuild(err)) return;
+        // 剩下的（离线、缓存坏了）不该只剩一块白板，降级成 textarea。
         if (!cancelled) {
           setFailed(err instanceof Error ? err.message : String(err));
         }
@@ -233,6 +237,11 @@ export default function TextEditor({
       <div className="p-4 space-y-2">
         <div className="text-[12px] text-red font-mono">
           编辑器加载失败：{failed}
+          {isStaleChunkError(failed) && (
+            <div className="mt-1 text-muted">
+              刷新页面通常就好了（服务端更新过，这个标签页还是旧的那一份）。
+            </div>
+          )}
         </div>
         <textarea
           defaultValue={initial}

@@ -445,6 +445,9 @@ export const claudeExecutor: Executor = {
     };
 
     const endStdin = () => {
+      // 收回插话句柄要和关管子同一时刻：管子一关，再写进去的东西这一轮永远读不到,
+      // 而调用方拿着一个「写了返回 true、其实没人收」的句柄比拿不到更糟。
+      opts.onSteer?.(null);
       if (!child.stdin.destroyed && child.stdin.writable) child.stdin.end();
     };
 
@@ -582,7 +585,21 @@ export const claudeExecutor: Executor = {
 
     if (useStdin) {
       writeLine(JSON.parse(buildPromptMessage(opts)));
-      // stdin stays open: the control protocol answers on it mid-turn.
+      // stdin stays open: the control protocol answers on it mid-turn — and
+      // that same open pipe is what makes mid-turn steering possible. The CLI
+      // queues whatever arrives on it, so one extra line is the whole feature.
+      opts.onSteer?.((text) => {
+        if (!text.trim()) return false;
+        if (child.stdin.destroyed || !child.stdin.writable) return false;
+        // Images deliberately dropped: a steer is a text nudge, and the caller
+        // (chat.ts) already refuses non-text payloads on that route.
+        writeLine(
+          JSON.parse(
+            buildPromptMessage({ ...opts, prompt: text, images: undefined }),
+          ),
+        );
+        return true;
+      });
     } else {
       endStdin();
     }
@@ -621,6 +638,9 @@ export const claudeExecutor: Executor = {
         },
       };
     } finally {
+      // 兜底：abort / timeout / spawn 失败都走不到 endStdin，句柄不收回就会留在
+      // in-flight 表里指着一个死进程。
+      opts.onSteer?.(null);
       if (timer) clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       opts.signal.removeEventListener("abort", onAbort);

@@ -238,12 +238,18 @@ assert.equal(
   "删掉的文件立刻从列表消失，不等下一个 turn 的 prune"
 );
 
-// 目录不许删（v1 不做，且 recursive 删目录是这个仓库出过事故的形状）。
+// **非空**目录不许删：只开放空文件夹（rmdir，不递归）—— recursive 删目录是这个
+// 仓库出过事故的形状。空文件夹那一半在 files-delete-dir.test.ts。
 const dirTarget = path.join(mine, "adir");
 await fsp.mkdir(dirTarget, { recursive: true });
+await fsp.writeFile(path.join(dirTarget, "keep.md"), "keep");
 const delDir = await post(alice, "/api/files/delete", { paths: [dirTarget] });
 assert.deepEqual(delDir.body.deleted, []);
-assert.equal(await exists(dirTarget), true, "目录还在");
+assert.equal(
+  await exists(path.join(dirTarget, "keep.md")),
+  true,
+  "非空目录里的东西一个都不能少"
+);
 
 // 空 paths → 400，不是「什么都没删算成功」。
 assert.equal(
@@ -294,6 +300,71 @@ assert.equal(
   (await upload(alice, path.join(mine, "nodir"), "a.txt", "x")).status,
   404
 );
+
+// ── GET /download：白名单逐个查 + 单个/打包两条路径 ─────────────────────────
+//
+// ⚠️ 这一段里最重要的是「第二个 path 也被查了」那条。`path` 是可重复的 query，
+// 而中间件的 valueFrom 只看第一个值 —— 也就是说这条路由**不可能**靠 policy 表里
+// 的 paths 声明保护，一旦有人把处理器里的循环改成只查一个，别人的文件就能被
+// `?path=我的&path=别人的` 顺出来。
+
+const download = async (user: unknown, paths: string[]) => {
+  const qs = paths.map((p) => `path=${encodeURIComponent(p)}`).join("&");
+  return appFor(user).request(`/api/files/download?${qs}`);
+};
+
+const one = await download(alice, [okFile]);
+assert.equal(one.status, 200);
+assert.equal(one.headers.get("content-type"), "application/octet-stream");
+assert.match(one.headers.get("content-disposition") ?? "", /^attachment; filename="plan.md"/);
+assert.equal(await one.text(), "第一版", "流回来的就是盘上那份");
+
+// 中文名必须走 filename*（只写 filename= 的话浏览器存下来是乱码）。
+const cn = await download(alice, [path.join(mine, "模板.docx")]);
+assert.equal(cn.status, 200);
+assert.equal(
+  cn.headers.get("content-disposition"),
+  `attachment; filename="__.docx"; filename*=UTF-8''%E6%A8%A1%E6%9D%BF.docx`
+);
+
+// `(` `)` 不是 RFC 5987 的 attr-char，而 encodeURIComponent 不转义它们 ——
+// 漏了这一步，带括号的中文名在部分浏览器上会被截断（这个仓库里「报告 (最终).md」
+// 这种名字很常见）。
+await fsp.writeFile(path.join(mine, "报告 (最终).md"), "x");
+const parens = await download(alice, [path.join(mine, "报告 (最终).md")]);
+assert.equal(
+  parens.headers.get("content-disposition"),
+  `attachment; filename="__ (__).md"; filename*=UTF-8''%E6%8A%A5%E5%91%8A%20%28%E6%9C%80%E7%BB%88%29.md`
+);
+
+// 白名单外 → 403。
+assert.equal((await download(alice, [outsideFile])).status, 403);
+
+// **混一个白名单外的进来 → 整条请求 403**，不是「悄悄少打包一个」：
+// 下载少了一个文件是看不见的，用户要到解压之后才发现。
+const mixed = await download(alice, [okFile, outsideFile]);
+assert.equal(mixed.status, 403, "第二个 path 也要过白名单");
+
+// bob 的白名单覆盖整个 tmp，同一个请求对他就是合法的 —— 说明上面拦掉的确实是
+// 白名单，不是别的什么东西顺手挡住了。
+assert.equal((await download(bob, [okFile, outsideFile])).status, 200);
+
+// 多个 → zip。
+const many = await download(alice, [okFile, path.join(mine, "模板.docx")]);
+assert.equal(many.status, 200);
+assert.equal(many.headers.get("content-type"), "application/zip");
+assert.match(many.headers.get("content-disposition") ?? "", /\.zip"/);
+const zipBytes = Buffer.from(await many.arrayBuffer());
+assert.equal(zipBytes.subarray(0, 4).toString("hex"), "504b0304", "是个真 zip");
+// 结构与 crc 由 zip.test.ts 拿系统 unzip 验，这里只确认条目数对得上。
+assert.equal(zipBytes.readUInt16LE(zipBytes.length - 22 + 10), 2);
+
+// 目录 → 400（v1 不做，且树上也选不中）。
+assert.equal((await download(alice, [path.join(mine, "adir")])).status, 400);
+// 不存在 → 404。
+assert.equal((await download(alice, [path.join(mine, "nope.md")])).status, 404);
+// 一个都没给 → 400。
+assert.equal((await appFor(alice).request("/api/files/download")).status, 400);
 
 closeDb();
 await fsp.rm(tmp, { recursive: true, force: true });
