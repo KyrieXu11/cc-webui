@@ -1,0 +1,466 @@
+server/chat.ts
+  s_bf50cc0447d653::t_057d6b603bc8cd 175-177,540-543,851,1020-1072
+  s_c27cd19eb3306e::t_c87328eafe61ed 468-479
+  s_96b706e79c15cb::t_1208d2c8276c84 189-215,994-998,1144-1148
+  s_96b706e79c15cb::t_2de7fff5c79f52 894-911
+  s_96b706e79c15cb::t_7c30d710e7ad55 9
+  s_c27cd19eb3306e::t_b9e54eceece785 1073-1074
+src/components/ShareSessionDialog.tsx
+  s_c8e03e1cb16441::t_0f9125b352906f 1-8,10-11,18-22,30-31,34-43,46-47,51-56,58-59,61,64-77,79-91,93-116,120-131,140-217,220-225,227-232,234,244-248
+  s_c8e03e1cb16441::t_4cf37f03384b3f 9,12-17,23-29,32-33,44-45,48-50,57,60,62-63,78,92,117-119,132-133,135,137-139,226,233,235-243
+  s_c8e03e1cb16441::t_dd970db9f749ef 134,136,218-219
+src/components/HomeView.tsx
+  s_bf50cc0447d653::t_e69198a3e1d485 671-673
+  s_c8e03e1cb16441::t_b47a1112a8134c 610,658-665,674-689
+  s_bf50cc0447d653::t_5e562902ee11c7 237,240-245
+server/files-routes.ts
+  s_96b706e79c15cb::t_e83ab4e1c928d4 422-478,610,637-639
+  s_c27cd19eb3306e::t_d43862f6ebd529 154-155
+  s_96b706e79c15cb::t_4351b47a5d08e4 591-609,611-636,640-648
+  s_96b706e79c15cb::t_52ff8327faa146 479-590
+  s_96b706e79c15cb::t_153c9706e5b374 27
+  s_d7876ece4a7973::t_d00a322eefad11 12-13,29,273-338,342-360,362-371,670-702
+  s_c27cd19eb3306e::t_af2d9f2c952806 18-22
+  s_c27cd19eb3306e::t_f7134684103a47 150-153,156-179,181-185
+  s_c27cd19eb3306e::t_16b6b2a06eab73 215-233,235
+  s_d7876ece4a7973::t_d7d77ca045667a 339-341,361
+  s_c27cd19eb3306e::t_3a5bb15a67683a 180
+  s_c27cd19eb3306e::t_5c9231b8a89adf 703
+CLAUDE.md
+  s_96b706e79c15cb::t_77856e46eab52a 10
+server/executors/codex-executor.test.ts
+  s_f393ef9cc333ac::t_6185c1318a9569 1-267
+package.json
+  s_96b706e79c15cb::t_5fca0f9bf86af2 12
+src/lib/pane-width.test.ts
+  s_f393ef9cc333ac::t_a81631f6ae8897 38-40
+  s_f393ef9cc333ac::t_119ad8ef6dc6b4 1-37,41-45
+src/components/Splitter.tsx
+  s_f393ef9cc333ac::t_77321e69586e8c 2,28-30,32-38,64-71,84-85,100-105,117-118,123-127,135,137,142-151,154,156,158-168,174-181,189-196,212-213
+server/sessions.ts
+  s_c8e03e1cb16441::t_1c3a9df15dc9fa 10,62,83
+  s_c8e03e1cb16441::t_0c01d978abb09f 5-9,11,57-61,63,68-82,84-85,129-141,144-145,152-183
+  s_c8e03e1cb16441::t_e4022d00d155d7 142-143,146-151
+  s_bf50cc0447d653::t_5e562902ee11c7 109-112,118-122
+  s_bf50cc0447d653::t_484fb4cbadfc7c 4,184
+src/components/RightDock.tsx
+  s_f393ef9cc333ac::t_b2017df6be8a13 63,97-98,106,139,162,184,192-196,214,232-234,240,288-290,292-304
+  s_bf50cc0447d653::t_3ae22ff1973699 1,30-33,60-62,64-81,99-105,107-138
+  s_bf50cc0447d653::t_3a9d3d16ce3a2e 283,311
+  s_bf50cc0447d653::t_f524e33693b788 291,308
+  s_bf50cc0447d653::t_99146b193c01ec 180,230,235-239,275-282,284-287,306-307,309-310,312-322
+  s_f393ef9cc333ac::t_bfccddab7b070e 5,170-175
+  s_bf50cc0447d653::t_9b5e247a102c9f 305
+src/components/files/OfficeEditor.tsx
+  s_f393ef9cc333ac::t_7f4e7750989c90 14-19,23,57,60,77,85,108-109,115-117,120-128
+  s_bf50cc0447d653::t_765da64adb45d3 91-94,99-107,110-114,118-119
+  s_bf50cc0447d653::t_3a9d3d16ce3a2e 95-98
+  s_bf50cc0447d653::t_4dcca34bebbfca 129
+server/files-delete-dir.test.ts
+  s_c27cd19eb3306e::t_c1f1e8462d2938 1-150
+src/lib/sessions.ts
+  s_c8e03e1cb16441::t_00404b9ed81cf7 11-17,22-32,129-141,150,154-181
+  s_c8e03e1cb16441::t_e4022d00d155d7 20,142-149,151-153
+  s_c8e03e1cb16441::t_1c3a9df15dc9fa 18-19
+  s_96b706e79c15cb::t_394778b4a23934 41-42
+  s_bf50cc0447d653::t_5e562902ee11c7 97-103,112,115-128
+  s_bf50cc0447d653::t_03f6ad5d4d357f 21
+server/chat-inflight.test.ts
+  s_96b706e79c15cb::t_bb00546cae6430 1-65
+src/lib/auth.ts
+  s_c27cd19eb3306e::t_371ebc570b4605 1-2,12-17
+server/auth/scope.ts
+  s_c8e03e1cb16441::t_85f57ecbaca50f 9,21-24,35-36,45-49
+src/main.tsx
+  s_96b706e79c15cb::t_49f9de4c0bc171 6-10
+src/components/Sidebar.tsx
+  s_c27cd19eb3306e::t_57813e2dc72454 11-12,23,49-58,188-198
+  s_c27cd19eb3306e::t_6de03bd727f6f2 199-200
+server/files-rename.test.ts
+  s_96b706e79c15cb::t_b9e358592a1bb3 1-125
+server/codex-mcp-config.test.ts
+  s_f393ef9cc333ac::t_ec7f524c285460 2
+src/components/AdminView.tsx
+  s_c27cd19eb3306e::t_8622666b3e79cc 17-23
+  s_c27cd19eb3306e::t_25562f7d5cb81f 304-305
+  s_c27cd19eb3306e::t_4fdce4fa7070ba 398-480
+  s_c27cd19eb3306e::t_9440c13ea6b055 164
+server/memory-routes.ts
+  s_c27cd19eb3306e::t_c87f117fc95327 1-118
+server/auth/middleware.ts
+  s_c8e03e1cb16441::t_214db463f975c8 143
+  s_96b706e79c15cb::t_7c30d710e7ad55 28-34
+server/zip.test.ts
+  s_d7876ece4a7973::t_1aad01578225e7 1-67
+server/session-files.ts
+  s_96b706e79c15cb::t_69cebef0aaeb60 166-176,182-185
+  s_96b706e79c15cb::t_83a21ff5256fe6 151-165,177-181,186-189
+src/lib/memory.ts
+  s_c27cd19eb3306e::t_9578b480aa6c47 1-71
+server/db.ts
+  s_c8e03e1cb16441::t_b57a1a697c2119 254-281
+  s_c27cd19eb3306e::t_bbea2556df612a 282-297
+docs/cli-migration.md
+  s_f393ef9cc333ac::t_eeecc1c0e85c37 7,14-15,579-585,591-599
+  s_f393ef9cc333ac::t_eabca9a0d7f27c 191-194,196-206,506-557
+  s_f393ef9cc333ac::t_3809dcb43b442c 558
+src/components/files/DockFileView.tsx
+  s_96b706e79c15cb::t_8e3250994d27d1 14,112,114-118,120-124
+  s_f393ef9cc333ac::t_1e25edc6c1b774 5-13,19-26,54-57,59,171,183-187,239-248
+server/executors/claude-steer.test.ts
+  s_bf50cc0447d653::t_f2c90181b3876d 1-47,51-74,78-86,88-94
+  s_bf50cc0447d653::t_e5da7de6d48fc5 48-50,75-77,87
+src/lib/api.ts
+  s_bf50cc0447d653::t_bd831a2ba8437f 184-218
+  s_c8e03e1cb16441::t_09ac20052ba026 41,49-54
+  s_c27cd19eb3306e::t_8cd42ac7ac3e4c 146-148
+src/lib/user-defaults.test.ts
+  s_c27cd19eb3306e::t_7fa85871eabe76 1-95
+src/components/ModeSelector.tsx
+  s_96b706e79c15cb::t_a9e5e89e7fb42c 2-3,18-19,35
+server/chat-turn-meta.test.ts
+  s_c27cd19eb3306e::t_a80235dafa1a0d 1-115
+server/codex-chat.ts
+  s_f393ef9cc333ac::t_b759bed28514ab 170-177,182-183
+  s_f393ef9cc333ac::t_5a6ceece6fda11 8-10
+  s_f393ef9cc333ac::t_d4e66f9b242298 297-303,305-318,322-327,329-331,360-362,364-370
+server/index.ts
+  s_f393ef9cc333ac::t_f0e5c063652d82 9-10,70-82
+src/lib/admin.ts
+  s_c27cd19eb3306e::t_7dbb2ef61e7d01 2,14-15,69-70
+src/App.tsx
+  s_c27cd19eb3306e::t_286d2bc2033872 951
+  s_96b706e79c15cb::t_a83ca0eaf8e40b 976-999
+  s_96b706e79c15cb::t_4f61ff87edce77 1524
+  s_c27cd19eb3306e::t_2152259ce9c597 615-616
+  s_c27cd19eb3306e::t_31014078060445 44-49
+  s_bf50cc0447d653::t_c2a662b27d8015 1090-1103,1106-1125,1133,1136-1137,1142,1145,1149-1165
+  s_bf50cc0447d653::t_a1f9483e8ccb47 262-272
+  s_bf50cc0447d653::t_854d8c858583f6 63-67,71-72,1081-1084,1087-1089,1104,1177-1192,1200-1202
+  s_c27cd19eb3306e::t_d635e1b1b7ac0c 642-645
+  s_bf50cc0447d653::t_bb5897cb06e69a 1085-1086,1193-1199,1204-1206,1208-1212,1509-1513
+  s_96b706e79c15cb::t_e060b9f9c5d911 556-564,579,608-609,702,1080
+  s_96b706e79c15cb::t_275157d41a5d50 919-925
+  s_c27cd19eb3306e::t_c6674f881079a4 298
+  s_96b706e79c15cb::t_4f1eb1e4fd8102 952-962
+  s_96b706e79c15cb::t_e2aafcb3b7e160 1213-1216,1222
+  s_c8e03e1cb16441::t_1279b84cf2e892 1459
+  s_96b706e79c15cb::t_dad2a6e419ec21 148-171,421-424,433-434,442,553-554,682
+  s_bf50cc0447d653::t_35e51a8f7ba531 787-788,804-805,835-836,847-848,1072-1073,1503,1506-1508,1514
+  s_c27cd19eb3306e::t_eabe21998b599f 1606-1610,1612
+  s_bf50cc0447d653::t_a3354d2ec66653 25,68-70,1126-1132,1134-1135,1138-1141,1143-1144,1146-1148,1166-1176
+  s_96b706e79c15cb::t_4427b124ec8ec5 52,1266,1290,1294,1296,1314
+  s_f393ef9cc333ac::t_8d14738fffc2a7 1371-1373
+  s_c27cd19eb3306e::t_4beed798f5091c 238-241
+  s_c27cd19eb3306e::t_57813e2dc72454 51,250-251,1394,1489,1620-1622
+  s_c27cd19eb3306e::t_e27c54d7ff9b21 343-352
+  s_96b706e79c15cb::t_4d3f7bcf52fc3c 1047-1049
+  s_c27cd19eb3306e::t_74be83b0f4e9cb 1000-1003
+  s_96b706e79c15cb::t_223ac299244f73 38
+  s_96b706e79c15cb::t_55d321ee26c28d 555,565-566,611-613
+  s_c27cd19eb3306e::t_f3957129118b50 1203
+server/auth/policy.ts
+  s_c8e03e1cb16441::t_85ff4082a1423a 84-90,258-268
+  s_d7876ece4a7973::t_dae24aff72cb8a 221-223
+  s_bf50cc0447d653::t_e8f715bcc3bc40 131-135
+  s_96b706e79c15cb::t_8494a6a2b47573 226-227
+  s_96b706e79c15cb::t_e83ab4e1c928d4 231-233
+  s_96b706e79c15cb::t_153c9706e5b374 228-230
+  s_c8e03e1cb16441::t_31e6401de0d21d 13,31-39,105-115,118-124,129-130,141,145,162,167,177-183,251-256
+  s_c27cd19eb3306e::t_835eb29142abb5 207-209
+AGENTS.md
+  s_c27cd19eb3306e::t_6e7098ddba4d8c 411-418
+  s_96b706e79c15cb::t_685a4ec90857f1 397-410
+  s_c8e03e1cb16441::t_0fffb72e140980 286-290
+  s_96b706e79c15cb::t_53b2bf90df5e67 97-98,103-107,135-140
+  s_c27cd19eb3306e::t_78cebed494064b 295-303
+  s_c27cd19eb3306e::t_d53a3c15d2b51c 323
+  s_f393ef9cc333ac::t_716d6e260cd44d 424-438
+  s_f393ef9cc333ac::t_55beff81899f51 17-18,23-26,50-51,55-57
+  s_c27cd19eb3306e::t_f594c52360c98c 353-354
+  s_96b706e79c15cb::t_b6939c7e813767 77,99-102
+  s_c27cd19eb3306e::t_51cbebb575ff2c 68,108-111
+  s_bf50cc0447d653::t_dcd04d3e477576 155-163
+  s_f393ef9cc333ac::t_7215b02be4cc0c 121-134
+  s_96b706e79c15cb::t_77856e46eab52a 35,292
+  s_f393ef9cc333ac::t_2cd3513b4c9f56 164-171,452-457
+  s_c8e03e1cb16441::t_ff238d85d48712 276-285,321-322,376-384
+  s_96b706e79c15cb::t_e425e94d78a3a6 385-396
+  s_96b706e79c15cb::t_dd69458566be54 112-120
+docs/file-manager.md
+  s_96b706e79c15cb::t_c29a423e868408 15-16,29,118,120
+  s_96b706e79c15cb::t_b6939c7e813767 20-22,119
+  s_d7876ece4a7973::t_b014ccfd719e30 12,59,116,156
+  s_bf50cc0447d653::t_5044a5cd2f72ec 60
+  s_c27cd19eb3306e::t_9bd84eae1c1a51 23-28
+  s_96b706e79c15cb::t_53b2bf90df5e67 17-19
+src/components/ImageView.tsx
+  s_96b706e79c15cb::t_9a7962e5c336a3 1-164,166-257,261-263,267,270-299
+  s_96b706e79c15cb::t_138c0d763a7a9c 264-266
+  s_96b706e79c15cb::t_02342dd1d5df8a 268-269
+  s_96b706e79c15cb::t_8aee66c28ba03b 165,258-260
+server/files-move.test.ts
+  s_96b706e79c15cb::t_dcfb47c3593d6e 1-142
+src/components/files/TextEditor.tsx
+  s_96b706e79c15cb::t_49f9de4c0bc171 217-220,240-244
+  s_96b706e79c15cb::t_16f4e106cad535 4
+server/groups.ts
+  s_96b706e79c15cb::t_30a58013460ffd 24,27-30
+  s_96b706e79c15cb::t_bba3ffa245feb7 2,82-84,134-136
+src/lib/filepreview.ts
+  s_f393ef9cc333ac::t_afba4cb110a24b 76-82,86-106,110-119
+  s_f393ef9cc333ac::t_b0822dcb362601 107-109
+  s_96b706e79c15cb::t_5342dffa5b1456 64-70
+src/lib/stale-build.ts
+  s_96b706e79c15cb::t_eeaee1cbd7b2ea 1-63
+src/lib/processor.test.ts
+  s_96b706e79c15cb::t_817502cc7aeb44 1-165
+src/lib/processor.ts
+  s_96b706e79c15cb::t_96be1f18660cf3 586-601,609,615,624
+src/components/group/GroupConfigDialog.tsx
+  s_f393ef9cc333ac::t_22b38bd42a777e 27
+src/components/ProjectSidebar.tsx
+  s_c8e03e1cb16441::t_21fb44c656cd5a 32,34-43
+  s_bf50cc0447d653::t_5e562902ee11c7 131,134-139
+  s_c8e03e1cb16441::t_fbc0274d08bf13 245-260,262-275
+  s_c8e03e1cb16441::t_55cf637cc7f563 295-299
+  s_c8e03e1cb16441::t_76eea30ceb95ed 10-11,31,33,44-60,74,76,195-201,261,276,292-294,300-308
+  s_c8e03e1cb16441::t_c94a68a7a71803 223-241,243-244
+server/executors/claude-executor.ts
+  s_bf50cc0447d653::t_67c4bbaac010ef 448-450,588-602,641-643
+src/lib/attachments.ts
+  s_c27cd19eb3306e::t_61fd30d4a45b58 1-41
+src/components/MemoryDialog.tsx
+  s_c27cd19eb3306e::t_5e8d579262cb62 1-237
+server/executors/types.ts
+  s_bf50cc0447d653::t_67c4bbaac010ef 135-145,200-209
+src/lib/file-drag.ts
+  s_96b706e79c15cb::t_519614c32daa42 1-48
+server/codex-mcp-config.ts
+  s_f393ef9cc333ac::t_ec7f524c285460 1-7,10
+server/zip.ts
+  s_d7876ece4a7973::t_9928c36c404a75 1-141
+server/auth/ownership.ts
+  s_c8e03e1cb16441::t_7dee0487e065a0 8,51-57,64,67-103
+  s_c8e03e1cb16441::t_9611dbe912e7e8 105-109
+  s_c8e03e1cb16441::t_c897e9f87d43fa 104
+server/feishu/parse.ts
+  s_f393ef9cc333ac::t_ed1042a2cd01ce 57
+server/fs.ts
+  s_f393ef9cc333ac::t_d13e341bba7392 99-128,147,150,152-157,308-320
+  s_f393ef9cc333ac::t_50389584098085 199-205,247-271,275-281,283
+  s_f393ef9cc333ac::t_bc42de806556f4 272-274
+  s_96b706e79c15cb::t_5342dffa5b1456 180-183,185,195-196
+vite.config.ts
+  s_f393ef9cc333ac::t_c2f6cd623d3e8f 16-21
+server/admin-defaults.test.ts
+  s_c27cd19eb3306e::t_552e16e31f9803 1-154
+server/auth/sharing.ts
+  s_c8e03e1cb16441::t_1c3a9df15dc9fa 92-101
+  s_c8e03e1cb16441::t_c0136dfd1c5325 1-91,102-110
+server/files-mkdir.test.ts
+  s_96b706e79c15cb::t_03c4cb255d7050 1-97
+server/feishu/handler.ts
+  s_f393ef9cc333ac::t_22b38bd42a777e 43-46,48-51
+server/auth-routes.ts
+  s_c8e03e1cb16441::t_831b5de32122ce 74-87
+  s_c27cd19eb3306e::t_7d617e169b5b43 5-9,36-40,67-73
+  s_c27cd19eb3306e::t_5c3248b2f0d2fd 4
+src/components/Composer.tsx
+  s_bf50cc0447d653::t_ff71ed6ece2e8b 13-25,41-50,72-74
+  s_96b706e79c15cb::t_ebac019083e1e3 33-34,67,92-94,198-205,287-291,424-426
+  s_bf50cc0447d653::t_25da19b8656ffe 26,28-31,36,38-40,70-71,161-163,211
+  s_bf50cc0447d653::t_ffd6bcb9eca094 213,217-282,535-558
+  s_bf50cc0447d653::t_ad5a3486321bc7 429-434,468-471,487-493,498,505
+  s_96b706e79c15cb::t_046777c6c7de39 6
+  s_bf50cc0447d653::t_6b0844e8b5b616 472-483
+  s_bf50cc0447d653::t_f10cc107930ec2 212,559
+src/lib/attachments.test.ts
+  s_c27cd19eb3306e::t_7b188bb0a653d6 1-46
+src/lib/memory.test.ts
+  s_c27cd19eb3306e::t_3a1e5236f158b2 1-65
+docs/user-permissions.md
+  s_96b706e79c15cb::t_1e29d7e689ef83 39
+  s_c8e03e1cb16441::t_ce0d62a0dc85e4 77-98,100,102,112-119
+  s_c27cd19eb3306e::t_179630b5aa76ae 365
+  s_c8e03e1cb16441::t_0fffb72e140980 99,101,103-111,364
+  s_c27cd19eb3306e::t_c66d6a4f0905f2 148-159
+server/executors/codex-executor.ts
+  s_f393ef9cc333ac::t_2c2b8c5206028b 1-534
+src/lib/settings.ts
+  s_c27cd19eb3306e::t_798c5ee443633e 295-297,301
+  s_c27cd19eb3306e::t_8f6640b04feab0 321,324
+  s_f393ef9cc333ac::t_3cabadeb454e0b 97-98,187-203,206-209
+  s_96b706e79c15cb::t_b27a3861108802 185,230-233,239,242-251
+  s_c27cd19eb3306e::t_2b20e16d41da87 204
+  s_c27cd19eb3306e::t_10e790e53a4458 101-119,121-127,131-157,159-166,179-184
+  s_c444ff7389081c::t_20277e147448bf 186,252
+server/groups/codex-runner.ts
+  s_f393ef9cc333ac::t_e7f87bf7547978 2,8-9,43-59,65-70,72-76,79-85,89,93-96,99,102-116,119-127,136,138,141
+src/components/UserBubble.tsx
+  s_c27cd19eb3306e::t_fe0238be76543f 17-20
+  s_c27cd19eb3306e::t_e1bc54ad5c98b8 2
+  s_c27cd19eb3306e::t_d95f79fd361944 57-79
+server/claude-sessions.ts
+  s_96b706e79c15cb::t_7ffb8c3a9ae7ea 54-63,83,146-147
+  s_c27cd19eb3306e::t_83d9733740a482 15,151-160
+  s_d7876ece4a7973::t_86fd69189561b8 224-245,248-265,267-272,278-279,288-290,297,305,307-308,313-315
+  s_d7876ece4a7973::t_f70a3d804405bb 10-11,266,273-277,280-287,291-296,298,310
+  s_c27cd19eb3306e::t_38f6c628655ac5 299
+server/claude-sessions.test.ts
+  s_d7876ece4a7973::t_2aecd29ca86e70 148-198,209
+  s_c27cd19eb3306e::t_83d9733740a482 17,199-208
+server/auth/bypass-mode.test.ts
+  s_96b706e79c15cb::t_7cacf94323776c 1-95,97,99-114
+  s_96b706e79c15cb::t_5f55f5dccad0d6 96,98
+src/components/HelpModal.tsx
+  s_c27cd19eb3306e::t_f160f852988dc4 2,8-16,18-90,94,105,109,113,129-150
+src/components/FilePreviewWindow.tsx
+  s_96b706e79c15cb::t_98a722fa0c026f 3,19,213-215,273-282,294
+  s_96b706e79c15cb::t_4427b124ec8ec5 257-258,262-263
+  s_f393ef9cc333ac::t_7ec8cf6f9c4df2 4,33-36,38,67,69-73,219,259-261,283-293
+  s_f393ef9cc333ac::t_bc42de806556f4 254-256
+README.md
+  s_bf50cc0447d653::t_dcd04d3e477576 20
+  s_f393ef9cc333ac::t_eee1abc1776297 3,19,26,28-29
+  s_c8e03e1cb16441::t_0fffb72e140980 31
+  s_f393ef9cc333ac::t_437a8c8e6b4010 132-133
+  s_c27cd19eb3306e::t_9b5e2d343c7f67 50-55,58,61-63,65-66,179,181,187
+src/components/Header.tsx
+  s_c8e03e1cb16441::t_fbc0274d08bf13 5,49,192-193,195,237
+  s_c8e03e1cb16441::t_1279b84cf2e892 4,26-27,45,50,188-191,194,196-219,236,238-244
+server/auth/users.ts
+  s_c27cd19eb3306e::t_b800dc6e136e04 145-199
+src/components/FileExplorer.tsx
+  s_96b706e79c15cb::t_d070ee19f2d13f 632,635-644,660-670,677-681,687-707,709-710,712-713,784,793-796
+  s_c27cd19eb3306e::t_8abbd92246962f 617-628,711,716-722,724-732,751
+  s_96b706e79c15cb::t_7eb2dbbab954a6 916-940
+  s_96b706e79c15cb::t_96fd4703519c96 19-24,533-551
+  s_96b706e79c15cb::t_c7961e58bba9be 15,89-90,212-233,248
+  s_c27cd19eb3306e::t_c38f3ff74acbb8 70-73,76-77,79,110,160,164,174,238,240
+  s_96b706e79c15cb::t_987d38e09318be 116-117,274-290,376-390,416-443
+  s_96b706e79c15cb::t_3bc20af72ded8e 552-553,555-607
+  s_d7876ece4a7973::t_96dd2f054c122f 44-45
+  s_96b706e79c15cb::t_0c868acc10b54a 10-14,16-17
+  s_c27cd19eb3306e::t_9bd84eae1c1a51 39-41
+  s_c27cd19eb3306e::t_74187dad8771f4 158,347-348,357-361,492,497,501,507
+  s_96b706e79c15cb::t_1b5bb097409538 87-88,247,682-686
+  s_96b706e79c15cb::t_87479e23619fc9 26-30,783
+  s_d7876ece4a7973::t_b2623572030227 306-312,332,341,350-351,355-356,362,364,369
+  s_96b706e79c15cb::t_b77d0cd7c7566c 633,674-676,708,733-750,752-767
+  s_96b706e79c15cb::t_a1d7616e1bbd28 786,790-792,817-852
+  s_96b706e79c15cb::t_2925fdb2052159 83-86,170-173,175-211,245-246
+  s_c27cd19eb3306e::t_3a5bb15a67683a 262-264
+  s_96b706e79c15cb::t_4b430f527e7c35 118-119,452-477
+  s_c27cd19eb3306e::t_0f6e596923145a 444,554,671
+server/groups/config.ts
+  s_f393ef9cc333ac::t_22b38bd42a777e 125
+  s_96b706e79c15cb::t_ffa5d8b811b7ad 40-46
+server/executors/contract.test.ts
+  s_f393ef9cc333ac::t_a441a6bb2365e2 3-5
+src/lib/files.ts
+  s_96b706e79c15cb::t_f63a71e07787ab 229-249
+  s_d7876ece4a7973::t_ed836c93946be2 131-157
+  s_96b706e79c15cb::t_46e693926e05af 201-228
+  s_96b706e79c15cb::t_8494a6a2b47573 178-200
+server/admin-routes.ts
+  s_c27cd19eb3306e::t_2c4d545a6d7b90 190-198
+  s_c27cd19eb3306e::t_43324bbfc1abc6 56-88
+  s_c27cd19eb3306e::t_5aed6a576a0b5f 11,16,19-23
+  s_c27cd19eb3306e::t_8ef894f5d2144d 241-242,252
+  s_c27cd19eb3306e::t_92a7365b3a9ead 110
+src/lib/user-defaults.ts
+  s_c27cd19eb3306e::t_7bdbb20d560cb1 1-74
+server/memory-routes.test.ts
+  s_c27cd19eb3306e::t_d5981474685524 1-135
+server/app.ts
+  s_bf50cc0447d653::t_0dd68481f57e2d 77-84
+  s_c27cd19eb3306e::t_835eb29142abb5 24,49
+  s_f393ef9cc333ac::t_c2f6cd623d3e8f 67-76,85-91
+src/AuthGate.tsx
+  s_c27cd19eb3306e::t_b74d85a025d4a9 17,23
+  s_c27cd19eb3306e::t_03c23d86f38b93 66-89
+  s_c27cd19eb3306e::t_edb2c7958245cb 108
+server/auth/sharing.test.ts
+  s_c8e03e1cb16441::t_dbe155f540891f 1-86,97-101,120-132,136-143,145-183,185-224,236-237,239-260,317,320,322-347
+  s_c8e03e1cb16441::t_8bb29592a08b69 102-103,109,111-119
+  s_c8e03e1cb16441::t_54d8301049afa8 87-96,104-108,110,133-135,144,184,225-235,238,310-316
+  s_c8e03e1cb16441::t_feefab43750ba6 261-309,318-319,321
+server/fs-raw-html.test.ts
+  s_f393ef9cc333ac::t_e2a7c9519c7761 1-128
+src/lib/pane-width.ts
+  s_f393ef9cc333ac::t_d10fbacf8ef3c1 1-34
+src/components/ModelSelector.tsx
+  s_c27cd19eb3306e::t_24ef80325d65cc 1
+  s_c27cd19eb3306e::t_a712c079e66c6a 84
+  s_c27cd19eb3306e::t_7c6d45f5fcb26a 56-58,61-83
+  s_c27cd19eb3306e::t_f9913b00610077 49,51-53,55
+server/files-routes.test.ts
+  s_d7876ece4a7973::t_b945c72e49f201 330-339
+  s_c27cd19eb3306e::t_25bc797260dd52 241-242,245,248-252
+  s_d7876ece4a7973::t_c6c28aae110bb9 304-329,340-368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "9b185aa210f94135d737d09916812ab2e6b8f55b",
+  "prompts": {},
+  "sessions": {
+    "s_96b706e79c15cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6a89a4a-563d-42bc-bf1f-89b1496708c6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_bf50cc0447d653": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d840288c-e089-4d27-90a1-094ee24008f3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_c27cd19eb3306e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "acce7d76-0486-406b-abeb-2104e076b4ad",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_c444ff7389081c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63c5c754-2833-4939-99bd-0bc43c48f095",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_c8e03e1cb16441": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2bdb1b0-4659-476f-b646-80b1b035013b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_d7876ece4a7973": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "931b6537-f296-429f-b3a5-5de28aab1287",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    },
+    "s_f393ef9cc333ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d357e7c2-dab5-4be8-9f74-e7c91dd07d3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "KyrieXu11 <kyriexu11@126.com>"
+    }
+  }
+}
