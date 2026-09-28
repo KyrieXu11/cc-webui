@@ -1076,6 +1076,16 @@ export default function App() {
     setSessionId(null);
   };
 
+  // 删掉的正好是界面上开着的那一条 → 切到新对话。不这么做的话 sessionId 还指着一个
+  // 已经不存在的会话（lastProject 里存的也是它，刷新之后又回到这儿），下一条消息会拿它
+  // 去 --resume，CLI 回「No conversation found」（用户 2026-09-23 截图）。
+  // 服务端另有一道兜底（chat.ts：续聊目标的文件没了就当新对话），这里是让界面别停在死会话上。
+  const handleSessionDeleted = (s: SessionSummary) => {
+    if (s.sessionId === sessionId && s.provider === settings.agentProvider) {
+      handleNewChat();
+    }
+  };
+
   const inProject = !!projectCwd;
   const busy = streamingHere || attachedStreaming;
 
@@ -1419,6 +1429,7 @@ export default function App() {
             refreshKey={sessionsRefreshKey}
             onNewChat={handleNewChat}
             onOpenSession={openSession}
+            onDeleted={handleSessionDeleted}
           />
         ) : (
           <EmptyProjectSidebar
