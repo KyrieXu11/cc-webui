@@ -17,6 +17,8 @@ interface Props {
   home: string;
   currentProvider: AgentProvider;
   currentSessionId: string | null;
+  /** 删掉了一条会话（删成功之后才调）。App 用它判断删的是不是正开着的那条。 */
+  onDeleted?: (s: SessionSummary) => void;
   /** Bump to force a re-fetch of the session list (e.g., after a turn ends). */
   refreshKey?: number;
   onNewChat: () => void;
@@ -63,6 +65,7 @@ export default function ProjectSidebar({
   home,
   currentProvider,
   currentSessionId,
+  onDeleted,
   refreshKey,
   onNewChat,
   onOpenSession,
@@ -140,6 +143,7 @@ export default function ProjectSidebar({
     setSessions((xs) =>
       xs.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider)
     );
+    onDeleted?.(s);
   };
 
   return (

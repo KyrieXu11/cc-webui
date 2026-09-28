@@ -17,6 +17,7 @@ import { relabelTasksSessionId } from "./bash-mcp.ts";
 // 不然它们会变成查不出来的孤儿。表和 GET /api/files 都还在，只是不再有写入方。
 import { relabelSessionFiles } from "./session-files.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
+import { claudeSessionExists } from "./claude-sessions.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
 import { availableServers } from "./devices/registry.ts";
@@ -958,8 +959,21 @@ chat.post("/chat", async (c) => {
   // auto-resume this session, since the human is back in the loop.
   cancelPendingWakeup(sessionId);
 
+  // 要续聊的会话文件已经不在了（被删掉了）→ 当成新对话起。不这么做的话 CLI 只会回
+  // 「No conversation found with session ID」，而界面还停在那个死会话上，每发一条
+  // 都是同一句错误（用户 2026-09-23：删掉正开着的会话之后刷新，就卡在这儿）。
+  // ⚠️ 只在**哪个项目目录里都找不到**时才这么做：文件还在别处的照旧交给 CLI 判断，
+  // 绝不能因为这一步把一个本来续得上的会话变成新对话。
+  let resumeId = sessionId;
+  if (resumeId && !(await claudeSessionExists(resumeId, cwd))) {
+    console.log(
+      `[chat] resume ${resumeId}: session file is gone (deleted?) — starting a new session instead`
+    );
+    resumeId = undefined;
+  }
+
   const entry = runChatTurn({
-    sessionId,
+    sessionId: resumeId,
     clientTurnId,
     prompt,
     images,

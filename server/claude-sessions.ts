@@ -431,6 +431,12 @@ export async function getClaudeSessionMessages(
   return limit && msgs.length > limit ? msgs.slice(msgs.length - limit) : msgs;
 }
 
+// 这个会话在**任何**项目目录里都还有文件吗。POST /chat 续聊前用它判断
+// 「要续的会话是不是已经被删掉了」（见 chat.ts）。
+export async function claudeSessionExists(id: string, dir?: string): Promise<boolean> {
+  return (await findSessionFile(id, dir)) !== null;
+}
+
 export async function deleteClaudeSession(
   id: string,
   opts: { dir?: string } = {}
