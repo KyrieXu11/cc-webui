@@ -418,7 +418,7 @@ export const claudeExecutor: Executor = {
       cwd: opts.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       // extraEnv 覆盖在后：见 ExecOptions.extraEnv（唯一动机是 MCP_TOOL_TIMEOUT）。
-      env: opts.extraEnv ? { ...process.env, ...opts.extraEnv } : process.env,
+      env: { ...process.env, ...opts.extraEnv, ...(opts.disableNativeMemory ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } : {}) },
     });
 
     // AbortSignal is deliberately not passed to spawn(): we need to know that

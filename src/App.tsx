@@ -292,10 +292,8 @@ export default function App() {
   // Group chat is an opt-in server feature (CC_WEBUI_GROUPS_ENABLED). Starts
   // false so nothing group-shaped renders before /api/meta answers.
   const [groupsServerFeature, setGroupsServerFeature] = useState(false);
-  // ...and it is admin-only, because a group is Claude + Codex by definition
-  // and a plain user may not select Codex at all (docs/user-permissions.md,
-  // decisions 14 and 16).
-  const { isAdmin, user, defaults } = useAuth();
+  // Group chat remains admin-only even when a member is granted Codex access.
+  const { isAdmin, user, defaults, allowedProviders } = useAuth();
   const groupsFeature = groupsServerFeature && isAdmin;
   // Every read of the current group goes through the flag, so a stale stored
   // group id can never surface a hidden feature.
@@ -345,6 +343,9 @@ export default function App() {
   useEffect(() => {
     const marks = loadAppliedMarks();
     if (!hasPendingDefaults(defaults, user.id, marks)) return;
+    if (defaults.provider && defaults.provider !== settings.agentProvider) {
+      clearActiveTurnState(); setSessionId(null); setAllEvents([]);
+    }
     setSettings((s) => applyUserDefaults(s, defaults));
     saveAppliedMarks({ ...marks, [user.id]: defaults.updatedAt });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -907,14 +908,13 @@ export default function App() {
     });
   };
 
-  // A provider choice lives in localStorage, so it outlives a role change (or
-  // an admin's browser being handed to a colleague). Codex is admin-only, so
-  // coerce it back instead of letting the composer fire requests the server
-  // will 403 — the picker itself is already hidden for non-admins.
+  // Revoked providers may still be read as history, but not used for a new turn.
   useEffect(() => {
-    if (!isAdmin && settings.agentProvider === "codex") updateProvider("claude");
+    if (!sessionId && !allowedProviders.includes(settings.agentProvider)) {
+      updateProvider(allowedProviders[0] ?? "claude");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, settings.agentProvider]);
+  }, [allowedProviders.join(","), settings.agentProvider, sessionId]);
 
   // 同样的道理，bypass 也是管理员专属（决策 12）。
   useEffect(() => {
@@ -930,6 +930,7 @@ export default function App() {
     setSettings((s) => ({ ...s, effort }));
 
   const handleSend = async (text: string, images?: ImageAttachment[]) => {
+    if (!allowedProviders.includes(settings.agentProvider)) return;
     const clientTurnId = createClientTurnId();
     setActiveTurnState({
       clientTurnId,
@@ -1068,6 +1069,7 @@ export default function App() {
   };
 
   const handleNewChat = () => {
+    if (!allowedProviders.includes(settings.agentProvider)) updateProvider(allowedProviders[0] ?? "claude");
     clearActiveTurnState();
     // 排队只属于刚才那个对话，别带到下一个去。
     setQueued([]);
@@ -1510,10 +1512,14 @@ export default function App() {
             </main>
             <div className="shrink-0">
               <div className="max-w-[820px] mx-auto w-full">
+                {!allowedProviders.includes(settings.agentProvider) && <div className="mb-2 text-[12px] text-muted flex items-center gap-2">
+                  此 AI 已停用，当前对话仅供查看。
+                  <button className="text-blue" onClick={handleNewChat}>新建可用 AI 对话</button>
+                </div>}
                 <Composer
                   onSend={submitOrQueue}
                   onCancel={handleCancel}
-                  disabled={busy}
+                  disabled={busy || !allowedProviders.includes(settings.agentProvider)}
                   queued={queued}
                   onUnqueue={(id) =>
                     setQueued((q) => q.filter((m) => m.id !== id))

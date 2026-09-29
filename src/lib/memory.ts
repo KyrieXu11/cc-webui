@@ -1,5 +1,4 @@
-// 项目记忆（只读）的前端一半。服务端在 server/memory-routes.ts，那里写着为什么
-// 只读、为什么单开一条路由。这里只有「取」和两个纯函数，没有任何写操作。
+// 统一项目记忆的只读浏览。旧 Claude 来源仅供服务端迁移，不在日常 UI 展示。
 
 export type Memory = {
   file: string;
@@ -9,16 +8,21 @@ export type Memory = {
   modified: string;
   body: string;
   truncated: boolean;
+  revision?: number;
+  provider?: string;
 };
 
 export type ProjectMemory = {
   dir: string | null;
   index: string | null;
   memories: Memory[];
+  enabled?: boolean;
+  total?: number;
+  nextCursor?: number | null;
 };
 
-export async function getProjectMemory(cwd: string): Promise<ProjectMemory> {
-  const res = await fetch(`/api/memory?cwd=${encodeURIComponent(cwd)}`);
+export async function getProjectMemory(cwd: string, cursor = 0): Promise<ProjectMemory> {
+  const res = await fetch(`/api/project-memory?cwd=${encodeURIComponent(cwd)}&cursor=${cursor}`);
   if (!res.ok) {
     const b = (await res.json().catch(() => ({}))) as { detail?: string; error?: string };
     throw new Error(b.detail || b.error || `读取记忆失败：${res.status}`);

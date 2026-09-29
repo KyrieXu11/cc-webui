@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendCodexTurn } from "./session-store.ts";
+import { prepareProjectMemory } from "./project-memory/runtime.ts";
 import { codexExecutor } from "./executors/codex-executor.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl } from "./codex-mcp-config.ts";
@@ -19,7 +20,8 @@ import {
   subscribeForegroundEvents,
 } from "./bash-mcp.ts";
 import { isCodexModelMismatchNotice } from "./codex-events.ts";
-import { currentUser } from "./auth/middleware.ts";
+import { assertProviderAllowed } from "./auth/users.ts";
+import { currentUser, isAdmin } from "./auth/middleware.ts";
 import { visibilityFor } from "./auth/scope.ts";
 import { recordOwner, relabelOwner } from "./auth/ownership.ts";
 
@@ -214,6 +216,9 @@ codexChat.post("/chat", async (c) => {
     typeof body.effort === "string" ? body.effort : undefined;
   const permissionMode: string | undefined =
     typeof body.permissionMode === "string" ? body.permissionMode : undefined;
+  if (permissionMode === "bypassPermissions" && !isAdmin(c)) {
+    return c.json({ error: "bypassPermissions is admin-only" }, 403);
+  }
   const rawImages: IncomingImage[] = Array.isArray(body.images)
     ? body.images
     : [];
@@ -273,11 +278,15 @@ codexChat.post("/chat", async (c) => {
     let taskSessionId = threadId ?? clientTurnId ?? `codex-turn-${reqId}`;
     const turnEvents: unknown[] = [];
     try {
+      assertProviderAllowed(ownerId, "codex", permissionMode);
+      const memory = await prepareProjectMemory(ownerId, cwd ?? process.cwd(), "codex", permissionMode);
       registerMcpSessionContext({
         token: mcpToken,
         sessionId: taskSessionId,
         ownerId,
         cwd,
+        projectMemory: memory?.capability,
+        onMemoryUpdated: () => fanout("memory_updated", JSON.stringify({ type: "memory_updated" })),
       });
       unsubscribeForeground = subscribeForegroundEvents((event, data) => {
         try {
@@ -298,7 +307,8 @@ codexChat.post("/chat", async (c) => {
       // `codex exec --experimental-json` — just a version-pinned bundled copy
       // of it). See server/executors/codex-executor.ts.
       const frames = codexExecutor.exec({
-        prompt: composePrompt(prompt),
+        prompt: memory ? memory.wrap(prompt, CODEX_RUNTIME_PROMPT + memory.rules) : composePrompt(prompt),
+        disableNativeMemory: !!memory,
         images: validImages(rawImages),
         cwd: cwd ?? process.cwd(),
         signal: entry.abort.signal,
@@ -310,6 +320,7 @@ codexChat.post("/chat", async (c) => {
         // and deliberately NOT the desktop-client `local-*` ones
         // (docs/desktop-client.md 决策 19: only server/chat.ts assembles those).
         mcpServers: [
+          ...(memory ? [{ name: "memory", url: getMcpRouteUrl(process.env, "memory"), bearerToken: mcpToken }] : []),
           {
             name: "bash",
             url: getMcpRouteUrl(process.env, "bash"),

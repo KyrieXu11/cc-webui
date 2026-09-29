@@ -1,0 +1,139 @@
+import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { randomUUID } from "node:crypto";
+const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "cc-memory-turn-"));
+Object.assign(process.env, {
+  CC_WEBUI_DB: path.join(tmp, "db"),
+  CC_WEBUI_PROJECT_MEMORY_DIR: path.join(tmp, "memory"),
+  CC_WEBUI_WORKSPACES_DIR: path.join(tmp, "workspaces"),
+  CC_WEBUI_GROUPS_DIR: path.join(tmp, "groups"),
+  CC_WEBUI_SESSION_INDEX: path.join(tmp, "index"),
+  CC_WEBUI_CLAUDE_PROJECTS_DIR: path.join(tmp, "claude"),
+  CODEX_SESSIONS_DIR: path.join(tmp, "codex"),
+  CC_WEBUI_COOKIE_SECRET_FILE: path.join(tmp, "cookie"),
+  CC_WEBUI_DOTENV: path.join(tmp, "empty.env"),
+  CC_WEBUI_PROJECT_MEMORY_ENABLED: "1"
+});
+await fs.writeFile(process.env.CC_WEBUI_DOTENV!, "");
+const capture = path.join(tmp, "captures.jsonl");
+const fake = path.join(tmp, "cli.cjs");
+await fs.writeFile(fake, `#!/usr/bin/env node
+const fs = require('node:fs');
+const codex = process.argv.includes('exec');
+const out = o => process.stdout.write(JSON.stringify(o)+'\\n');
+const finish = prompt => {
+  fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify({codex, prompt, args:process.argv.slice(2), nativeDisabled:process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY})+'\\n');
+  if(codex) {
+    out({type:'thread.started',thread_id:'22222222-2222-4222-8222-222222222222'});
+    out({type:'item.completed',item:{id:'a',type:'agent_message',text:'ok'}});
+    out({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}});
+  } else {
+    out({type:'system',subtype:'init',session_id:'11111111-1111-4111-8111-111111111111',model:'opus'});
+    out({type:'assistant',message:{id:'a',role:'assistant',content:[{type:'text',text:'ok'}]}});
+    out({type:'result',subtype:'success',session_id:'11111111-1111-4111-8111-111111111111'});
+  }
+};
+if(codex) { let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>finish(s)); }
+else { let done=false;require('node:readline').createInterface({input:process.stdin}).on('line',s=>{if(!done){done=true;finish(JSON.parse(s).message.content[0].text)}}); }
+`);
+await fs.chmod(fake, 0o755);
+process.env.CC_WEBUI_CLAUDE_BIN = fake;
+process.env.CC_WEBUI_CODEX_BIN = fake;
+const {
+  createUser,
+  setAllowedProviders
+} = await import("./auth/users.ts");
+const {
+  issueSession,
+  SESSION_COOKIE
+} = await import("./auth/session.ts");
+const {
+  resolveMemoryScope
+} = await import("./project-memory/scope.ts");
+const {
+  saveMemory
+} = await import("./project-memory/store.ts");
+const {
+  memoryPrompt
+} = await import("./project-memory/prompt.ts");
+const {
+  createApp
+} = await import("./app.ts");
+const {
+  closeDb
+} = await import("./db.ts");
+const {
+  unwrapMemoryPrompt
+} = await import("../shared/project-memory-envelope.ts");
+try {
+  const user = createUser({
+    username: "member",
+    password: "pw",
+    role: "user",
+    allowedPaths: [tmp]
+  });
+  setAllowedProviders(user.id, ["claude", "codex"]);
+  const scope = await resolveMemoryScope(user.id, tmp);
+  await saveMemory(scope, {
+    operation_id: "seed",
+    name: "project-test",
+    description: "INDEX_SENTINEL",
+    type: "project",
+    body: "BODY_SENTINEL_DO_NOT_AUTO_INJECT"
+  }, {
+    provider: "claude",
+    sessionId: ""
+  });
+  const app = createApp();
+  const send = async (provider: "claude" | "codex") => {
+    const res = await app.request(provider === "claude" ? "/api/chat" : "/api/codex/chat", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE}=${issueSession(user.id)}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        cwd: tmp,
+        prompt: "hello",
+        clientTurnId: randomUUID(),
+        permissionMode: "auto"
+      })
+    });
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.match(text, /ok/);
+  };
+  await send("claude");
+  await send("codex");
+  const records = (await fs.readFile(capture, "utf8")).trim().split("\n").map(s => JSON.parse(s));
+  const claude = records.find(r => !r.codex),
+    codex = records.find(r => r.codex);
+  for (const r of records) {
+    assert.match(r.prompt, /INDEX_SENTINEL/);
+    assert.doesNotMatch(r.prompt, /BODY_SENTINEL_DO_NOT_AUTO_INJECT/);
+    assert.equal(unwrapMemoryPrompt(r.prompt).trim(), "hello");
+  }
+  assert.equal(claude.nativeDisabled, "1");
+  assert.ok(claude.args.includes(memoryPrompt(true)) || claude.args.some((a: string) => a.endsWith(memoryPrompt(true))));
+  assert.match(claude.args[claude.args.indexOf("--mcp-config") + 1], /"memory"/);
+  assert.ok(codex.args.includes("features.memories=false"));
+  assert.ok(codex.args.includes("memories.use_memories=false"));
+  assert.ok(codex.args.some((s: string) => s.startsWith("mcp_servers.memory.url=")));
+  assert.ok(!codex.args.some((s: string) => s.includes("Bearer ")), "Codex capability stays in env, not argv");
+  assert.ok(codex.prompt.includes(memoryPrompt(true)), "same business rules for both providers");
+  process.env.CC_WEBUI_PROJECT_MEMORY_ENABLED = "false";
+  await send("claude");
+  const last = JSON.parse((await fs.readFile(capture, "utf8")).trim().split("\n").at(-1)!);
+  assert.equal(last.prompt, "hello");
+  assert.equal(last.nativeDisabled, undefined);
+  assert.doesNotMatch(last.args[last.args.indexOf("--mcp-config") + 1], /"memory"/);
+} finally {
+  closeDb();
+  await fs.rm(tmp, {
+    recursive: true,
+    force: true
+  });
+}
+console.log("managed-memory CLI turn adapters tested without real AI calls");

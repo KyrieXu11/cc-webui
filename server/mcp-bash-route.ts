@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { serveMcp } from "./mcp-http.ts";
 import { z } from "zod";
 import {
   DEFAULT_MEMBER_LIMIT,
@@ -544,49 +544,6 @@ function errMsg(err: unknown): string {
 // body has been fully delivered. Previously nothing was ever closed, which was
 // a per-request leak — and it got worse once Claude started using these routes
 // too, not just Codex and Feishu.
-async function serveMcp(
-  raw: Request,
-  make: () => McpServer
-): Promise<Response> {
-  const transport = new WebStandardStreamableHTTPServerTransport();
-  const server = make();
-  await server.connect(transport);
-
-  const close = () => {
-    // Closing the server closes the transport it is connected to.
-    void Promise.resolve(server.close()).catch(() => {});
-  };
-
-  let res: Response;
-  try {
-    res = await transport.handleRequest(raw);
-  } catch (err) {
-    close();
-    throw err;
-  }
-
-  // A streaming (SSE) response stays open for the rest of the exchange, so
-  // disposal has to wait for the stream to finish rather than for this handler
-  // to return.
-  if (!res.body) {
-    close();
-    return res;
-  }
-  // `flush` fires when the upstream ends normally. If the client aborts the
-  // connection instead, the stream is cancelled and this never runs — the
-  // server is then simply unreferenced, which is the pre-fix behavior and the
-  // rarer path.
-  const onFlush = new TransformStream({
-    flush() {
-      close();
-    },
-  });
-  return new Response(res.body.pipeThrough(onFlush), {
-    status: res.status,
-    statusText: res.statusText,
-    headers: res.headers,
-  });
-}
 
 route.all("/bash", async (c) => {
   const token = extractBearerToken(c.req.header("authorization"));

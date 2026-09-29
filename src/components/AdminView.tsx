@@ -19,7 +19,10 @@ import {
   availableEffortOptions,
   clampEffort,
   modelOptionsForProvider,
+  defaultModelForProvider,
   type EffortLevel,
+  type AgentProvider,
+  PROVIDER_OPTIONS,
 } from "../lib/settings";
 
 interface Props {
@@ -161,7 +164,7 @@ function UsersSection({
     <>
       <SectionHead
         title="用户"
-        hint="目录白名单决定用户能在哪些文件夹里工作。它是使用便利，不是安全隔离——agent 有 shell，能读写服务进程用户能碰的一切。默认模型 / effort 只是默认值：对方下次打开页面（或切回这个标签页）时会换成你设的，之后自己改的会保留，直到你再保存。"
+        hint="可用 AI 是服务端限制；默认 AI / 模型 / effort 不是锁定值。Codex CLI 不提供逐工具确认，开放后工具写入会自动执行（普通账号仍不能选 Bypass）。目录白名单决定用户能在哪些文件夹里工作。它是使用便利，不是安全隔离——agent 有 shell，能读写服务进程用户能碰的一切。默认模型 / effort 只是默认值：对方下次打开页面（或切回这个标签页）时会换成你设的，之后自己改的会保留，直到你再保存。"
       />
 
       <div className="border border-line rounded-lg overflow-hidden mb-7">
@@ -395,8 +398,7 @@ function UserRow({
   );
 }
 
-// 默认模型 / effort（决策 45-47）。只有 Claude 的模型：Codex 只有管理员能用，
-// 给普通账号设一个它选不了的模型没有意义。
+// 可用 provider 是限制；默认 AI / 模型 / effort 每个版本只套用一次。
 function DefaultsRow({
   user,
   busy,
@@ -406,18 +408,23 @@ function DefaultsRow({
   busy: boolean;
   onRun: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const savedProviders = user.allowedProviders ?? (user.role === "admin" ? ["claude", "codex"] : ["claude"]);
+  const savedProvider = user.defaults?.provider ?? (savedProviders[0] as AgentProvider);
+  const [providers, setProviders] = useState<AgentProvider[]>(savedProviders as AgentProvider[]);
+  const [provider, setProvider] = useState<AgentProvider>(savedProvider);
   const savedModel = user.defaults?.model ?? "";
   const savedEffort = user.defaults?.effort ?? "";
   const [model, setModel] = useState(savedModel);
   const [effort, setEffort] = useState<string>(savedEffort);
   useEffect(() => {
+    setProviders(savedProviders as AgentProvider[]); setProvider(savedProvider);
     setModel(savedModel);
     setEffort(savedEffort);
-  }, [savedModel, savedEffort]);
+  }, [savedModel, savedEffort, savedProvider, savedProviders.join(",")]);
 
   // 没指定模型时对方用什么模型都有可能，所以五档全给；指定了就只给那个模型有的档。
-  const efforts = model ? availableEffortOptions(model) : EFFORT_OPTIONS;
-  const dirty = model !== savedModel || effort !== savedEffort;
+  const efforts = model ? availableEffortOptions(model) : provider === "codex" ? availableEffortOptions(defaultModelForProvider(provider)) : EFFORT_OPTIONS;
+  const dirty = model !== savedModel || effort !== savedEffort || provider !== savedProvider || providers.join(",") !== savedProviders.join(",");
 
   const pickModel = (next: string) => {
     setModel(next);
@@ -432,6 +439,21 @@ function DefaultsRow({
 
   return (
     <div className="flex flex-wrap items-center gap-2 mt-2.5">
+      <span className="text-[12px] text-muted">可用 AI</span>
+      {PROVIDER_OPTIONS.map(p => <label key={p.id} className="flex items-center gap-1 text-[12px] text-muted">
+        <input type="checkbox" checked={providers.includes(p.id)} disabled={busy || user.role === "admin"}
+          onChange={e => {
+            const next = e.target.checked ? [...providers, p.id] : providers.filter(v => v !== p.id);
+            if (!next.length) return;
+            setProviders(next);
+            if (!next.includes(provider)) { setProvider(next[0]); setModel(""); setEffort(""); }
+          }} />{p.label}
+      </label>)}
+      <label className="flex items-center gap-1 text-[12px] text-muted">默认 AI
+        <select className={selectClass} value={provider} onChange={e => { setProvider(e.target.value as AgentProvider); setModel(""); setEffort(""); }}>
+          {PROVIDER_OPTIONS.filter(p => providers.includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </label>
       <label className="flex items-center gap-1.5 text-[12px] text-muted">
         默认模型
         <select
@@ -440,9 +462,9 @@ function DefaultsRow({
           className={selectClass}
         >
           <option value="">不设置</option>
-          {modelOptionsForProvider("claude").map((m) => (
+          {modelOptionsForProvider(provider).map((m) => (
             <option key={m.id} value={m.id}>
-              {m.pinned ? m.label : `${m.label}（跟随最新）`}
+              {m.pinned || provider === "codex" ? m.label : `${m.label}（跟随最新）`}
             </option>
           ))}
         </select>
@@ -467,12 +489,13 @@ function DefaultsRow({
         onClick={() =>
           onRun(() =>
             patchAdminUser(user.id, {
-              defaults: { model: model || null, effort: effort || null },
+              allowedProviders: providers,
+              defaults: { provider, model: model || null, effort: effort || null },
             }),
           )
         }
       >
-        保存默认
+        保存 AI 设置
       </Ghost>
     </div>
   );

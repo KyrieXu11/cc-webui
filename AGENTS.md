@@ -65,12 +65,13 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 | `/api/groups` | `groups.ts` + `groups/*` | **多 agent 群聊**（见下） |
 | `/api/fs` | `fs.ts` | 文件浏览器（懒加载目录树） |
 | `/api/sessions` | `sessions.ts` + `session-store.ts` | 历史会话列表 / 单会话消息（读 `~/.claude/projects/`） |
-| `/api/memory` | `memory-routes.ts` | **项目记忆（只读）**：`~/.claude/projects/<slug>/memory/` 的 MEMORY.md 索引 + 每条正文。⚠️ 只有 GET，**不许加写方法**（用户明确要求只读，这是 CLI 自己的存储）；能看哪个项目 = 能不能打开那个项目（policy 查 query 的 cwd），不收调用方给的文件名。前端是左栏那颗书本按钮 → `MemoryDialog.tsx`，只在项目里出现 |
+| `/api/project-memory` | `project-memory-routes.ts` + `project-memory/*` | 当前账号＋规范化 cwd 的只读浏览/明确导入；正文在 `~/.cc-webui/project-memory/`、索引与版本在 DB。运行时唯一写入口是 `/api/mcp/memory` 的 per-turn capability。默认关闭，设计/验收见 `docs/project-memory.md`；**不得给原生 `/api/memory` 加写方法** |
+| `/api/memory` | `memory-routes.ts` | **项目记忆（只读）**：`~/.claude/projects/<slug>/memory/` 的 MEMORY.md 索引 + 每条正文。⚠️ 只有 GET，**不许加写方法**（用户明确要求只读，这是 CLI 自己的存储）；能看哪个项目 = 能不能打开那个项目（policy 查 query 的 cwd），不收调用方给的文件名。仅保留兼容 GET 与迁移来源，**日常 UI 不再展示原生记忆**；左栏书本 → `MemoryDialog.tsx` 只读统一项目库 |
 | `/api/upload` | `upload.ts` | 文件上传落盘 |
 | `/api/permission` | `permission.ts` | 权限卡 resolve；`shared/permission-flow.ts` 是 scope-keyed allowance |
 | `/api/meta` | `meta.ts` | 目录扫描（列 `$HOME` 候选项目） |
 | `/api/bash/tasks` | `bash-tasks.ts` | 后台 bash 任务面板的 SSE |
-| `/api/mcp` | `mcp-bash-route.ts` | **HTTP 版** bash + lark + schedule MCP（bearer-token 网关），Claude / Codex / 飞书都走它 |
+| `/api/mcp` | `mcp-bash-route.ts` | **HTTP 版** bash + lark + schedule MCP（另有 `mcp-memory-route.ts` 的项目 memory）（bearer-token 网关），Claude / Codex / 飞书都走它 |
 | `/api/mcp/local/:server` | `mcp-local-route.ts` | **桌面客户端中继**：把 CLI 的 MCP 调用透传到家人机器上的 Electron 客户端（见下「5. 桌面客户端」） |
 | `/api/client` | `client-routes.ts` | 桌面客户端安装包下载（**要鉴权**，不是公开面） |
 | `/ws/device` | `devices/ws.ts` | 设备 WebSocket。⚠️ **不是 Hono 路由** —— 挂在 http.Server 的 upgrade 事件上，绕开 authMiddleware |
@@ -167,7 +168,7 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 - Codex：`codex-chat.ts` → `executors/codex-executor.ts`（spawn `codex exec --experimental-json`），
   同样走 **HTTP** `/api/mcp` 的 bash MCP（`mcp-bash-route.ts`）——MCP server 以 `-c mcp_servers.*`
   覆盖的形式进 argv，**bearer token 只走环境变量**（argv 是 `ps` 可见的）。
-  ⚠️ Codex 只挂 `bash` 一条：**没有** Claude 那条 `schedule`（所以 Codex 单聊没有 wakeup），
+  ⚠️ Codex 默认挂 `bash`，启用项目记忆时另挂 `memory`：**没有** Claude 那条 `schedule`（所以 Codex 单聊没有 wakeup），
   更没有桌面客户端的 `local-*`（决策 19）。
 - 权限：`permissionMode: default` 时每个工具弹卡；`本次会话都允许` 缓存进 `permission-flow` 的
   allowance Set（scope = sessionId）；10 分钟无响应自动 deny。
@@ -301,6 +302,14 @@ claude CLI（你 Mac 上的子进程）
   每一版只套用一次（`src/lib/user-defaults.ts`），之后用户自己改的会保留，直到管理员再保存。
   ⚠️ 别改成「每次加载都套用」——那等于把用户的选择锁死，而用户确认过要的是「她还能改」。
   校验用的是和输入框同一张表（`admin-routes.ts` 直接 import `src/lib/settings.ts`）。
+
+### 项目 Memory MCP 与成员可用 AI（2026-09-28）
+
+- `CC_WEBUI_PROJECT_MEMORY_ENABLED=1` 才给网页单聊装配新记忆；原生记忆仍只读，导入是独立确认动作。普通索引只注入 metadata，正文由 MCP read 返回，角色不是任意文件路径。
+- 五个固定 memory 工具是权限卡的范围受限例外，Plan 写入在服务端拒绝。namespace 是调用者 actor＋canonical cwd；**不能以会话 owner 或 provider 分库**。群聊/飞书不给 capability。
+- `shared/project-memory-envelope.ts` 同时用于请求注入和历史/标题剥离；换 envelope 要一起改，不能把索引显示成用户气泡。steer 必须在原有消息内携带快照；跨 actor 插话改为 409 排队，不能把他人的记忆送给当前运行者。
+- `user_ai_access` 管成员可用 provider；无行仍仅 Claude，管理员默认两种。`user_defaults.provider` 与模型/effort 一样是默认值而非锁定。Codex 无逐工具审批，授予必须明确，不等于授予管理员角色；Bypass 仍按角色拒绝。参见 `docs/user-permissions.md` 决策 48-50。
+- 新表/存储测试要设置 `CC_WEBUI_DB`、`CC_WEBUI_PROJECT_MEMORY_DIR`，建账号仍要隔离工作区。新根有专用标记，恢复只清扫版本文件，**不能清扫任意 .md**。
 
 ## 数据与存储布局
 
@@ -494,7 +503,7 @@ claude CLI（你 Mac 上的子进程）
   （`server/auth/`，设计与全部决策见 [`docs/user-permissions.md`](./docs/user-permissions.md)）。
   但白名单是**护栏不是隔离**——agent 有 shell，能读写服务进程那个 OS 用户能碰的一切。
   给谁开账号 = 把这台机器交给谁。
-- 公开的路由只有：登录 / 登出 / `GET /api/auth/me` / **四条** `/api/mcp/*`（per-turn capability token，
+- 公开的路由只有：登录 / 登出 / `GET /api/auth/me` / **五条** `/api/mcp/*`（per-turn capability token，
   含桌面客户端中继 `/api/mcp/local/:server`）
   / 两条 `/api/office/{download,callback}`（签名票据）/ `/feishu/:bot/events`（固定 404）。
   **`/api/mcp/*` 拿到 token 就等于一个 shell**，它的合法调用方只有本机 CLI 子进程，

@@ -1,3 +1,4 @@
+import { assertProviderAllowed } from "../auth/users.ts";
 import { randomUUID } from "node:crypto";
 import { getMcpRouteUrl } from "../codex-mcp-config.ts";
 import {
@@ -23,6 +24,7 @@ export async function* runCodex(args: {
   ctx: RunnerCtx;
 }): AsyncIterable<RunnerEvent> {
   const { config, participant, prompt, images, ctx } = args;
+  assertProviderAllowed(ctx.ownerId, "codex", participant.mode);
   const scope = `${ctx.gid}:${ctx.agentId}`;
 
   // Codex doesn't accept a system prompt directly; fold the group preamble

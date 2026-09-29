@@ -13,12 +13,15 @@
 import {
   EFFORT_OPTIONS,
   clampEffort,
+  defaultModelForProvider,
+  type AgentProvider,
   modelOptionsForProvider,
   type EffortLevel,
   type Settings,
 } from "./settings";
 
 export type UserDefaults = {
+  provider?: AgentProvider | null;
   model: string | null;
   effort: EffortLevel | null;
   updatedAt: number;
@@ -58,17 +61,18 @@ export function hasPendingDefaults(
 }
 
 export function applyUserDefaults(s: Settings, d: UserDefaults): Settings {
-  // 模型只对 Claude 生效：默认值来自 Claude 的模型表，而 Codex 只有管理员能用，
-  // 塞一个 Claude 模型给 Codex 会话只会让下一次发送失败。
+  // 显式 provider 可以切换；没有 provider 的旧默认值保持原有行为。
   // 选项表里已经没有的 id（某个固定版本下线了）直接忽略，别把人卡在一个发不出去的模型上。
+  const provider = d.provider ?? s.agentProvider;
+  const initialModel = provider === s.agentProvider ? s.model : defaultModelForProvider(provider);
   const model =
     d.model &&
-    s.agentProvider === "claude" &&
-    modelOptionsForProvider("claude").some((o) => o.id === d.model)
+    (d.provider || provider === "claude") &&
+    modelOptionsForProvider(provider).some((o) => o.id === d.model)
       ? d.model
-      : s.model;
+      : initialModel;
   const wanted =
     d.effort && EFFORT_OPTIONS.some((o) => o.id === d.effort) ? d.effort : s.effort;
   // 和输入框里换模型是同一条规则：新模型没有这一档（Sonnet 没有 xHigh）就往下落。
-  return { ...s, model, effort: clampEffort(wanted, model) };
+  return { ...s, agentProvider: provider, model, effort: clampEffort(wanted, model) };
 }

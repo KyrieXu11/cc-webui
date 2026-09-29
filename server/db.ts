@@ -295,6 +295,44 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // 8 — 可用 provider 是限制；provider/model/effort 默认值仍由浏览器按版本套用。
+  `
+  ALTER TABLE user_defaults ADD COLUMN provider TEXT CHECK(provider IN ('claude','codex'));
+  CREATE TABLE user_ai_access (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    providers TEXT NOT NULL
+  );
+  `,
+  // 9 — 项目记忆：文件存正文，数据库存指针、版本与幂等结果。
+  `
+  CREATE TABLE project_memory_scopes (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cwd TEXT NOT NULL, project_key TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, cwd)
+  );
+  CREATE TABLE project_memories (
+    id TEXT PRIMARY KEY,
+    scope_id TEXT NOT NULL REFERENCES project_memory_scopes(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, description TEXT NOT NULL, type TEXT NOT NULL,
+    revision INTEGER NOT NULL, file TEXT NOT NULL, hash TEXT NOT NULL, body_offset INTEGER NOT NULL,
+    provider TEXT NOT NULL, session_id TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    UNIQUE(scope_id, name)
+  );
+  CREATE INDEX idx_project_memory_scope ON project_memories(scope_id,updated_at DESC,id);
+  CREATE TABLE project_memory_revisions (
+    memory_id TEXT NOT NULL REFERENCES project_memories(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL, parent_revision INTEGER NOT NULL, file TEXT NOT NULL,
+    hash TEXT NOT NULL, body_offset INTEGER NOT NULL, provider TEXT NOT NULL, session_id TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(memory_id, revision)
+  );
+  CREATE TABLE project_memory_operations (
+    scope_id TEXT NOT NULL REFERENCES project_memory_scopes(id) ON DELETE CASCADE,
+    operation_id TEXT NOT NULL, request_hash TEXT NOT NULL, result TEXT NOT NULL,
+    PRIMARY KEY(scope_id, operation_id)
+  );
+  `,
 ];
 
 let handle: Database | null = null;

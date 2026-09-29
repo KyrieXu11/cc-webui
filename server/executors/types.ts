@@ -178,6 +178,8 @@ export type ExecOptions = {
   disallowedTools?: string[];
   allowedTools?: string[];
   appendSystemPrompt?: string;
+  /** Disable CLI-native memory only for this managed WebUI turn. */
+  disableNativeMemory?: boolean;
 
   // Wall-clock cap. Exceeding it yields `status: "timeout"`, distinct from a
   // caller abort.

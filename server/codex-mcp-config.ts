@@ -8,7 +8,7 @@
 
 // Named for the HTTP MCP routes in server/mcp-bash-route.ts. Not Codex-only
 // any more — both CLI executors reach the same routes.
-export type McpRouteName = "bash" | "lark" | "schedule" | "local";
+export type McpRouteName = "bash" | "lark" | "schedule" | "local" | "memory";
 
 export function getMcpRouteUrl(
   env: Partial<

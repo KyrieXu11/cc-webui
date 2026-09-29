@@ -1,7 +1,7 @@
 # 项目记忆 / Memory MCP — v1 最终设计方案
 
-> 2026-09-28。**设计方案，尚未实施**。采用独立 Memory MCP，不让 CLI 原生文件写入成为第二条写入路径。
-> 当前 `/api/memory` 与 `MemoryDialog` 展示的 Claude 原生记忆仍然只读；本方案不解除这条约束。
+> 2026-09-29。**v1 已实施并发布到本机正式服务，生产已启用；其它部署默认不开启**。采用独立 Memory MCP，不让 CLI 原生文件写入成为第二条写入路径。
+> 日常界面仅展示统一项目记忆；旧 `/api/memory` 仍严格 GET-only，供兼容与显式迁移。
 
 ## 1. 目标和边界
 
@@ -76,6 +76,7 @@ Claude 和 Codex 共用以上 store / prompt 规则；provider 只存在于来�
 - DB 的 active revision 指针决定什么能被读取或召回；孤立文件不是有效记忆。
 - 不让模型写真实 MEMORY.md。**MEMORY.md 风格的索引是 DB 生成的只读投影，不是第二份 canonical。**
 - 不将文件存储目录告诉模型，也不给 Codex 增加该目录的 --add-dir。
+- 正文根有 `.cc-webui-project-memory` 标记，拒绝把非空的未知目录当作库；恢复只清扫 UUID/hash/UUID/UUID.md 形状的孤立版本，不能清扫任意 Markdown。
 - 新增 `CC_WEBUI_PROJECT_MEMORY_DIR` 用于部署与测试覆盖。测试必须同时隔离 CC_WEBUI_DB 与此目录；涉及建账号时还要隔离工作区。
 
 DB 增量迁移增加：
@@ -109,7 +110,7 @@ server name：`memory`；HTTP endpoint：`/api/mcp/memory`。
 - `body`：Markdown，一条聚焦一个长期事实、偏好或规则；feedback / project 建议包含 Why 与 How to apply。
 - `revision`、provider、session、actor、timestamps：服务端确定，agent 不能伪造来源。
 
-写入建议每条不超过约 4 KiB，硬上限 16 KiB（包括服务端生成的 frontmatter）；超限拒绝，**不静默截断保存**。
+写入建议每条不超过约 4 KiB，硬上限 32 KiB（包括服务端生成的 frontmatter）；超限拒绝，**不静默截断保存**。
 
 ### 搜索范围
 
@@ -236,19 +237,18 @@ CAS 先把条目移出可见索引并保存不含正文的 tombstone/幂等结�
 导入是用户明确触发的独立管理操作，不是每个 turn 自动同步：
 
 1. 从现有只读入口能展示的 Claude 记忆枚举来源。
-2. 预览并选条目；不扫描整个 HOME，也不接受任意 source path。
+2. 使用明确的账号 / cwd 迁移清单枚举来源；不扫描整个 HOME，也不接受任意 source path。
 3. 校验格式，按来源标识 + 内容 hash 幂等导入新库。
-4. 同名不同内容进入冲突预览，不静默覆盖。
+4. 同名不同内容在迁移报告中明确报冲突，不静默覆盖。
 5. 不修改原文件，不做双向同步，不自动导入 Codex 全局库的所有内容。
 
 用户可以不开导入，新库从空开始。
 
-界面沿用现有 MemoryDialog 的入口，明确分两种来源：
+界面沿用现有 MemoryDialog 的入口，**仅展示统一项目记忆**（2026-09-29 用户确认）。Claude / Codex 共用只指同账号跨 provider，不指跨账号。正文与索引只读；不再显示 Claude 原生标签或前端导入按钮。
 
-- **共享项目记忆（Claude / Codex 共用）**：这里的共享只指同账号跨 provider，不指跨账号。显示正文、类型、版本、时间和来源；v1 日常面板只读。
-- **Claude 原生记忆（只读）**：保留现有入口与 GET API，没有编辑/删除。
+旧 `/api/memory` 仍为 GET-only 兼容入口及迁移来源，不给它增加写方法。新增 `/api/project-memory` 只读入口与独立导入接口。
+显式批量迁移使用 `npx tsx scripts/import-project-memory.ts --apply --manifest /absolute/plan.json --report /absolute/report.json`。清单形状为 `{"projects":[{"username":"rebecca","cwd":"/absolute/project"}]}`，每个 scope 必须明确账号；报告不含正文。没有项目目录的旧记忆保留原文件、待原目录恢复后再导入，不擅自并入其它项目。
 
-新增只读 `/api/project-memory` 入口与单独的导入接口，不给 `/api/memory` 增加写方法。
 MCP 调用自然进入已有工具时间线。可用 `memory_updated` 控制事件刷新已打开面板，但不把空渲染事件塞进 MessageList blocks 而切断时间线。
 
 ## 12. 文件职责与实施顺序
@@ -280,7 +280,7 @@ MCP 调用自然进入已有工具时间线。可用 `memory_updated` 控制事�
 4. envelope 的历史与标题过滤、steer 和 attach 回归。
 5. 只读 UI 与导入，最后补文档、启用开关。
 
-不在同一批顺手扩大群聊/飞书能力、放开普通账号 Codex、增加第三个搜索面或修改原生记忆接口。
+记忆能力不扩到群聊/飞书、不增加第三个搜索面、不修改原生记忆写接口。另按 2026-09-28 的后续要求，管理员可明确授予成员 Codex 使用权限并选择默认 AI / 模型 / effort，见 user-permissions.md 新决策。
 
 ## 13. 验收标准
 
@@ -301,3 +301,17 @@ MCP 调用自然进入已有工具时间线。可用 `memory_updated` 控制事�
 - 实施后 `npm run typecheck` 与测试通过；测试不启动真实 bot、不动真实 DB / workspace / memory。
 
 **验收不把模型行为确定性与协议保证混为一谈**：服务端能保证写入成功与持久化、scope 和版本；是否主动选择正确记忆仍受模型影响，需要少量真实模型行为测试，不能只靠 fake API 宣称召回效果达标。
+
+
+## 实施验证与上线
+
+- 新增 store / MCP / 导入 / CLI 注入 / provider 授权与 envelope 测试，使用临时 DB、记忆目录和假 CLI，不消耗真实模型额度。
+- 校验两个 CLI 都装配 memory，只有索引进入 prompt；同一份业务规则、CLI 原生记忆关闭、功能关闭后恢复旧行为。
+- 索引超过显示预算仍可搜索/分页；真实版本冲突只有一个赢家；重试不重复写；正文损坏拒读；清理失败可重试；进程恢复只清理本库的版本文件。
+- 浏览器 QA 使用 `127.0.0.1:9898` 的独立临时数据库与禁用的 CLI，确认管理员设置、成员 Codex 默认值、只读记忆面板和账号分库。
+- 正式服务真实 Codex（gpt-5.6-sol / low / Plan）已完成 `memory.list` + `memory.read`，成功读回迁移的 `feedback-infra-config`。这是基础连通性/读取验收，不代替广泛召回质量评估；Claude CLI 当前不可用，未做其线上模型验收。
+- 部署需重启后端，并设置 `CC_WEBUI_PROJECT_MEMORY_ENABLED=1` 才启用运行时记忆；默认关闭可先完成导入和成员 AI 配置；本机生产部署明确设为 1。
+- 本机正式服务 8789 已重启，公网 HTTPS 返回 200；生产 `.env` 显式设置 `CC_WEBUI_PROJECT_MEMORY_ENABLED=1`。
+- 显式导入 9 个现存项目的 175 条旧记忆，其中 rebecca 工作区 22 条仅归 rebecca，其余 153 条归本机管理员。4 个已消失项目的 8 条保留原件及待迁移清单；没有擅自归并。194 个原生 Markdown 文件（含索引）逐字节校验未改。
+- rebecca 保持普通成员角色，可用 AI 切为 Codex，默认 gpt-5.6-sol / xhigh；管理员仍可在用户设置中调整。CLI 全局配置未改。
+- 上线前备份 DB（SQLite 一致性快照）、旧 dist、`.env` 与原生记忆至私有 `~/.cc-webui/backups/project-memory-<timestamp>/`；迁移清单、逐条报告和源文件校验记录保存在该目录。数据库现为 schema 9，回滚旧代码须同时还原备份 DB / dist / env，不能只切 Git 分支。

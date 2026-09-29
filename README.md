@@ -52,7 +52,8 @@
   - 单击文件夹＝展开，同时设为「上传」「新建文件夹」的落点
   - 右键文件或文件夹进入多选 → 下载（多个打成 zip，文件夹不能下载）/ 删除（真删、无回收站、留痕；**文件夹只删空的**）
   - 拖到文件夹＝移动，拖到对话框＝插入相对路径；悬停出现的铅笔＝重命名
-- **项目记忆（只读）** — 左侧竖栏的书本按钮（只在项目里有），查看 Claude CLI 给这个项目记下的记忆：`~/.claude/projects/<slug>/memory/` 的 `MEMORY.md` 索引 + 每条正文，`[[链接]]` 可跳转。**只读**：没有任何编辑入口，接口也只有 GET
+- **AI 共用项目记忆（可选）** — `CC_WEBUI_PROJECT_MEMORY_ENABLED=1` 后，网页 Claude / Codex 通过独立 Memory MCP 使用同一账号、同一项目的记忆。每轮加载索引，按需读取正文；保存会原子更新正文与索引，带版本冲突和幂等保护。左栏书本只展示这一份统一记忆；旧 Claude 记忆可用显式迁移脚本导入，原生文件不改动。Plan 禁止保存/删除；其它模式下五个范围固定的 memory 工具不另弹通用文件权限卡。详见 [项目记忆](docs/project-memory.md)
+- **成员可用 AI** — 管理 → 用户：勾选允许 Claude / Codex，再设置默认 AI、该 AI 的模型和 effort。可用 AI 是服务端限制，默认值每版只套用一次，对方之后仍可自行调整模型/effort。普通账号默认仅 Claude，管理员可明确开放 Codex，不必升为管理员。**Codex CLI 没有逐工具确认通道，工具写入会自动执行；普通账号仍不能使用 Bypass。** 群聊仍只供管理员发起。
 - **文件上传** — composer 支持点击 / 拖拽 / 粘贴：
   - **图片** → base64 直接作为 image content block 发给模型，1 个回合看见（等价于终端粘贴）
   - **其他文件** → 落盘系统临时目录下的 `cc-webui-uploads/`（macOS 上是 `/var/folders/…/T/`，可用 `CC_WEBUI_UPLOAD_DIR` 改），路径以 `附件：` 形式带进 prompt 让 Claude 去读；消息气泡里只显示文件名，悬停看路径。⚠️ **macOS 会自动清掉这个目录里 3 天前的文件**（`dirhelper`），要长期用的资料请用文件面板上传进项目
@@ -72,7 +73,7 @@
 
 - Node 20+
 - 本机已安装并登录 `claude` CLI（`claude --version` 能通过）
-- 使用 Codex provider 时，本机需要可运行 Codex CLI / `@openai/codex-sdk` 所需的 OpenAI 凭据
+- 使用 Codex provider 时，本机需要安装并登录 Codex CLI，普通账号还需管理员授予 Codex 使用权限
 
 ## Installation
 
@@ -135,6 +136,8 @@ npm run dev
 | `CC_WEBUI_SESSION_INDEX` | 旧 Codex 会话索引文件路径，现仅用于首次启动时一次性导入进 SQLite | `~/.cc-webui/sessions.json` |
 | `CC_WEBUI_DB` | SQLite 数据库路径（索引与关系：最近项目 / 飞书绑定 / 群聊索引 / Codex 会话索引） | `~/.cc-webui/cc-webui.db` |
 | `CC_WEBUI_GROUPS_DIR` | 多 agent 群聊数据目录（`<gid>/config.json` + `transcript.jsonl` + `index.json`） | `~/.cc-webui/groups` |
+| `CC_WEBUI_PROJECT_MEMORY_ENABLED` | 启用网页单聊的项目 Memory MCP；仅本次 CLI 调用禁用原生自动记忆，不改全局配置 | 关闭 |
+| `CC_WEBUI_PROJECT_MEMORY_DIR` | 项目记忆正文库；只接受空目录或带本应用标记的目录，不可填现有项目/原生记忆目录 | `~/.cc-webui/project-memory` |
 | `CC_WEBUI_GROUPS_ENABLED` | 是否启用**多 agent 群聊**（一个 turn 里多个 agent 接话）。未开启时网页群聊入口不出现、`/api/groups` 不挂载；飞书和网页单聊不受影响 | 关闭 |
 | `CC_WEBUI_OFFICE_URL` | ONLYOFFICE DocumentServer 的**浏览器可达**地址（必须公网：是用户的浏览器去取 `api.js`）。**留空 = 在线编辑关闭**，取件台里 Office 文件降级成「浏览器打开 / 下载」 | 未设置（关闭） |
 | `CC_WEBUI_OFFICE_JWT_SECRET` | 与容器 `JWT_SECRET` **必须一致**，否则容器一律拒签。同时用于签发容器取文件 / 回调的票据 | 未设置（关闭） |

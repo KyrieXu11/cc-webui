@@ -5,6 +5,7 @@
 // see anyone's bash tasks, and read anyone's session content — the last one
 // deliberately without an access log.
 
+import type { AgentProvider } from "../../src/lib/settings.ts";
 import { randomUUID } from "node:crypto";
 import { getDb, transact } from "../db.ts";
 import { assertUsableUsername, isUsableUsername } from "./workspaces.ts";
@@ -150,6 +151,7 @@ export function setAllowedPaths(userId: string, patterns: string[]): void {
 // user changes afterwards sticks until the admin saves again.
 
 export type UserDefaults = {
+  provider?: AgentProvider | null;
   model: string | null;
   effort: string | null;
   updatedAt: number;
@@ -158,12 +160,13 @@ export type UserDefaults = {
 export function getUserDefaults(userId: string): UserDefaults | null {
   const row = getDb()
     .prepare(
-      `SELECT model, effort, updated_at AS updatedAt
+      `SELECT provider, model, effort, updated_at AS updatedAt
          FROM user_defaults WHERE user_id = ?`,
     )
     .get(userId) as UserDefaults | undefined;
   if (!row) return null;
   return {
+    ...(row.provider ? { provider: row.provider } : {}),
     model: row.model ?? null,
     effort: row.effort ?? null,
     updatedAt: Number(row.updatedAt),
@@ -175,10 +178,10 @@ export function getUserDefaults(userId: string): UserDefaults | null {
 // account apply it again — including a re-save of the same values.
 export function setUserDefaults(
   userId: string,
-  value: { model: string | null; effort: string | null },
+  value: { provider?: AgentProvider | null; model: string | null; effort: string | null },
 ): UserDefaults | null {
   const db = getDb();
-  if (!value.model && !value.effort) {
+  if (!value.provider && !value.model && !value.effort) {
     db.prepare("DELETE FROM user_defaults WHERE user_id = ?").run(userId);
     return null;
   }
@@ -187,14 +190,38 @@ export function setUserDefaults(
   const prev = getUserDefaults(userId)?.updatedAt ?? 0;
   const updatedAt = Math.max(Date.now(), prev + 1);
   db.prepare(
-    `INSERT INTO user_defaults(user_id, model, effort, updated_at)
-          VALUES (?, ?, ?, ?)
+    `INSERT INTO user_defaults(user_id, model, effort, updated_at, provider)
+          VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE
-        SET model = excluded.model,
+        SET provider = excluded.provider,
+            model = excluded.model,
             effort = excluded.effort,
             updated_at = excluded.updated_at`,
-  ).run(userId, value.model, value.effort, updatedAt);
-  return { model: value.model, effort: value.effort, updatedAt };
+  ).run(userId, value.model, value.effort, updatedAt, value.provider ?? null);
+  return getUserDefaults(userId);
+}
+
+// No explicit grant preserves existing ordinary-account behavior. Admins retain both.
+export function getAllowedProviders(user: User): AgentProvider[] {
+  if (user.role === "admin") return ["claude", "codex"];
+  const row = getDb().prepare("SELECT providers FROM user_ai_access WHERE user_id = ?").get(user.id) as { providers: string } | undefined;
+  if (!row) return ["claude"];
+  try {
+    const values: unknown = JSON.parse(row.providers);
+    return Array.isArray(values) ? ["claude", "codex"].filter(p => values.includes(p)) as AgentProvider[] : [];
+  } catch { return []; }
+}
+
+export function assertProviderAllowed(actorId: string | undefined, provider: AgentProvider, mode?: string): void {
+  const actor = actorId ? getUserById(actorId) : null;
+  if (!actor || !getAllowedProviders(actor).includes(provider)) throw new Error(`此账号不能使用 ${provider}`);
+  if (mode === "bypassPermissions" && actor.role !== "admin") throw new Error("Bypass 模式仅管理员可用");
+}
+
+export function setAllowedProviders(userId: string, providers: AgentProvider[]): void {
+  if (!providers.length || providers.some(p => p !== "claude" && p !== "codex")) throw new Error("at least one valid provider required");
+  getDb().prepare(`INSERT INTO user_ai_access(user_id, providers) VALUES (?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET providers = excluded.providers`).run(userId, JSON.stringify([...new Set(providers)]));
 }
 
 // ─── bootstrap ──────────────────────────────────────────────────────────────

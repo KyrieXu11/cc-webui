@@ -86,6 +86,10 @@ export async function* streamChat(
       if (!data) continue;
       try {
         const parsed = JSON.parse(data);
+        if (event === "memory_updated") {
+          if (typeof window !== "undefined") window.dispatchEvent(new Event("cc-webui:memory-updated"));
+          continue;
+        }
         yield parsed;
       } catch {
         /* skip malformed */
@@ -149,6 +153,7 @@ export function connectAttach(
   ]) {
     es.addEventListener(t, forward);
   }
+  es.addEventListener("memory_updated", () => window.dispatchEvent(new Event("cc-webui:memory-updated")));
   es.addEventListener("done", () => {
     onDone?.("done");
     es.close();

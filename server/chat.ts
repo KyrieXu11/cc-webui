@@ -16,6 +16,10 @@ import { relabelTasksSessionId } from "./bash-mcp.ts";
 // relabel 留着：CLI 会在首个 turn 换掉 session id，registry 里已有的历史行还得跟着走，
 // 不然它们会变成查不出来的孤儿。表和 GET /api/files 都还在，只是不再有写入方。
 import { relabelSessionFiles } from "./session-files.ts";
+import { prepareProjectMemory, MEMORY_TOOLS, type MemoryCapability } from "./project-memory/runtime.ts";
+import { memorySnapshot } from "./project-memory/prompt.ts";
+import { wrapMemoryPrompt } from "../shared/project-memory-envelope.ts";
+import { assertProviderAllowed } from "./auth/users.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import { claudeSessionExists } from "./claude-sessions.ts";
 import type { ExecResult } from "./executors/types.ts";
@@ -175,6 +179,7 @@ interface InFlightChat {
   cancelIterator?: () => Promise<void>;
   // 中途插话的句柄：executor 在 CLI 起来、stdin 可写之后塞进来，这一轮不再接受
   // 输入时置回 null（见 ExecOptions.onSteer）。POST /chat/steer 是唯一的消费者。
+  projectMemory?: MemoryCapability;
   steer?: ((text: string) => boolean) | null;
 }
 
@@ -502,6 +507,9 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       // /api/bash/tasks streams, and the wakeup slot the timer reads, are still
       // the very same objects. A per-turn bearer token carries this turn's
       // context (cwd, live session id, SSE fanout, wakeup slot).
+      assertProviderAllowed(opts.ownerId, "claude", opts.permissionMode);
+      const memory = await prepareProjectMemory(opts.ownerId, opts.cwd ?? process.cwd(), "claude", opts.permissionMode);
+      entry.projectMemory = memory?.capability;
       const mcpToken = randomUUID();
       mcpTokenToRelease = mcpToken;
       registerMcpSessionContext({
@@ -511,6 +519,8 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         cwd: opts.cwd,
         onForegroundEvent: fanout,
         wakeupSlot,
+        projectMemory: memory?.capability,
+        onMemoryUpdated: () => fanout("memory_updated", JSON.stringify({ type: "memory_updated" })),
       });
 
       // 起 turn 前探测这个账号有没有在线设备（docs/desktop-client.md 决策 9）。
@@ -542,7 +552,8 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         onSteer: (send) => {
           entry.steer = send;
         },
-        prompt: opts.prompt,
+        prompt: memory ? memory.wrap(opts.prompt) : opts.prompt,
+        disableNativeMemory: !!memory,
         images: opts.images,
         cwd: opts.cwd ?? process.cwd(),
         signal: abort.signal,
@@ -555,7 +566,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         // it disabled so the model only uses mcp__schedule__wakeup, whose
         // timers the server owns (survive across turns, cancellable).
         disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
-        appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers),
+        appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers) + (memory?.rules ?? ""),
         // 只在真有本地工具时才抬高超时（见 CLI_MCP_TOOL_TIMEOUT_MS 的注释）。
         // 无条件抬高会让服务端那些本该快速失败的 MCP 调用也拖到 5 分钟。
         extraEnv:
@@ -563,6 +574,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
             ? { MCP_TOOL_TIMEOUT: String(CLI_MCP_TOOL_TIMEOUT_MS) }
             : undefined,
         mcpServers: [
+          ...(memory ? [{ name: "memory", url: getMcpRouteUrl(process.env, "memory"), bearerToken: mcpToken }] : []),
           {
             name: "bash",
             url: getMcpRouteUrl(process.env, "bash"),
@@ -601,6 +613,9 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           toolUseId,
           signal,
         }) => {
+            if (entry.projectMemory && MEMORY_TOOLS.has(toolName)) {
+              return { behavior: "allow", updatedInput: input };
+            }
             if (
               toolName === MCP_BASH_OUTPUT ||
               toolName === MCP_BASH_KILL ||
@@ -737,7 +752,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           const cb = m.event.content_block;
           if (cb?.type === "tool_use") {
             console.log(
-              `[chat ${reqId}] tool_use: ${cb.name} input=${JSON.stringify(cb.input ?? {}).slice(0, 200)}`
+              `[chat ${reqId}] tool_use: ${cb.name} input=${(MEMORY_TOOLS.has(cb.name) ? "[project memory input redacted]" : JSON.stringify(cb.input ?? {}).slice(0, 200))}`
             );
           }
         }
@@ -1081,7 +1096,11 @@ chat.post("/chat/steer", async (c) => {
   if (!entry) return unavailable("no_entry");
   if (entry.status !== "running") return unavailable(`already_${entry.status}`);
   if (!entry.steer) return unavailable("no_handle");
-  if (!entry.steer(text)) return unavailable("pipe_closed");
+  if (entry.projectMemory && entry.projectMemory.scope.actorId !== currentUser(c)?.id) return unavailable("different_actor");
+  let steerText = text;
+  try { if (entry.projectMemory) steerText = wrapMemoryPrompt(await memorySnapshot(entry.projectMemory.scope), text); }
+  catch { return unavailable("memory_unavailable"); }
+  if (!entry.steer(steerText)) return unavailable("pipe_closed");
   console.log(`[chat ${entry.reqId}] steer 已送达（${text.length} 字）`);
   return c.json({ ok: true });
 });

@@ -159,6 +159,8 @@ groups.delete("/:gid", async (c) => {
 // ============================================================
 
 groups.post("/:gid/turn", async (c) => {
+  // Ordinary accounts cannot route around the solo provider policy via groups.
+  if (!isAdmin(c)) return c.json({ error: "group turns are admin-only" }, 403);
   const gid = c.req.param("gid");
   const body = await c.req.json().catch(() => ({}));
   const text: string = typeof body.text === "string" ? body.text : "";

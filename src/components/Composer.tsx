@@ -513,7 +513,7 @@ export default function Composer({
             onChange={onModelChange}
           />
           <span className="text-subtle/50 text-[11px]">·</span>
-          <ModeSelector value={mode} onChange={onModeChange} />
+          <ModeSelector value={mode} provider={provider} onChange={onModeChange} />
           <span className="text-subtle/50 text-[11px]">·</span>
           <EffortSelector
             value={effort}

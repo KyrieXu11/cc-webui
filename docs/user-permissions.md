@@ -156,6 +156,9 @@
 | 45 | 管理员给账号设的是**默认值,不是限制**:对方在输入框里照样能改,服务端也不拿它覆盖请求 | 用户明确选了「她还能改」。要锁的话得在 `POST /api/chat` 里按账号强制覆盖 body,那是另一个功能 |
 | 46 | 浏览器按 `updatedAt` **每一版只套用一次**(按账号记在 localStorage),切回标签页时重新问一次 `/me` | 每次加载都套用 = 一刷新就把她自己的选择冲掉,变相锁死;只套用一次 = 管理员之后再改她永远看不到。版本号每保存一次就前进一次(同一毫秒内也前进),所以「原样再存一次」= 把她拉回默认值 |
 | 47 | 只收 **Claude** 的模型,校验用输入框同一张表(`admin-routes.ts` 直接 import `src/lib/settings.ts`) | Codex 只有管理员能用(决策 14);两张表迟早漂移,漂了就会存下一个输入框里不显示的模型、或者那个模型没有的 effort 档位(Sonnet 没有 xHigh) |
+| 48 | **取代决策 14**：普通账号缺省仅 Claude；管理员可显式配置 allowedProviders（至少一种），并选默认 provider / 对应模型 / effort | 后端每次发起与实际 runner 都复查；Codex 的无逐工具审批风险在管理界面明示，不通过给成员管理员角色来绕过。Bypass 仍管理员专属 |
+| 49 | 群聊发起仍管理员专属；实际 runner 还要检查资源 actor 的 provider 权限 | 普通账号不能借群聊 API 绕过可用 AI 限制；飞书仍按它现有的资源 actor 运行，新项目 Memory MCP 不进入这两条路 |
+| 50 | provider 是硬限制，默认 provider / 模型 / effort 是默认值 | 默认仍按 updatedAt 每版一次；撤销某 provider 时清掉不再合法的默认值；历史可读但停用 AI 的会话不能继续发送 |
 
 ## 数据模型(全部是新增状态)
 
@@ -344,7 +347,7 @@ scopeToUser(user, list)                // 服务端强制过滤,不接受调用�
   macOS 上可接 `sandbox-exec`(Seatbelt,`/usr/bin/sandbox-exec` 存在但已 deprecated)。
   **Landlock 是 Linux LSM(kernel 5.13+),在 macOS 上不存在**,所以本机开发期一定是护栏形态。
   注意包住 **CLI 子进程**这一层就同时覆盖了 bash 和 CLI 内置的 Read/Write/Edit,比逐个工具加检查干净。
-- Codex 侧一旦有真审批通道(`codex exec` 支持 `--ask-for-approval`),决策 14 可以放开。
+- 决策 14 已由决策 48 取代：开放 Codex 必须是管理员明确授予的 provider 权限；它目前仍没有逐工具审批通道。
 
 ## 实施进度
 

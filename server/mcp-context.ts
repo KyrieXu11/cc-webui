@@ -1,3 +1,4 @@
+import type { MemoryCapability } from "./project-memory/runtime.ts";
 import type * as lark from "@larksuiteoapi/node-sdk";
 import type { WakeupSlot } from "./wakeup.ts";
 
@@ -34,6 +35,8 @@ interface McpSessionContext {
   onForegroundEvent?: (event: string, data: string) => void;
   // Backs the `schedule` MCP server: one pending wakeup per turn.
   wakeupSlot?: WakeupSlot;
+  projectMemory?: MemoryCapability;
+  onMemoryUpdated?: () => void;
   createdAt: number;
 }
 
@@ -47,6 +50,8 @@ export function registerMcpSessionContext(opts: {
   lark?: LarkMcpContext;
   onForegroundEvent?: (event: string, data: string) => void;
   wakeupSlot?: WakeupSlot;
+  projectMemory?: MemoryCapability;
+  onMemoryUpdated?: () => void;
 }): void {
   contexts.set(opts.token, {
     token: opts.token,
@@ -56,6 +61,8 @@ export function registerMcpSessionContext(opts: {
     lark: opts.lark,
     onForegroundEvent: opts.onForegroundEvent,
     wakeupSlot: opts.wakeupSlot,
+    projectMemory: opts.projectMemory,
+    onMemoryUpdated: opts.onMemoryUpdated,
     createdAt: Date.now(),
   });
 }

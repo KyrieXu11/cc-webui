@@ -21,6 +21,8 @@ import { groups } from "./groups.ts";
 import { feishu } from "./feishu/index.ts";
 import { authRoutes } from "./auth-routes.ts";
 import { adminRoutes } from "./admin-routes.ts";
+import { projectMemoryRoute } from "./project-memory-routes.ts";
+import { mcpMemoryRoute } from "./mcp-memory-route.ts";
 import { memoryRoute } from "./memory-routes.ts";
 import { groupsEnabled } from "./features.ts";
 import { authMiddleware } from "./auth/middleware.ts";
@@ -47,6 +49,8 @@ export function createApp(opts: { serveDist?: boolean } = {}): Hono {
   app.route("/api/office", officeRoute);
   app.route("/api/sessions", sessionsRoute);
   app.route("/api/memory", memoryRoute);
+  app.route("/api/project-memory", projectMemoryRoute);
+  app.route("/api/mcp", mcpMemoryRoute);
   app.route("/api/upload", uploadRoute);
   app.route("/api/permission", permissionRoute);
   app.route("/api/meta", metaRoute);
