@@ -5,15 +5,15 @@
 
 ## 1. 目标和边界
 
-让同一账号在同一项目里，换会话或从 Claude 切到 Codex 后，仍能使用已保存的长期记忆。
+让有权打开同一项目的账号，换会话或从 Claude 切到 Codex 后，仍能使用已保存的长期记忆。
 
 固定边界：
 
-- namespace = **actor 账号 ID + 规范化的会话 cwd**，不是 session ID，不含 provider。
+- namespace = **规范化的会话 cwd**（2026-09-29 用户确认不按账号隔离），不是 session ID，不含 provider。
 - 项目沿用 CONTEXT.md 的定义：作为会话 cwd 打开的文件夹，不强制归并到 Git 根目录。
 - 路径通过现有 `assertCanOpen` / `normalizePath` 规范化，`/tmp` 与 `/private/tmp` 等别名不产生两份记忆。
-- 不同账号默认不共享库；会话 reader 续聊使用调用者的记忆 namespace，不使用会话 owner 的库。
-- 共享会话的原有对话可能已经包含此前使用过的记忆，这是既有 transcript 可见性，不等于授予对方访问整个记忆库。
+- 有权打开同一项目的账号共用一份库；调用者 actor 仍必须通过当前目录白名单和 provider 授权。会话 reader 续聊按会话 cwd 使用项目库；会话分享不自动增加目录白名单。
+- 跨项目不能使用记忆 ID 读取另一项目；知道 ID、拥有别处的会话或登录管理员身份都不代替当前项目的目录访问授权。
 - v1 只接网页单聊 Claude / Codex。群聊、飞书不给 memory capability，不能凭它们恰好有管理员 actor 就放行。
 - v1 无向量库、embedding、额外 selector 模型、逐 turn 后台摘要、团队共享或用户全局记忆。
 - MCP 是**受管理功能的唯一写入口**。项目现有 shell/白名单是护栏，不是 OS 隔离；不声称能阻止同 OS 账号的外部程序手工改存储。
@@ -81,10 +81,10 @@ Claude 和 Codex 共用以上 store / prompt 规则；provider 只存在于来�
 
 DB 增量迁移增加：
 
-- `project_memory_scopes`：actor、canonical cwd、project key、scope revision。
+- `project_memory_scopes`：canonical cwd、project key、scope revision，不关联账号生命周期。
 - `project_memories`：ID、scope、name、description、type、当前 revision、当前正文版本指针。
 - `project_memory_revisions`：版本、parent revision、文件相对定位、正文 hash、来源 provider/session、提交时间。正文不放这里。
-- `project_memory_operations`：operation ID、请求 hash、结果元数据，供写操作幂等。**不存正文、token 或完整工具输入。**
+- `project_memory_operations`：actor ID、operation ID、请求 hash、结果元数据，供写操作幂等。**不存正文、token 或完整工具输入。**
 
 唯一约束 `(scope, name)` 防止同名重复；CAS 版本约束防止覆盖他人刚写的更新。
 
@@ -197,7 +197,7 @@ v1 不自动注入 top-5 正文，也不额外起模型召回。模型根据索�
 - 自动放行不代替上述服务端 scope 校验。不要按 `mcp__*` 前缀放行；仅明确工具名及有效 capability。
 - memory.save 的正文不得进入服务端诊断日志。现有 chat.ts 打印 tool input 的位置需对 memory 工具脱敏，截断 200 字符不算脱敏。
 - 目录/正文采用私有文件权限；读取按 DB 版本指针并校验 hash，外部篡改明确报 memory_corrupt，不悄悄让 DB 索引和正文分叉。
-- 删除账号后 scope 不可再访问，正文目录需要清理；不能把 DB 外键删行误认为文件也删了。
+- 删除账号后它的 token / scope capability 不可再使用，**项目正文与索引保留**，其它有项目访问权的账号仍能召回；不得级联删除项目库或以旧 actor 目录名推断归属。
 
 ## 10. 并发、幂等与错误恢复
 
@@ -244,10 +244,10 @@ CAS 先把条目移出可见索引并保存不含正文的 tombstone/幂等结�
 
 用户可以不开导入，新库从空开始。
 
-界面沿用现有 MemoryDialog 的入口，**仅展示统一项目记忆**（2026-09-29 用户确认）。Claude / Codex 共用只指同账号跨 provider，不指跨账号。正文与索引只读；不再显示 Claude 原生标签或前端导入按钮。
+界面沿用现有 MemoryDialog 的入口，**仅展示统一项目记忆**（2026-09-29 用户确认）。有权打开项目的账号、Claude / Codex 共用一份库；访问边界是项目，不是账号。正文与索引只读；不再显示 Claude 原生标签或前端导入按钮。
 
 旧 `/api/memory` 仍为 GET-only 兼容入口及迁移来源，不给它增加写方法。新增 `/api/project-memory` 只读入口与独立导入接口。
-显式批量迁移使用 `npx tsx scripts/import-project-memory.ts --apply --manifest /absolute/plan.json --report /absolute/report.json`。清单形状为 `{"projects":[{"username":"rebecca","cwd":"/absolute/project"}]}`，每个 scope 必须明确账号；报告不含正文。没有项目目录的旧记忆保留原文件、待原目录恢复后再导入，不擅自并入其它项目。
+显式批量迁移使用 `npx tsx scripts/import-project-memory.ts --apply --manifest /absolute/plan.json --report /absolute/report.json`。清单形状为 `{"projects":[{"username":"rebecca","cwd":"/absolute/project"}]}`，必须明确执行导入的账号以复查目录访问权，但保存到项目共用 scope；报告不含正文。没有项目目录的旧记忆保留原文件、待原目录恢复后再导入，不擅自并入其它项目。
 
 MCP 调用自然进入已有工具时间线。可用 `memory_updated` 控制事件刷新已打开面板，但不把空渲染事件塞进 MessageList blocks 而切断时间线。
 
@@ -287,7 +287,7 @@ MCP 调用自然进入已有工具时间线。可用 `memory_updated` 控制事�
 采用仓库现有 top-level await + node:assert 测试风格；不为 DOM 测试塞进纯逻辑测试路径。
 
 - Claude 保存 → 新 Claude 会话可读 → 新 Codex 会话可读；反向也成立。
-- 相同账号另一项目、另一账号、只有 session reader 的人无法用 ID 访问原 scope。
+- 另一项目或无目录白名单的人无法用 ID 访问原 scope；同项目的两个有权限账号读写同一条记忆；撤销路径 / 删除账号后旧 capability 拒绝。
 - 普通目录 / 符号链接别名得到相同 scope；cwd 超白名单、账号删除、过期 token 均拒绝。
 - 新会话 / resume / steer 有当前快照；attach 不重复创建 turn 或写记忆。
 - 系统规则固定；普通索引只含 metadata，正文只有 read 才给；截断明确且 search/list 覆盖全库。
@@ -308,10 +308,20 @@ MCP 调用自然进入已有工具时间线。可用 `memory_updated` 控制事�
 - 新增 store / MCP / 导入 / CLI 注入 / provider 授权与 envelope 测试，使用临时 DB、记忆目录和假 CLI，不消耗真实模型额度。
 - 校验两个 CLI 都装配 memory，只有索引进入 prompt；同一份业务规则、CLI 原生记忆关闭、功能关闭后恢复旧行为。
 - 索引超过显示预算仍可搜索/分页；真实版本冲突只有一个赢家；重试不重复写；正文损坏拒读；清理失败可重试；进程恢复只清理本库的版本文件。
-- 浏览器 QA 使用 `127.0.0.1:9898` 的独立临时数据库与禁用的 CLI，确认管理员设置、成员 Codex 默认值、只读记忆面板和账号分库。
+- 浏览器 QA 使用 `127.0.0.1:9898` 的独立临时数据库与禁用的 CLI，确认管理员设置、成员 Codex 默认值、只读记忆面板和项目共用。
 - 正式服务真实 Codex（gpt-5.6-sol / low / Plan）已完成 `memory.list` + `memory.read`，成功读回迁移的 `feedback-infra-config`。这是基础连通性/读取验收，不代替广泛召回质量评估；Claude CLI 当前不可用，未做其线上模型验收。
 - 部署需重启后端，并设置 `CC_WEBUI_PROJECT_MEMORY_ENABLED=1` 才启用运行时记忆；默认关闭可先完成导入和成员 AI 配置；本机生产部署明确设为 1。
 - 本机正式服务 8789 已重启，公网 HTTPS 返回 200；生产 `.env` 显式设置 `CC_WEBUI_PROJECT_MEMORY_ENABLED=1`。
-- 显式导入 9 个现存项目的 175 条旧记忆，其中 rebecca 工作区 22 条仅归 rebecca，其余 153 条归本机管理员。4 个已消失项目的 8 条保留原件及待迁移清单；没有擅自归并。194 个原生 Markdown 文件（含索引）逐字节校验未改。
+- 显式导入 9 个现存项目的 175 条旧记忆，首次导入按旧规则将 rebecca 工作区 22 条放在 rebecca 库，其余 153 条放在本机管理员库；随后按用户确认的新规则自动合并为 9 个项目库。4 个已消失项目的 8 条保留原件及待迁移清单；没有擅自归并。194 个原生 Markdown 文件（含索引）逐字节校验未改。
 - rebecca 保持普通成员角色，可用 AI 切为 Codex，默认 gpt-5.6-sol / xhigh；管理员仍可在用户设置中调整。CLI 全局配置未改。
-- 上线前备份 DB（SQLite 一致性快照）、旧 dist、`.env` 与原生记忆至私有 `~/.cc-webui/backups/project-memory-<timestamp>/`；迁移清单、逐条报告和源文件校验记录保存在该目录。数据库现为 schema 9，回滚旧代码须同时还原备份 DB / dist / env，不能只切 Git 分支。
+- 上线前备份 DB（SQLite 一致性快照）、旧 dist、`.env` 与原生记忆至私有 `~/.cc-webui/backups/project-memory-<timestamp>/`；迁移清单、逐条报告和源文件校验记录保存在该目录。数据库升级后为 schema 10，回滚旧代码须同时还原备份 DB / dist / env，不能只切 Git 分支。
+
+### 2026-09-29 项目共享修正
+
+- namespace 改为规范化 cwd，去掉 scopes 对账号的外键。schema 10 在事务内合并旧账号库，保留全部 memory ID、版本、正文定位、hash、来源和幂等结果，不重写正文。
+- 同名记录全部保留：较新条目保留原名，其余加稳定 ID 后缀；预留所有已有名称，避免 suffix 覆盖第三条。幂等键仍带 actor，避免两个账号恰好都用 `save-1` 时串请求。
+- 新版本正文写入 `project-memory/projects/<project-key>/<memory-id>/`。旧不可变版本继续按原指针读取；forget 同时清理新布局与全部旧 actor 布局。账号删除不删除项目记忆。
+- 每次调用仍复查账号存在、provider 可用、目录白名单、Plan 限制；群聊 / 飞书仍无 capability。
+- 修正版本已直接发布：正式服务 schema 10，175 条 / 9 个项目保留，外键检查通过；管理员和 rebecca 的正式 GET 均在 rebecca 项目返回 22 条。
+- 56 项测试及 typecheck / build 通过；以真实 rebecca actor、Codex gpt-5.6-sol / low / Plan 调用 `memory.list` 成功并返回 22，SSE 没有配置兼容错误项；既有 greeting 历史的 2 个误报在 UI 回放中为 0，正常答复仍保留。
+- 变更前私有备份 DB schema 9、全部记忆正文、dist 与 `.env`；迁移先在备份副本演练，再重启正式服务自动提交 schema 10。CLI 全局配置没有修改。

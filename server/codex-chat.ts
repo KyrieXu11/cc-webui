@@ -19,7 +19,7 @@ import {
   resolveTaskSessionId,
   subscribeForegroundEvents,
 } from "./bash-mcp.ts";
-import { isCodexModelMismatchNotice } from "./codex-events.ts";
+import { isCodexNonFatalNotice } from "./codex-events.ts";
 import { assertProviderAllowed } from "./auth/users.ts";
 import { currentUser, isAdmin } from "./auth/middleware.ts";
 import { visibilityFor } from "./auth/scope.ts";
@@ -340,9 +340,9 @@ codexChat.post("/chat", async (c) => {
         // `payload` is the CLI's own JSONL frame, verbatim — the same shape the
         // SDK yielded, which is why everything below is unchanged.
         const ev = frame.payload as any;
-        // Drop the benign model-mismatch advisory (see codex-events.ts) so it
-        // doesn't surface as a "[错误] …" message or land in the saved session.
-        if (isCodexModelMismatchNotice(ev)) continue;
+        // Drop only known non-fatal CLI notices; retain genuine errors and
+        // unknown config/security warnings (also filtered during UI replay).
+        if (isCodexNonFatalNotice(ev)) continue;
         eventCount++;
         if (eventCount <= 20 || eventCount % 50 === 0) {
           console.log(`[codex ${reqId}] event #${eventCount} ${ev.type} @${elapsed()}`);

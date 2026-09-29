@@ -55,7 +55,7 @@ const queues = new Map<string, Promise<unknown>>();
 const recoveries = new Map<string, Promise<void>>();
 function folder(scope: MemoryScope, id?: string): string {
   if (!UUID.test(scope.actorId) || id && !UUID.test(id) || !/^[a-f0-9]{64}$/.test(scope.projectKey)) throw new MemoryError("scope_unavailable", "记忆范围无效");
-  return path.join(memoryRoot(), scope.actorId, scope.projectKey, ...(id ? [id] : []));
+  return path.join(memoryRoot(), "projects", scope.projectKey, ...(id ? [id] : []));
 }
 function absolute(file: string): string {
   const root = memoryRoot();
@@ -148,7 +148,7 @@ function checkOperation(id: string): void {
   if (!/^[a-zA-Z0-9_.:-]{1,128}$/.test(id)) throw new MemoryError("invalid_input", "operation_id 应为稳定的短标识");
 }
 function previous(scope: MemoryScope, id: string, hash: string): Result | null {
-  const r = getDb().prepare("SELECT request_hash AS hash,result FROM project_memory_operations WHERE scope_id=? AND operation_id=?").get(scope.id, id) as {
+  const r = getDb().prepare("SELECT request_hash AS hash,result FROM project_memory_operations WHERE scope_id=? AND actor_id=? AND operation_id=?").get(scope.id, scope.actorId, id) as {
     hash: string;
     result: string;
   } | undefined;
@@ -161,7 +161,7 @@ function previous(scope: MemoryScope, id: string, hash: string): Result | null {
   };
 }
 function record(scope: MemoryScope, id: string, hash: string, result: Result): void {
-  getDb().prepare("INSERT INTO project_memory_operations(scope_id,operation_id,request_hash,result) VALUES(?,?,?,?)").run(scope.id, id, hash, JSON.stringify(result));
+  getDb().prepare("INSERT INTO project_memory_operations(scope_id,actor_id,operation_id,request_hash,result) VALUES(?,?,?,?,?)").run(scope.id, scope.actorId, id, hash, JSON.stringify(result));
 }
 function checkSave(input: SaveMemory): void {
   checkOperation(input.operation_id);
@@ -265,15 +265,12 @@ export async function deleteMemory(scope: MemoryScope, input: DeleteMemory): Pro
     }
     if (result.cleanup_pending) {
       try {
-        await fs.rm(folder(scope, input.id), {
-          recursive: true,
-          force: true
-        });
+        await removeMemoryBodies(scope, input.id);
       } catch {
         throw new MemoryError("delete_cleanup_pending", "已停止召回，但正文清理失败；请重试同一 operation_id");
       }
       result.cleanup_pending = false;
-      getDb().prepare("UPDATE project_memory_operations SET result=? WHERE scope_id=? AND operation_id=?").run(JSON.stringify(result), scope.id, input.operation_id);
+      getDb().prepare("UPDATE project_memory_operations SET result=? WHERE scope_id=? AND actor_id=? AND operation_id=?").run(JSON.stringify(result), scope.id, scope.actorId, input.operation_id);
     }
     return result;
   });
@@ -325,8 +322,9 @@ export async function recoverMemoryFiles(): Promise<void> {
       for (const e of entries) {
         const file = path.join(dir, e.name);
         if (e.isSymbolicLink()) continue;
-        // Never sweep arbitrary Markdown: only our actor/hash/memory/version layout.
-        if (e.isDirectory() && depth < 3 && (depth === 1 ? /^[a-f0-9]{64}$/.test(e.name) : UUID.test(e.name))) await walk(file, depth + 1);else if (depth === 3 && e.isFile() && UUID.test(e.name.replace(/\.md(?:\.tmp)?$/, "")) && /\.md(?:\.tmp)?$/.test(e.name) && !live.has(file)) await fs.rm(file, {
+        // Shared projects/hash/memory/version, plus historical actor/hash/... pointers.
+        const directory = depth === 0 ? e.name === "projects" || UUID.test(e.name) : depth === 1 ? /^[a-f0-9]{64}$/.test(e.name) : UUID.test(e.name);
+        if (e.isDirectory() && depth < 3 && directory) await walk(file, depth + 1);else if (depth === 3 && e.isFile() && UUID.test(e.name.replace(/\.md(?:\.tmp)?$/, "")) && /\.md(?:\.tmp)?$/.test(e.name) && !live.has(file)) await fs.rm(file, {
           force: true
         });
       }
@@ -341,19 +339,14 @@ export async function recoverMemoryFiles(): Promise<void> {
     throw err;
   }
 }
-export async function purgeAccountMemory(actorId: string): Promise<void> {
-  if (!UUID.test(actorId)) throw new MemoryError("scope_unavailable", "账号无效");
-  const root = memoryRoot();
-  try {
-    await fs.access(root);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw e;
-  }
-  // This also refuses an accidentally configured unrelated folder.
+async function removeMemoryBodies(scope: MemoryScope, id: string): Promise<void> {
+  // Immutable versions created before schema 10 may still live under actor
+  // directories. Deleting a shared entry removes BOTH layouts, not just the
+  // current writer's folder. Account deletion never calls this function.
   await recoverMemoryFiles();
-  await fs.rm(path.join(memoryRoot(), actorId), {
-    recursive: true,
-    force: true
-  });
+  await fs.rm(folder(scope, id), { recursive: true, force: true });
+  for (const entry of await fs.readdir(memoryRoot(), { withFileTypes: true })) {
+    if (!entry.isDirectory() || !UUID.test(entry.name)) continue;
+    await fs.rm(path.join(memoryRoot(), entry.name, scope.projectKey, id), { recursive: true, force: true });
+  }
 }

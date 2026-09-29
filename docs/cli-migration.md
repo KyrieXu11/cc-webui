@@ -597,3 +597,9 @@ finally 里自己管。
   `--experimental-json` 的事件集里也没有审批请求），所以决策 #15 的「`default` 接上真实审批」
   这半条**对 Codex 不成立**，只对 Claude 落地了。要给 Codex 做权限卡，得评估
   `codex app-server`（另一套 JSON-RPC 协议，未调研）。
+
+### 2026-09-29：ignored feature 设置不是 turn 失败
+
+实测 Codex CLI 0.157.1 会将 user config 的 `features.child_agents_md` / `features.goal` 不认识提示输出成两条重复 `item.completed` + `item.type=error`，后续仍有正常的 `agent_message` 和 `turn.completed`。它读取的是服务端 OS 用户的 `~/.codex/config.toml`，不是网页 rebecca 账号的配置。
+
+`shared/codex-notices.ts` 仅过滤这两个非安全 feature 的完整 ignored 提示，以及既有 model-mismatch advisory；未知 key、审批/沙箱配置警告、top-level error、turn.failed 都保留。网页 live / history、群聊使用同一判定，不修改原生 rollout 或用户全局配置。官方全局/项目配置层次见 [Config basics](https://learn.chatgpt.com/docs/config-file/config-basic)。

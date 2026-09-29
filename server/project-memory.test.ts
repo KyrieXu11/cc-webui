@@ -111,10 +111,14 @@ try {
     operation_id: "duplicate"
   }, source), /同名/);
   await assert.rejects(readMemory(other, saved.id), /没有该记忆/);
-  await assert.rejects(readMemory(foreign, saved.id), /没有该记忆/);
+  assert.equal(foreign.id, scope.id, "same project has one namespace across actors");
+  assert.equal((await readMemory(foreign, saved.id)).body, content.body);
+  const bobSaved = await saveMemory(foreign, { ...content, name: "feedback-bob", description: "另一条共用偏好", body: "Bob 写入的项目偏好" }, source);
+  assert.equal((await readMemory(scope, bobSaved.id)).body, "Bob 写入的项目偏好");
+  assert.equal((await saveMemory(foreign, { ...content, name: "feedback-bob", description: "另一条共用偏好", body: "Bob 写入的项目偏好" }, source)).replayed, true, "operation IDs are bound to actor, even though content is shared");
   assert.equal((await searchMemory(scope, "数据库")).entries[0].id, saved.id);
   assert.equal((await searchMemory(scope, "%")).entries.length, 0, "SQL wildcard is literal");
-  const updates = await Promise.allSettled(["a", "b"].map(key => saveMemory(scope, {
+  const updates = await Promise.allSettled(["a", "b"].map((key, i) => saveMemory(i ? foreign : scope, {
     ...content,
     operation_id: "update-" + key,
     id: saved.id,
@@ -163,7 +167,7 @@ try {
   assert.ok((await listMemory(scope, 100, 100)).next_cursor !== null);
 
   // A new process cleans crash leftovers, but retains every committed revision.
-  const orphanDir = path.join(memoryRoot(), actor.id, scope.projectKey, randomUUID());
+  const orphanDir = path.join(memoryRoot(), "projects", scope.projectKey, randomUUID());
   await fs.mkdir(orphanDir);
   const orphan = path.join(orphanDir, randomUUID() + ".md");
   await fs.writeFile(orphan, "uncommitted");
@@ -329,6 +333,10 @@ try {
 
   // UI uses the current actor and preserves the original read-only endpoint.
   const cookie = `${SESSION_COOKIE}=${issueSession(actor.id)}`;
+  const bobCookie = `${SESSION_COOKIE}=${issueSession(bob.id)}`;
+  const sharedUI = await app.request(`/api/project-memory?cwd=${encodeURIComponent(scope.cwd)}`, { headers: { cookie: bobCookie } });
+  assert.equal(sharedUI.status, 200);
+  assert.equal((await sharedUI.json()).total, (await listMemory(scope)).total);
   assert.equal((await app.request(`/api/project-memory?cwd=${encodeURIComponent(scope.cwd)}`, {
     headers: {
       cookie
@@ -341,7 +349,7 @@ try {
     }
   })).status, 404);
   const remove = fs.rm;
-  const targetFolder = path.join(memoryRoot(), actor.id, scope.projectKey, saved.id);
+  const targetFolder = path.join(memoryRoot(), "projects", scope.projectKey, saved.id);
   fs.rm = async (...args) => {
     if (args[0] === targetFolder) throw new Error("synthetic cleanup failure");
     return remove(...args);
@@ -369,7 +377,7 @@ try {
     expected_revision: 2
   })).replayed, true);
   assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM project_memory_revisions WHERE memory_id=?").get(saved.id)!.n, 0);
-  await assert.rejects(fs.stat(path.join(memoryRoot(), actor.id, scope.projectKey, saved.id)), /ENOENT/);
+  await assert.rejects(fs.stat(path.join(memoryRoot(), "projects", scope.projectKey, saved.id)), /ENOENT/);
   await assert.rejects(saveMemory(scope, {
     ...content,
     operation_id: "large",
@@ -379,8 +387,10 @@ try {
   assert.equal(await prepareProjectMemory(actor.id, scope.cwd, "claude", "plan").then(r => r?.capability.writable), false);
   process.env.CC_WEBUI_PROJECT_MEMORY_ENABLED = "false";
   assert.equal(await prepareProjectMemory(actor.id, scope.cwd, "claude"), null);
+  const sharedTotal = (await listMemory(foreign)).total;
   deleteUser(actor.id);
   await assert.rejects(listMemory(scope), /账号不可用/);
+  assert.equal((await listMemory(foreign)).total, sharedTotal, "deleting an account must retain shared project memory");
 } finally {
   closeDb();
   await fs.rm(tmp, {

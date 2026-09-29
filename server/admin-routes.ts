@@ -4,7 +4,6 @@
 
 import { transact } from "./db.ts";
 import type { AgentProvider } from "../src/lib/settings.ts";
-import { purgeAccountMemory } from "./project-memory/store.ts";
 import { Hono } from "hono";
 import {
   createUser,
@@ -299,8 +298,7 @@ adminRoutes.delete("/users/:id", async (c) => {
   // and groups therefore become UNOWNED, which makes them admin-only rather
   // than deleting them (decision 10) — the transcripts are still on disk.
   deleteUser(id);
-  try { await purgeAccountMemory(id); }
-  catch { return c.json({ ok: true, warning: "账号已删除，记忆文件清理未完成；启用记忆的启动恢复或下次写入时会重试" }); }
+  // Project memory belongs to the project, not this account; retain it.
   return c.json({ ok: true });
 });
 

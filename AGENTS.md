@@ -65,7 +65,7 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 | `/api/groups` | `groups.ts` + `groups/*` | **多 agent 群聊**（见下） |
 | `/api/fs` | `fs.ts` | 文件浏览器（懒加载目录树） |
 | `/api/sessions` | `sessions.ts` + `session-store.ts` | 历史会话列表 / 单会话消息（读 `~/.claude/projects/`） |
-| `/api/project-memory` | `project-memory-routes.ts` + `project-memory/*` | 当前账号＋规范化 cwd 的只读浏览/明确导入；正文在 `~/.cc-webui/project-memory/`、索引与版本在 DB。运行时唯一写入口是 `/api/mcp/memory` 的 per-turn capability。默认关闭，设计/验收见 `docs/project-memory.md`；**不得给原生 `/api/memory` 加写方法** |
+| `/api/project-memory` | `project-memory-routes.ts` + `project-memory/*` | 规范化 cwd 的项目共用记忆，只读浏览/明确导入按调用者目录白名单授权；正文在 `~/.cc-webui/project-memory/`、索引与版本在 DB。运行时唯一写入口是 `/api/mcp/memory` 的 per-turn capability。默认关闭，设计/验收见 `docs/project-memory.md`；**不得给原生 `/api/memory` 加写方法** |
 | `/api/memory` | `memory-routes.ts` | **项目记忆（只读）**：`~/.claude/projects/<slug>/memory/` 的 MEMORY.md 索引 + 每条正文。⚠️ 只有 GET，**不许加写方法**（用户明确要求只读，这是 CLI 自己的存储）；能看哪个项目 = 能不能打开那个项目（policy 查 query 的 cwd），不收调用方给的文件名。仅保留兼容 GET 与迁移来源，**日常 UI 不再展示原生记忆**；左栏书本 → `MemoryDialog.tsx` 只读统一项目库 |
 | `/api/upload` | `upload.ts` | 文件上传落盘 |
 | `/api/permission` | `permission.ts` | 权限卡 resolve；`shared/permission-flow.ts` 是 scope-keyed allowance |
@@ -306,7 +306,7 @@ claude CLI（你 Mac 上的子进程）
 ### 项目 Memory MCP 与成员可用 AI（2026-09-28）
 
 - `CC_WEBUI_PROJECT_MEMORY_ENABLED=1` 才给网页单聊装配新记忆；原生记忆仍只读，导入是独立确认动作。普通索引只注入 metadata，正文由 MCP read 返回，角色不是任意文件路径。
-- 五个固定 memory 工具是权限卡的范围受限例外，Plan 写入在服务端拒绝。namespace 是调用者 actor＋canonical cwd；**不能以会话 owner 或 provider 分库**。群聊/飞书不给 capability。
+- 五个固定 memory 工具是权限卡的范围受限例外，Plan 写入在服务端拒绝。namespace 仅是 canonical cwd；有权打开同一项目的账号共用，actor 仍决定白名单/工具授权与幂等请求身份。**不能以账号、会话 owner 或 provider 分库**。删除账号不得清理项目记忆。群聊/飞书不给 capability。
 - `shared/project-memory-envelope.ts` 同时用于请求注入和历史/标题剥离；换 envelope 要一起改，不能把索引显示成用户气泡。steer 必须在原有消息内携带快照；跨 actor 插话改为 409 排队，不能把他人的记忆送给当前运行者。
 - `user_ai_access` 管成员可用 provider；无行仍仅 Claude，管理员默认两种。`user_defaults.provider` 与模型/effort 一样是默认值而非锁定。Codex 无逐工具审批，授予必须明确，不等于授予管理员角色；Bypass 仍按角色拒绝。参见 `docs/user-permissions.md` 决策 48-50。
 - 新表/存储测试要设置 `CC_WEBUI_DB`、`CC_WEBUI_PROJECT_MEMORY_DIR`，建账号仍要隔离工作区。新根有专用标记，恢复只清扫版本文件，**不能清扫任意 .md**。
