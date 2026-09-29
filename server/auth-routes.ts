@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import {
   authenticate,
   getAllowedPaths,
+  getAllowedProviders,
   getUserDefaults,
   listUsers,
 } from "./auth/users.ts";
@@ -37,6 +38,7 @@ authRoutes.post("/login", async (c) => {
     user,
     allowedPaths: getAllowedPaths(user.id),
     defaults: getUserDefaults(user.id),
+    allowedProviders: getAllowedProviders(user),
   });
 });
 
@@ -70,6 +72,7 @@ authRoutes.get("/me", (c) => {
     user,
     allowedPaths: getAllowedPaths(user.id),
     defaults: getUserDefaults(user.id),
+    allowedProviders: getAllowedProviders(user),
   });
 });
 

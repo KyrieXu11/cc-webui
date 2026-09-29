@@ -13,3 +13,7 @@ export function groupsEnabled(): boolean {
   const raw = process.env.CC_WEBUI_GROUPS_ENABLED;
   return !!raw && TRUTHY.has(raw.trim().toLowerCase());
 }
+
+export function projectMemoryEnabled(): boolean {
+  return TRUTHY.has(process.env.CC_WEBUI_PROJECT_MEMORY_ENABLED?.trim().toLowerCase() ?? "");
+}

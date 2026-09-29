@@ -1,9 +1,10 @@
 import Popover from "./Popover";
-import { modeOptionsFor, modeLabel, type PermissionMode } from "../lib/settings";
+import { modeOptionsFor, modeLabel, type AgentProvider, type PermissionMode } from "../lib/settings";
 import { useAuth } from "../AuthGate";
 
 interface Props {
   value: PermissionMode;
+  provider?: AgentProvider;
   onChange: (v: PermissionMode) => void;
   direction?: "up" | "down";
   align?: "left" | "right";
@@ -11,6 +12,7 @@ interface Props {
 
 export default function ModeSelector({
   value,
+  provider = "claude",
   onChange,
   direction = "up",
   align = "left",
@@ -49,7 +51,7 @@ export default function ModeSelector({
                 >
                   {m.label}
                 </div>
-                <div className="text-[10.5px] text-subtle mt-0.5">{m.hint}</div>
+                <div className="text-[10.5px] text-subtle mt-0.5">{provider === "codex" ? (m.id === "plan" ? "CLI 只读；项目记忆禁止写入" : m.id === "bypassPermissions" ? "不限制 CLI（危险）" : "工作区可读写；Codex 无逐工具确认") : m.hint}</div>
               </div>
               {value === m.id && (
                 <div className="w-1.5 h-1.5 rounded-full bg-blue" />

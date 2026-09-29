@@ -130,6 +130,7 @@ export function mcpConfigOverrides(servers: McpServerSpec[]): string[] {
 export function buildConfigOverrides(opts: ExecOptions): string[] {
   return [
     ...mcpConfigOverrides(opts.mcpServers ?? []),
+    ...(opts.disableNativeMemory ? ["features.memories=false", "memories.use_memories=false", "memories.generate_memories=false"] : []),
     // See mapSandbox: the only survivable value on `codex exec`.
     `approval_policy="never"`,
     `model_reasoning_effort=${tomlString(mapEffort(opts.effort))}`,

@@ -1,3 +1,4 @@
+import { assertProviderAllowed } from "../auth/users.ts";
 import { randomUUID } from "node:crypto";
 import { awaitPermission } from "../permission.ts";
 import { ownerOf } from "../auth/ownership.ts";
@@ -43,6 +44,7 @@ export async function* runClaude(args: {
   ctx: RunnerCtx;
 }): AsyncIterable<RunnerEvent> {
   const { config, participant, prompt, images, ctx } = args;
+  assertProviderAllowed(ctx.ownerId, "claude", participant.mode);
   const scope = `${ctx.gid}:${ctx.agentId}`;
   const allowance = getOrCreateAllowance(scope);
   const inputAllowance = getOrCreateInputAllowance(scope);

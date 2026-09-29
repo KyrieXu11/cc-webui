@@ -79,10 +79,9 @@ async function memoryDirFor(cwd: string): Promise<string | null> {
   return null;
 }
 
-memoryRoute.get("/", async (c) => {
-  const cwd = c.req.query("cwd") ?? "";
+export async function readClaudeProjectMemory(cwd: string) {
   const dir = await memoryDirFor(cwd);
-  if (!dir) return c.json({ dir: null, index: null, memories: [] });
+  if (!dir) return { dir: null, index: null, memories: [] as MemoryEntry[] };
 
   const names = (await fs.readdir(dir))
     .filter((n) => n.endsWith(".md"))
@@ -112,7 +111,9 @@ memoryRoute.get("/", async (c) => {
       truncated,
     });
   }
-  return c.json({ dir, index, memories });
-});
+  return { dir, index, memories };
+}
+
+memoryRoute.get("/", async c => c.json(await readClaudeProjectMemory(c.req.query("cwd") ?? "")));
 
 export { memoryRoute };

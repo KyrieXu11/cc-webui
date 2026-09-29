@@ -1,3 +1,4 @@
+import type { AgentProvider } from "./settings";
 import type { UserDefaults } from "./user-defaults";
 
 export type Role = "admin" | "user";
@@ -12,6 +13,7 @@ export type AuthUser = {
 export type Me = {
   user: AuthUser | null;
   allowedPaths?: string[];
+  allowedProviders?: AgentProvider[];
   // 管理员给这个账号设的默认模型 / effort；没设是 null（见 user-defaults.ts）。
   defaults?: UserDefaults | null;
 };

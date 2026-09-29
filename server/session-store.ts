@@ -1,3 +1,4 @@
+import { unwrapMemoryPrompt } from "../shared/project-memory-envelope.ts";
 import fs from "node:fs/promises";
 import os from "node:os";
 import { getDb, transact } from "./db.ts";
@@ -49,6 +50,7 @@ const CODEX_SESSION_ID_RE =
   /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
 function summarizePrompt(prompt: string): string {
+  prompt = unwrapMemoryPrompt(prompt);
   const compact = prompt.replace(/\s+/g, " ").trim();
   return compact.length > 80 ? compact.slice(0, 79) + "..." : compact;
 }
@@ -163,7 +165,7 @@ async function parseNativeCodexSummary(
       if (typeof payload.cwd === "string") cwd = payload.cwd;
     } else if (record.type === "event_msg") {
       if (payload.type === "user_message" && !firstPrompt) {
-        firstPrompt = compactText(payload.message);
+        firstPrompt = unwrapMemoryPrompt(compactText(payload.message));
       } else if (
         payload.type === "thread_name_updated" &&
         typeof payload.thread_name === "string"
@@ -175,7 +177,7 @@ async function parseNativeCodexSummary(
       payload.role === "user" &&
       !fallbackPrompt
     ) {
-      fallbackPrompt = compactText(payload.content);
+      fallbackPrompt = unwrapMemoryPrompt(compactText(payload.content));
     }
   }
 
@@ -277,7 +279,7 @@ async function readNativeCodexTurns(
       pushCurrent();
       current = {
         provider: "codex",
-        prompt: compactText(payload.message),
+        prompt: unwrapMemoryPrompt(compactText(payload.message)),
         startedAt,
         events: [],
       };

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "./Markdown";
 import {
   MEMORY_LINK_PREFIX,
@@ -9,12 +9,7 @@ import {
   type ProjectMemory,
 } from "../lib/memory";
 
-// 项目记忆（只读）：Claude 在这个项目的对话里记下的东西 —— 左边是索引
-// （MEMORY.md 的顺序，不在索引里的补在最后），右边是选中那条的正文。
-//
-// ⚠️ **只读**（用户 2026-09-23：「注意，不可编辑，只读」）：这里没有任何编辑 / 删除
-// 入口，服务端那条路由也只有 GET。别在这里加「顺手改一下」的按钮 —— 这份记忆是
-// CLI 自己的存储，改坏了影响的是之后每一轮对话。
+// 唯一日常入口：当前账号的统一项目记忆。保存/更新仅通过 Memory MCP。
 
 interface Props {
   cwd: string;
@@ -39,19 +34,41 @@ function formatModified(iso: string): string {
 }
 
 export default function MemoryDialog({ cwd, onClose }: Props) {
+  const [refresh, setRefresh] = useState(0);
+  const [notice, setNotice] = useState("");
   const [data, setData] = useState<ProjectMemory | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>(INDEX);
 
+  const requestVersion = useRef(0);
+  useEffect(() => { setSelected(INDEX); }, [cwd]);
   useEffect(() => {
+    const version = ++requestVersion.current;
     let alive = true;
+    setData(null); setErr(null);
     getProjectMemory(cwd)
-      .then((d) => alive && setData(d))
+      .then((d) => { if (alive && version === requestVersion.current) { setData(d); setSelected(prev => prev === INDEX || d.memories.some(m => m.file === prev) ? prev : INDEX); } })
       .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
     };
-  }, [cwd]);
+  }, [cwd, refresh]);
+
+  useEffect(() => {
+    const reload = () => setRefresh(n => n + 1);
+    window.addEventListener("cc-webui:memory-updated", reload);
+    return () => window.removeEventListener("cc-webui:memory-updated", reload);
+  }, []);
+
+  const loadMore = async () => {
+    if (!data || data.nextCursor == null) return;
+    const version = requestVersion.current;
+    try {
+      const next = await getProjectMemory(cwd, data.nextCursor);
+      if (version !== requestVersion.current) return;
+      setData({ ...next, index: [data.index, next.index].filter(Boolean).join("\n"), memories: [...data.memories, ...next.memories.filter(m => !data.memories.some(old => old.file === m.file))] });
+    } catch (e) { setNotice((e as Error).message); }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -105,7 +122,7 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
             只读
           </span>
           {data && list.length > 0 && (
-            <span className="text-[11.5px] text-subtle">共 {list.length} 条</span>
+            <span className="text-[11.5px] text-subtle">共 {data.total ?? list.length} 条</span>
           )}
           <span
             className="font-mono text-[11px] text-subtle truncate min-w-0 flex-1"
@@ -125,6 +142,12 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
           </button>
         </header>
 
+        <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-muted">Claude / Codex 共用</span>
+          {data && <span className="text-[11px] text-subtle">仅当前账号 / 当前项目 · {data.total ?? data.memories.length} 条{data.enabled ? " · 已启用" : " · 运行时未启用"}</span>}
+          {data?.nextCursor != null && <button onClick={() => void loadMore()} className="text-[12px] text-blue">加载更多</button>}
+        </div>
+        {notice && <div className="px-4 py-2 text-[12px] text-muted border-b border-line">{notice}</div>}
         {err ? (
           <div className="p-5 text-[12.5px] text-red">{err}</div>
         ) : !data ? (
@@ -133,7 +156,7 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
           <div className="p-6 text-[13px] text-muted leading-relaxed">
             这个项目还没有记忆。
             <div className="text-[12px] text-subtle mt-1.5">
-              Claude 在这个项目的对话里记下的偏好、做事方式、背景信息会出现在这里。
+              在对话中让 AI 记住长期偏好或背景；Claude 和 Codex 都会使用这份项目记忆。
             </div>
           </div>
         ) : (
@@ -141,7 +164,7 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
             <nav className="md:w-[300px] max-md:max-h-[38%] shrink-0 overflow-y-auto border-b md:border-b-0 md:border-r border-line p-1.5">
               <ListButton active={selected === INDEX} onClick={() => setSelected(INDEX)}>
                 <div className="text-[12.5px] text-fg font-medium">索引</div>
-                <div className="font-mono text-[10.5px] text-subtle mt-0.5">MEMORY.md</div>
+                <div className="font-mono text-[10.5px] text-subtle mt-0.5">服务端生成索引</div>
               </ListButton>
               {list.map((x, i) => (
                 <div key={x.memory.file}>
@@ -204,7 +227,7 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
                 </div>
               ) : (
                 <div className="text-[12.5px] text-subtle">
-                  这个项目没有 MEMORY.md 索引，左边列的是目录里全部的记忆文件。
+                  暂时没有可显示的记忆索引。
                 </div>
               )}
             </article>

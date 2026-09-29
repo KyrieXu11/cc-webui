@@ -113,6 +113,7 @@ try {
       "/api/mcp/bash",
       "/api/mcp/lark",
       "/api/mcp/local/:server",
+      "/api/mcp/memory",
       "/api/mcp/schedule",
       "/api/office/callback",
       "/api/office/download",
@@ -425,7 +426,7 @@ try {
     assert.match((await res.json()).detail ?? "", /outside the folders/, route);
   }
 
-  // ── Codex is admin-only (decision 14) ────────────────────────────────────
+  // ── Codex requires an explicit admin grant (supersedes decision 14) ────────────────────────────────────
   //
   // `codex exec` has no --ask-for-approval, so on that side every mode is
   // unrestricted writes. The UI hides the picker, but the UI is not the gate.
@@ -435,9 +436,9 @@ try {
     body: JSON.stringify({ prompt: "hi", cwd: tmp }),
   });
   assert.equal(codexTurn.status, 403);
-  // The ROLE check must be what refused, not the path check — otherwise
+  // The provider grant must be what refused, not the path check — otherwise
   // whitelisting a folder would quietly hand the account a Codex agent.
-  assert.equal((await codexTurn.json()).error, "forbidden");
+  assert.equal((await codexTurn.json()).error, "provider_not_allowed");
 
   // ── 工作区：建号时发一块地，服务端管着它那条 pattern ────────────────────
 

@@ -2,11 +2,15 @@
 // server/auth/policy.ts, so the middleware rejects a plain user before any
 // handler runs.
 
+import { transact } from "./db.ts";
+import type { AgentProvider } from "../src/lib/settings.ts";
+import { purgeAccountMemory } from "./project-memory/store.ts";
 import { Hono } from "hono";
 import {
   createUser,
   deleteUser,
   getAllowedPaths,
+  getAllowedProviders,
   getUserById,
   getUserDefaults,
   listUsers,
@@ -14,12 +18,14 @@ import {
   setPassword,
   setRole,
   setUserDefaults,
+  setAllowedProviders,
   type Role,
 } from "./auth/users.ts";
 import {
   EFFORT_OPTIONS,
   availableEffortOptions,
   modelOptionsForProvider,
+  defaultModelForProvider,
 } from "../src/lib/settings.ts";
 import { claimUnowned, resourceIdsOwnedBy } from "./auth/ownership.ts";
 import { listAllOpenedProjects } from "./opened-projects.ts";
@@ -53,7 +59,7 @@ function asPatterns(v: unknown): string[] | undefined {
   return v.filter((x): x is string => typeof x === "string");
 }
 
-type DefaultsInput = { model: string | null; effort: string | null };
+type DefaultsInput = { provider?: AgentProvider | null; model: string | null; effort: string | null };
 
 // PATCH body `defaults` → what to store, or why not. Checked against the same
 // option table the composer offers (src/lib/settings.ts), so the admin page
@@ -62,20 +68,22 @@ type DefaultsInput = { model: string | null; effort: string | null };
 function parseDefaults(
   raw: unknown,
 ): { ok: true; value: DefaultsInput } | { ok: false; error: string } {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, error: "defaults must be an object" };
   }
   const blank = (v: unknown) => v === undefined || v === null || v === "";
-  const { model, effort } = raw as { model?: unknown; effort?: unknown };
+  const { provider, model, effort } = raw as { provider?: unknown; model?: unknown; effort?: unknown };
+  if (!blank(provider) && provider !== "claude" && provider !== "codex") return { ok: false, error: "unknown provider" };
+  const ai = blank(provider) ? "claude" : provider as AgentProvider;
   if (
     !blank(model) &&
-    !modelOptionsForProvider("claude").some((o) => o.id === model)
+    !modelOptionsForProvider(ai).some((o) => o.id === model)
   ) {
     return { ok: false, error: "unknown model" };
   }
   const m = blank(model) ? null : (model as string);
   if (!blank(effort)) {
-    const allowed = m ? availableEffortOptions(m) : EFFORT_OPTIONS;
+    const allowed = m ? availableEffortOptions(m) : ai === "codex" ? availableEffortOptions(defaultModelForProvider(ai)) : EFFORT_OPTIONS;
     if (!allowed.some((o) => o.id === effort)) {
       return {
         ok: false,
@@ -83,7 +91,7 @@ function parseDefaults(
       };
     }
   }
-  return { ok: true, value: { model: m, effort: blank(effort) ? null : (effort as string) } };
+  return { ok: true, value: { ...(provider ? { provider: ai } : {}), model: m, effort: blank(effort) ? null : (effort as string) } };
 }
 
 // How many admins remain if `excludingId` were removed or demoted. Guards below
@@ -108,6 +116,7 @@ adminRoutes.get("/users", (c) => {
       workspace: managed ? { dir: workspaceDirFor(u.username), pattern: managed } : null,
       ownedResources: resourceIdsOwnedBy(u.id).size,
       defaults: getUserDefaults(u.id),
+      allowedProviders: getAllowedProviders(u),
     };
   });
   return c.json({ users });
@@ -187,6 +196,15 @@ adminRoutes.patch("/users/:id", async (c) => {
   if (!target) return c.json({ error: "not found" }, 404);
   const body = await c.req.json().catch(() => ({}));
 
+  let providers = getAllowedProviders({ ...target, role: isRole(body.role) ? body.role : target.role });
+  if (target.role === "admin" && body.role === "user" && body.allowedProviders === undefined) providers = ["claude"];
+  if (body.allowedProviders !== undefined) {
+    if (!Array.isArray(body.allowedProviders) || !body.allowedProviders.length || body.allowedProviders.some((p: unknown) => p !== "claude" && p !== "codex")) {
+      return c.json({ error: "at least one valid provider required" }, 400);
+    }
+    providers = [...new Set(body.allowedProviders)] as AgentProvider[];
+    if ((body.role ?? target.role) === "admin") providers = ["claude", "codex"];
+  }
   // Validated before anything below writes: a bad `defaults` must not leave
   // the role / password half of the same request applied.
   let defaults: DefaultsInput | undefined;
@@ -194,6 +212,9 @@ adminRoutes.patch("/users/:id", async (c) => {
     const parsed = parseDefaults(body.defaults);
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
     defaults = parsed.value;
+    if ((defaults.provider || defaults.model) && !providers.includes(defaults.provider ?? "claude")) {
+      return c.json({ error: "default provider must be allowed" }, 400);
+    }
   }
 
   if (isRole(body.role) && body.role !== target.role) {
@@ -202,6 +223,7 @@ adminRoutes.patch("/users/:id", async (c) => {
     }
     setRole(id, body.role);
     if (body.role === "user") {
+      if (body.allowedProviders === undefined) setAllowedProviders(id, ["claude"]);
       // Demotion narrows the whitelist to just the workspace (decision 29).
       // Otherwise a demoted admin keeps `**` and the role change is cosmetic as
       // far as the filesystem goes. The UI confirms this destroys the old list;
@@ -238,7 +260,14 @@ adminRoutes.patch("/users/:id", async (c) => {
     setAllowedPaths(id, keep ? [keep, ...manual] : manual);
   }
 
-  if (defaults) setUserDefaults(id, defaults);
+  transact(() => {
+    if (body.allowedProviders !== undefined) setAllowedProviders(id, providers);
+    const saved = getUserDefaults(id);
+    if (defaults) setUserDefaults(id, defaults);
+    else if (saved && !providers.includes(saved.provider ?? "claude")) {
+      setUserDefaults(id, { provider: providers[0], model: null, effort: null });
+    }
+  });
 
   const all = getAllowedPaths(id);
   const managed = workspacePatternIn(target.username, all);
@@ -250,11 +279,12 @@ adminRoutes.patch("/users/:id", async (c) => {
         ? { dir: workspaceDirFor(target.username), pattern: managed }
         : null,
       defaults: getUserDefaults(id),
+      allowedProviders: getAllowedProviders(getUserById(id)!),
     },
   });
 });
 
-adminRoutes.delete("/users/:id", (c) => {
+adminRoutes.delete("/users/:id", async (c) => {
   const id = c.req.param("id");
   const target = getUserById(id);
   if (!target) return c.json({ error: "not found" }, 404);
@@ -269,6 +299,8 @@ adminRoutes.delete("/users/:id", (c) => {
   // and groups therefore become UNOWNED, which makes them admin-only rather
   // than deleting them (decision 10) — the transcripts are still on disk.
   deleteUser(id);
+  try { await purgeAccountMemory(id); }
+  catch { return c.json({ ok: true, warning: "账号已删除，记忆文件清理未完成；启用记忆的启动恢复或下次写入时会重试" }); }
   return c.json({ ok: true });
 });
 

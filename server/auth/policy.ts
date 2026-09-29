@@ -147,14 +147,13 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
 
   // ── web single chat (Codex) ───────────────────────────────────────────────
   //
-  // admin-only by decision 14: `codex exec` has no --ask-for-approval, so on
-  // that side even permissionMode `auto` means unrestricted writes — banning
-  // bypassPermissions for ordinary users (decision 12) would be paper-only.
-  // Only the route that STARTS a turn is gated; attach/cancel/inflight stay
-  // owner-scoped, which already yields nothing for someone who owns no Codex
-  // session, and keeps working if this ever loosens.
+  // Ordinary accounts need an explicit administrator grant (user_ai_access).
+  // middleware checks it on every start; resume still requires reader access.
+  // Codex has no per-tool approval channel; granting it is a deliberate policy
+  // choice, not an admin-role promotion. Bypass remains admin-only.
   "POST /api/codex/chat": {
-    auth: "admin",
+    auth: "user",
+    owns: { from: "body", key: "sessionId", kind: "codex", optional: true, access: "reader" },
     paths: [{ from: "body", key: "cwd", optional: true, fallback: "serverCwd" }],
   },
   "POST /api/codex/chat/cancel": {
@@ -206,6 +205,9 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   "GET /api/fs/tree": { auth: "user", paths: [{ from: "query", key: "path" }] },
   // 项目记忆（只读）。能看哪个项目的记忆 = 能不能打开这个项目：白名单查的是 cwd，
   // 读哪些文件由服务端 readdir 决定，不收调用方给的文件名（见 memory-routes.ts）。
+  "GET /api/project-memory": { auth: "user", paths: [{ from: "query", key: "cwd" }] },
+  "POST /api/project-memory/import": { auth: "user", paths: [{ from: "body", key: "cwd" }] },
+  "ALL /api/mcp/memory": { auth: "public", note: MCP_NOTE },
   "GET /api/memory": { auth: "user", paths: [{ from: "query", key: "cwd" }] },
   "GET /api/fs/scan": { auth: "user", handlerScoped: true },
 

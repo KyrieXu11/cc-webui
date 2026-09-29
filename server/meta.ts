@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { groupsEnabled } from "./features.ts";
+import { groupsEnabled, projectMemoryEnabled } from "./features.ts";
 import { officeConfigured } from "./office.ts";
 import { clientRelease } from "./client-release.ts";
 import fs from "node:fs/promises";
@@ -131,7 +131,7 @@ metaRoute.get("/", async (c) => {
   // frontend uses `features.groups` to decide whether the group-chat surface
   // exists at all.
   // office=false 时前端把 Office 文件降级成只读/下载，而不是给一个点了没反应的按钮。
-  const features = { groups: groupsEnabled(), office: officeConfigured() };
+  const features = { groups: groupsEnabled(), office: officeConfigured(), projectMemory: projectMemoryEnabled() };
   // 桌面客户端的当前版本（docs/desktop-client.md 决策 26/28）。**没发布过就整个
   // 字段缺席**——客户端据「在不在」判断要不要比 semver，给个空对象等于逼它多写
   // 一条判空。和 features 一样每次现算（60 秒缓存只盖 slashCommands/skills 那个

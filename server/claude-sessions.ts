@@ -7,6 +7,7 @@
 // Layout: ~/.claude/projects/<slug>/<sessionId>.jsonl, append-only, one JSON
 // object per line. cc-webui only ever reads (and deletes whole sessions).
 
+import { unwrapMemoryPrompt, stripMemoryMessage } from "../shared/project-memory-envelope.ts";
 import { createReadStream, promises as fs } from "node:fs";
 import { createInterface } from "node:readline";
 import path from "node:path";
@@ -141,7 +142,7 @@ function toMessage(o: RawLine): ClaudeSessionMessage | null {
     // The on-disk field is camelCase; the frontend's SessionMessage expects
     // snake_case, same as live SDK/CLI events.
     session_id: typeof o.sessionId === "string" ? o.sessionId : "",
-    message: o.message,
+    message: stripMemoryMessage(o.message),
     timestamp: typeof o.timestamp === "string" ? o.timestamp : undefined,
     api_block_index:
       typeof o.apiBlockIndex === "number" ? o.apiBlockIndex : undefined,
@@ -153,7 +154,7 @@ function toMessage(o: RawLine): ClaudeSessionMessage | null {
 // 标题就是一行临时目录路径（用户 2026-09-23 截图里侧栏那条）。所以先剥掉附件那段：
 // 有正文用正文，只发了附件就用文件名。
 export function summarize(prompt: string): string {
-  const { files, body } = splitAttachments(prompt);
+  const { files, body } = splitAttachments(unwrapMemoryPrompt(prompt));
   const text = files.length
     ? body.trim() || files.map((f) => f.name).join("、")
     : prompt;
@@ -163,7 +164,7 @@ export function summarize(prompt: string): string {
 
 function firstUserText(message: unknown): string {
   if (!message || typeof message !== "object") return "";
-  const content = (message as { content?: unknown }).content;
+  const content = (stripMemoryMessage(message) as { content?: unknown }).content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content

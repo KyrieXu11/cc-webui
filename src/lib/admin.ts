@@ -1,3 +1,4 @@
+import type { AgentProvider } from "./settings";
 import type { Role } from "./auth";
 import type { UserDefaults } from "./user-defaults";
 
@@ -13,6 +14,7 @@ export type AdminUser = {
   ownedResources: number;
   // 管理员给这个账号设的默认模型 / effort，没设是 null。
   defaults: UserDefaults | null;
+  allowedProviders: AgentProvider[];
 };
 
 export type OpenedRecord = {
@@ -67,7 +69,8 @@ export async function patchAdminUser(
     removeWorkspace?: boolean;
     createWorkspace?: boolean;
     // 两项都给 null = 清空。
-    defaults?: { model: string | null; effort: string | null };
+    defaults?: { provider?: AgentProvider | null; model: string | null; effort: string | null };
+    allowedProviders?: AgentProvider[];
   },
 ): Promise<void> {
   await json(

@@ -50,7 +50,7 @@ export default function Sidebar({
           <button
             onClick={onOpenMemory}
             aria-label="项目记忆"
-            title="项目记忆（只读）：Claude 在这个项目里记下的东西"
+            title="项目记忆（只读）：Claude / Codex 共用"
             className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
           >
             <MemoryIcon />

@@ -448,12 +448,9 @@ function ProviderPicker({
   value: AgentProvider;
   onChange: (provider: AgentProvider) => void;
 }) {
-  const { isAdmin } = useAuth();
-  // Codex is admin-only (decision 14: `codex exec` has no approval channel, so
-  // every mode is unrestricted writes there). Hidden rather than disabled —
-  // same as the group-chat entry — and with nothing left to choose between,
-  // the picker itself goes away instead of showing a one-tab tablist.
-  const options = PROVIDER_OPTIONS.filter((p) => p.id !== "codex" || isAdmin);
+  const { allowedProviders } = useAuth();
+  // The server publishes this account's explicit grants.
+  const options = PROVIDER_OPTIONS.filter((p) => allowedProviders.includes(p.id));
   if (options.length < 2) return null;
   return (
     <div

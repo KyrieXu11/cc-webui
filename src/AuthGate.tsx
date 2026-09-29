@@ -14,11 +14,13 @@ import {
   type AuthUser,
   type Me,
 } from "./lib/auth";
+import type { AgentProvider } from "./lib/settings";
 import type { UserDefaults } from "./lib/user-defaults";
 
 type AuthValue = {
   user: AuthUser;
   allowedPaths: string[];
+  allowedProviders: AgentProvider[];
   isAdmin: boolean;
   defaults: UserDefaults | null;
   signOut: () => void;
@@ -104,6 +106,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       value={{
         user: me.user,
         allowedPaths: me.allowedPaths ?? [],
+        allowedProviders: me.allowedProviders ?? (me.user.role === "admin" ? ["claude", "codex"] : ["claude"]),
         isAdmin: me.user.role === "admin",
         defaults: me.defaults ?? null,
         signOut,

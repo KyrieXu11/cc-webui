@@ -4,7 +4,8 @@ import { loadDotEnvOnce } from "./env.ts";
 import { importLegacyJson } from "./import-legacy-json.ts";
 import { startFeishuChannels } from "./feishu/index.ts";
 import { countUsers, seedAdminFromEnv } from "./auth/users.ts";
-import { groupsEnabled } from "./features.ts";
+import { groupsEnabled, projectMemoryEnabled } from "./features.ts";
+import { recoverMemoryFiles } from "./project-memory/store.ts";
 import { createDeviceWs, DEVICE_WS_PATH } from "./devices/ws.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import { codexExecutor, CODEX_JSON_FLAG } from "./executors/codex-executor.ts";
@@ -12,6 +13,7 @@ import { codexExecutor, CODEX_JSON_FLAG } from "./executors/codex-executor.ts";
 // .env first: it carries CC_WEBUI_ADMIN and the Feishu credentials, and
 // everything below reads config.
 loadDotEnvOnce();
+if (projectMemoryEnabled()) await recoverMemoryFiles();
 
 // Move the flat JSON stores into SQLite before anything serves a request, so
 // no handler can observe a half-migrated state.
