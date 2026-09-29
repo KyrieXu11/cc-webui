@@ -423,7 +423,7 @@ function DefaultsRow({
   }, [savedModel, savedEffort, savedProvider, savedProviders.join(",")]);
 
   // 没指定模型时对方用什么模型都有可能，所以五档全给；指定了就只给那个模型有的档。
-  const efforts = model ? availableEffortOptions(model) : provider === "codex" ? availableEffortOptions(defaultModelForProvider(provider)) : EFFORT_OPTIONS;
+  const efforts = availableEffortOptions(model || defaultModelForProvider(provider));
   const dirty = model !== savedModel || effort !== savedEffort || provider !== savedProvider || providers.join(",") !== savedProviders.join(",");
 
   const pickModel = (next: string) => {

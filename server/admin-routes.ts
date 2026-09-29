@@ -1,3 +1,4 @@
+import { getCodexModelCatalog } from "./codex-models.ts";
 // Admin-only management API. Every route here is `auth: "admin"` in
 // server/auth/policy.ts, so the middleware rejects a plain user before any
 // handler runs.
@@ -64,9 +65,9 @@ type DefaultsInput = { provider?: AgentProvider | null; model: string | null; ef
 // option table the composer offers (src/lib/settings.ts), so the admin page
 // can never store a model the picker would not show, or an effort that model
 // does not have (Sonnet has no xhigh). "" and absent both mean "not set".
-function parseDefaults(
+async function parseDefaults(
   raw: unknown,
-): { ok: true; value: DefaultsInput } | { ok: false; error: string } {
+): Promise<{ ok: true; value: DefaultsInput } | { ok: false; error: string }> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, error: "defaults must be an object" };
   }
@@ -74,15 +75,17 @@ function parseDefaults(
   const { provider, model, effort } = raw as { provider?: unknown; model?: unknown; effort?: unknown };
   if (!blank(provider) && provider !== "claude" && provider !== "codex") return { ok: false, error: "unknown provider" };
   const ai = blank(provider) ? "claude" : provider as AgentProvider;
+  const catalog = ai === "codex" ? await getCodexModelCatalog() : null;
+  const models = catalog?.models ?? modelOptionsForProvider(ai);
   if (
     !blank(model) &&
-    !modelOptionsForProvider(ai).some((o) => o.id === model)
+    !models.some((o) => o.id === model)
   ) {
     return { ok: false, error: "unknown model" };
   }
   const m = blank(model) ? null : (model as string);
   if (!blank(effort)) {
-    const allowed = m ? availableEffortOptions(m) : ai === "codex" ? availableEffortOptions(defaultModelForProvider(ai)) : EFFORT_OPTIONS;
+    const allowed = availableEffortOptions(m ?? catalog?.defaultModel ?? defaultModelForProvider(ai), catalog?.models);
     if (!allowed.some((o) => o.id === effort)) {
       return {
         ok: false,
@@ -208,7 +211,7 @@ adminRoutes.patch("/users/:id", async (c) => {
   // the role / password half of the same request applied.
   let defaults: DefaultsInput | undefined;
   if (body.defaults !== undefined) {
-    const parsed = parseDefaults(body.defaults);
+    const parsed = await parseDefaults(body.defaults);
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
     defaults = parsed.value;
     if ((defaults.provider || defaults.model) && !providers.includes(defaults.provider ?? "claude")) {

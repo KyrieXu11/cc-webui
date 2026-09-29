@@ -1,3 +1,4 @@
+import { getCodexModelCatalog } from "./codex-models.ts";
 import { Hono } from "hono";
 import { groupsEnabled, projectMemoryEnabled } from "./features.ts";
 import { officeConfigured } from "./office.ts";
@@ -137,14 +138,15 @@ metaRoute.get("/", async (c) => {
   // 一条判空。和 features 一样每次现算（60 秒缓存只盖 slashCommands/skills 那个
   // Scan），所以下面**两条 return 都要带**；只加一条会让字段时有时无，而第一次
   // 请求总是走重扫那条，本地根本复现不出来。
+  const models = { codex: await getCodexModelCatalog() };
   const release = clientRelease();
   const desktopClient = release ? { desktopClient: release } : {};
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-    return c.json({ ...cached.scan, features, ...desktopClient, cached: true });
+    return c.json({ ...cached.scan, features, models, ...desktopClient, cached: true });
   }
   const scan = await scanClaudeCommands(cwd);
   cache.set(key, { ts: Date.now(), scan });
-  return c.json({ ...scan, features, ...desktopClient, cached: false });
+  return c.json({ ...scan, features, models, ...desktopClient, cached: false });
 });
 
 export { metaRoute };

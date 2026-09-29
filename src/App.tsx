@@ -239,6 +239,7 @@ export default function App() {
   // ⚠️ 不能拿 settings.effort 顶：看别人的轮次时那是看的人自己的设置（她 xhigh、
   // 你这边显示 max）。只有正在往界面写的那条流能设它，每条流开始时先清掉。
   const [turnEffort, setTurnEffort] = useState<string | undefined>(undefined);
+  const [turnStartedAt, setTurnStartedAt] = useState<number | undefined>(undefined);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [systemPref, setSystemPref] = useState<Theme>(systemTheme);
   // 窄屏：两个侧栏从常驻列变成抽屉（方案 B）。
@@ -615,6 +616,7 @@ export default function App() {
     let closed = false;
     // 重放会先送来这一轮的 turn_meta；在那之前别留着上一轮的。
     setTurnEffort(undefined);
+    setTurnStartedAt(undefined);
     setAttachedStreaming(true);
     const finishAttach = (reason: "done" | "error" | "no-inflight") => {
       if (closed) return;
@@ -642,6 +644,7 @@ export default function App() {
       (msg) => {
         if (msg?.type === "turn_meta") {
           setTurnEffort(typeof msg.effort === "string" ? msg.effort : undefined);
+          setTurnStartedAt(typeof msg.startedAt === "number" ? msg.startedAt : undefined);
           return;
         }
         if (msg?.type === "foreground_started" && msg.fgId) {
@@ -808,7 +811,7 @@ export default function App() {
     setSessionId(s.sessionId);
     setSettings((cur) => {
       const modelOptions = modelOptionsForProvider(s.provider);
-      const model = modelOptions.some((m) => m.id === cur.model)
+      const model = (s.provider === "codex" && cur.agentProvider === "codex" && cur.model) || modelOptions.some((m) => m.id === cur.model)
         ? cur.model
         : defaultModelForProvider(s.provider);
       return { ...cur, agentProvider: s.provider, model };
@@ -950,6 +953,7 @@ export default function App() {
     setVisibleCount((c) => Math.max(c, INITIAL_VISIBLE));
     setIsStreaming(true);
     setTurnEffort(undefined);
+    setTurnStartedAt(undefined);
 
     // 这个 turn 归属的会话。新会话时先是 null，等 CLI 吐出 session_id 再落定。
     const turnCwd = projectCwd;
@@ -1000,6 +1004,7 @@ export default function App() {
         }
         if (msg?.type === "turn_meta") {
           setTurnEffort(typeof msg.effort === "string" ? msg.effort : undefined);
+          setTurnStartedAt(typeof msg.startedAt === "number" ? msg.startedAt : undefined);
           continue;
         }
         if (msg?.type === "system" && msg.subtype === "api_retry") {
@@ -1500,6 +1505,9 @@ export default function App() {
                         retryInfo={retryInfo}
                         onPreviewImage={previewAttachedImage}
                         effort={turnEffort}
+                        provider={settings.agentProvider}
+                        isRunning={streamingHere || (attachedStreaming && turnStartedAt !== undefined)}
+                        turnStartedAt={turnStartedAt ?? liveTurn?.startedAt}
                       />
                     </>
                   )}

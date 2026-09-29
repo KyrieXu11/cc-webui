@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { createGroup, updateGroupConfig } from "../../lib/groups";
 import {
   modelOptionsForProvider,
+  defaultModelForProvider,
+  clampEffort,
   type AgentProvider,
   type EffortLevel,
   type PermissionMode,
@@ -24,7 +26,7 @@ const defaultParticipant = (id: "claude" | "codex"): GroupParticipant => {
   const model =
     id === "claude"
       ? opts.find((m) => m.id.includes("opus"))?.id ?? opts[0]?.id ?? "opus"
-      : opts[0]?.id ?? "gpt-5.6-sol";
+      : defaultModelForProvider("codex");
   return {
     id,
     model,
@@ -443,7 +445,7 @@ function ParticipantCard({
           <ModelSelector
             provider={agent}
             value={value.model}
-            onChange={(model) => onChange({ ...value, model })}
+            onChange={(model) => onChange({ ...value, model, effort: clampEffort(value.effort ?? "medium", model) })}
             direction="down"
             align="right"
           />

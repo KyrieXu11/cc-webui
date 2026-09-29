@@ -503,7 +503,7 @@ function buildBlocks(
       });
     }
   }
-  if (activeAgent && liveByAgent[activeAgent]?.length) {
+  if (activeAgent && liveByAgent[activeAgent]) {
     out.push({
       kind: "agent",
       agent: activeAgent,
@@ -666,6 +666,8 @@ function AgentBlock({
         onToggleStep={onToggleStep}
         onAnswerPermission={onAnswerPermission}
         compact
+        provider={agent}
+        isRunning={isLive}
       />
     </div>
   );

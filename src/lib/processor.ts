@@ -3,6 +3,11 @@ import type { ChatEvent, ImageAttachment, StepStatus } from "./types";
 import type { CodexSessionTurn, SessionHistoryItem, SessionMessage } from "./sessions";
 
 const TOOL_ALIAS: Record<string, string> = {
+  "mcp__memory__list": "memory.list",
+  "mcp__memory__search": "memory.search",
+  "mcp__memory__read": "memory.read",
+  "mcp__memory__save": "memory.save",
+  "mcp__memory__delete": "memory.delete",
   "mcp__bash__run": "Bash",
   "mcp__bash__output": "BashOutput",
   "mcp__bash__kill": "KillBash",
@@ -85,7 +90,7 @@ export function applySDKMessage(
       msg.type === "item.completed") &&
     msg.item
   ) {
-    return applyCodexItem(events, msg.item);
+    return applyCodexItem(events, msg.item, msg.type);
   }
 
   if (msg.type === "system" && msg.subtype === "init") {
@@ -389,7 +394,9 @@ export function applySDKMessage(
   return events;
 }
 
-function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
+function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEvent[] {
+  const status = item.error || item.result?.isError === true || item.result?.is_error === true
+    ? "error" : codexStatus(item.status ?? (phase === "item.completed" ? "completed" : "in_progress"));
   switch (item.type) {
     case "agent_message":
       return upsertTextEvent(events, {
@@ -402,6 +409,7 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
         id: `t-codex-${item.id}`,
         type: "thinking",
         text: item.text ?? "",
+        status: phase === "item.completed" ? "ok" : "pending",
       });
     case "command_execution":
       return upsertStepEvent(events, {
@@ -409,7 +417,7 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
         type: "step",
         tool: "CodexShell",
         arg: truncate(item.command, 96),
-        status: codexStatus(item.status),
+        status,
         input: { command: item.command },
         output: item.aggregated_output ?? "",
       });
@@ -419,7 +427,7 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
         type: "step",
         tool: "ApplyPatch",
         arg: `${(item.changes ?? []).length} files`,
-        status: item.status === "failed" ? "error" : "ok",
+        status,
         input: { changes: item.changes ?? [] },
         output: stringifyToolResult(item.changes ?? []),
       });
@@ -431,7 +439,7 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
         type: "step",
         tool: toolName,
         arg: summarize(toolName, item.arguments),
-        status: codexStatus(item.status),
+        status,
         input:
           item.arguments && typeof item.arguments === "object"
             ? item.arguments
@@ -445,8 +453,16 @@ function applyCodexItem(events: ChatEvent[], item: any): ChatEvent[] {
         type: "step",
         tool: "WebSearch",
         arg: item.query,
-        status: "ok",
+        status,
         input: { query: item.query },
+      });
+    case "collab_tool_call":
+    case "collab_agent_tool_call":
+      return upsertStepEvent(events, {
+        id: `s-codex-${item.id}`, type: "step", tool: "Agent",
+        arg: item.tool ?? "agent collaboration", status,
+        input: { tool: item.tool, agents: item.receiver_thread_ids ?? [] },
+        output: stringifyToolResult(item.agents_states ?? item.result),
       });
     case "todo_list":
       return upsertStepEvent(events, {

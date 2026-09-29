@@ -1,3 +1,4 @@
+import type { EffortLevel } from "./settings";
 export type StepStatus = "ok" | "pending" | "error";
 
 export type PermissionDecision =
@@ -18,7 +19,7 @@ export type GroupParticipant = {
   id: GroupAgentId;
   model: string;
   mode?: "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto" | "dontAsk";
-  effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  effort?: EffortLevel;
   systemPrompt?: string;
   skills: string[];
   mcpServers: string[];
@@ -124,6 +125,8 @@ export type ChatEvent =
       // 空串，只带 `estimated_tokens`（实测累加值 ≈ usage 里的 thinking_tokens）。
       // 所以「有没有在思考」只能靠这个计数器，text 会一直是空的。
       tokens?: number;
+      // Codex reports reasoning summaries as items, not token deltas.
+      status?: StepStatus;
     }
   | {
       id: string;

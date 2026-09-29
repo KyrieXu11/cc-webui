@@ -3,7 +3,7 @@ import Popover from "../Popover";
 import ModelSelector from "../ModelSelector";
 import ModeSelector from "../ModeSelector";
 import EffortSelector from "../EffortSelector";
-import type { EffortLevel, PermissionMode } from "../../lib/settings";
+import { clampEffort, type EffortLevel, type PermissionMode } from "../../lib/settings";
 import type { GroupAgentId, GroupParticipant } from "../../lib/types";
 
 const AGENT_ACCENT: Record<GroupAgentId, string> = {
@@ -134,7 +134,7 @@ function PopoverBody({
           <ModelSelector
             provider={agent}
             value={draft.model}
-            onChange={(model) => setDraft({ ...draft, model })}
+            onChange={(model) => setDraft({ ...draft, model, effort: clampEffort(draft.effort ?? "medium", model) })}
             direction="down"
             align="right"
           />

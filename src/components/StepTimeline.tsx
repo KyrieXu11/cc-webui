@@ -1,6 +1,7 @@
 import type { ChatEvent } from "../lib/types";
 import EditDiff from "./EditDiff";
 import ThinkingRow from "./ThinkingRow";
+import { useEffect, useState } from "react";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
 type ThinkingEvent = Extract<ChatEvent, { type: "thinking" }>;
@@ -10,7 +11,20 @@ type ThinkingEvent = Extract<ChatEvent, { type: "thinking" }>;
 // decided on). Keeping thinking INSIDE the group is what keeps the connector
 // line continuous; when these rows were separate blocks, every one of them cut
 // the line in two and left a blank gap.
-export type TimelineRow = StepEvent | ThinkingEvent;
+export type TimelineRow = StepEvent | ThinkingEvent | { id: string; type: "activity"; turnStartedAt?: number };
+
+function ToolElapsed({ reported = 0 }: { reported?: number }) {
+  const [elapsed, setElapsed] = useState(reported);
+  useEffect(() => {
+    const start = Date.now() - reported * 1000;
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    tick(); const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [reported]);
+  return <span className="font-mono text-subtle shrink-0 tabular-nums" aria-label="工具等待时长">
+    {elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`}
+  </span>;
+}
 
 const CheckIcon = ({
   status,
@@ -166,6 +180,7 @@ interface Props {
   awaitingPermission?: Set<string>;
   // Effort level of the turn, shown on thinking rows ("· max effort").
   effort?: string;
+  liveToolIds?: Set<string>;
 }
 
 export default function StepTimeline({
@@ -175,6 +190,7 @@ export default function StepTimeline({
   onToggle,
   awaitingPermission,
   effort,
+  liveToolIds,
 }: Props) {
   return (
     <div
@@ -186,6 +202,7 @@ export default function StepTimeline({
       )}
       <div className="flex flex-col">
         {rows.map((row) => {
+          if (row.type === "activity") return <ThinkingRow key={row.id} tokens={0} live turnStartedAt={row.turnStartedAt} effort={effort} />;
           if (row.type === "thinking") {
             return (
               <ThinkingRow
@@ -206,7 +223,7 @@ export default function StepTimeline({
                 <div className="relative z-10 shrink-0 bg-canvas">
                   <CheckIcon
                     status={s.status}
-                    waiting={awaitingPermission?.has(s.id)}
+                    waiting={awaitingPermission?.has(s.id) || (liveToolIds !== undefined && !liveToolIds.has(s.id))}
                   />
                 </div>
                 <div className="flex items-baseline gap-2 text-[13px] min-w-0 flex-1">
@@ -226,6 +243,7 @@ export default function StepTimeline({
                         : `${s.elapsedSeconds}s`}
                     </span>
                   )}
+                  {s.status === "pending" && s.elapsedSeconds === undefined && liveToolIds?.has(s.id) && <ToolElapsed />}
                 </div>
                 <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
                   <Chevron open={open} />

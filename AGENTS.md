@@ -292,7 +292,7 @@ claude CLI（你 Mac 上的子进程）
 - **测试是纯脚本风格**（top-level `await` + `node:assert`，不是 `describe/it`），但 `tsx --test` 能发现并跑。
   绝大多数在 `server/`；`src/` 下只跑**纯逻辑**（`processor.test.ts`），要 DOM / React 的别往这里塞。
   加测试就照 `server/groups/*.test.ts` 的样子写。
-- **模型/权限/effort 选项集中在 `src/lib/settings.ts`**——新增模型只改这里。
+- **Claude 模型/权限及 effort 标签集中在 `src/lib/settings.ts`**；Codex 模型与可用 effort 由 `server/codex-models.ts` 读 CLI 的 `models_cache.json`，随 `/api/meta` 下发，登录/切回标签/每分钟刷新，读不到则用显式回退列表。管理员默认值校验同一目录，不能只补硬编码。
   除了四个家族别名，还有三个**固定版本**（Opus 5 / Opus 4.8 / Sonnet 4.6，2026-09-23 加的：
   opus 那天变成 5.5，同档 effort 下想得更多）。⚠️ 固定版本是精确 slug，**迟早会下线报错**，
   加新的之前先真跑一轮（那段注释里有命令）；effort 规则按**家族**算（`claudeFamily`），
@@ -462,7 +462,7 @@ claude CLI（你 Mac 上的子进程）
   sandbox，`approval_policy` 恒为 `"never"`。**这不是偷懒，是 `codex exec` 压根没有审批通道**——
   `-a/--ask-for-approval` 只长在交互式 TUI 上，`--experimental-json` 的事件集里也没有任何审批请求
   （thread.started / turn.* / item.* / error，没别的）。传 `"on-request"` 只会让 turn 挂住或工具被
-  直接拒掉，没有任何一侧能回答它。所以 UI 上 `default` 写着「每次弹权限」对 Codex 是**假的**，
+  直接拒掉，没有任何一侧能回答它。所以 旧 UI 上 `default` 写着「每次弹权限」对 Codex 是**假的**（现已按 provider 提示），
   这是 UI/文案问题，不是驱动层能修的。要真做审批得换 `codex app-server`（另一套协议，未评估）。
 
 **飞书**
@@ -551,3 +551,10 @@ claude CLI（你 Mac 上的子进程）
   ——腾讯云安全组按端口放行，公网目前进不来。**风险不在现在，在于它靠的是云控制台里的一条
   规则**：安全组一放宽、或者机器搬家，裸端口就回来了。要彻底断：改 `proxyBindAddr`（会一起
   干掉 10133）或在 VPS 上按端口加防火墙规则。
+
+### Codex 运行反馈与模型目录（2026-09-29）
+
+- `codex exec` 无 reasoning/text delta，工具有 `item.started/updated/completed`。`MessageList` 为真实 live Codex turn 渲染临时 activity 行（同一 sparkle / 耗时 / turn effort），不是伪造 thinking ChatEvent/token。工具执行时用工具 spinner，完成后继续 activity；done/cancel/no-inflight/历史不转圈。
+- CodeX 单聊 buffer 第一帧 `turn_meta {effort,startedAt,provider}`；attach 重放同一帧。未确认 attach 真在运行前不显示历史活动动画。
+- MCP `result.isError` 也必须映射 error，不可因为 transport completed 就画绿勾；web search/file change 的 started 帧亦需 pending。
+- `CC_WEBUI_CODEX_MODELS_CACHE` 可覆盖默认 `$CODEX_HOME/models_cache.json`（缺省 `~/.codex`）。只下发 visibility=list 的公开模型信息；不下发 identity/账号/token/文件路径。

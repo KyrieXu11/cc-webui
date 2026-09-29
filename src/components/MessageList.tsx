@@ -7,6 +7,7 @@ import SummaryCard from "./SummaryCard";
 import ThinkingBlock from "./ThinkingBlock";
 import PendingHint from "./PendingHint";
 import RetryHint from "./RetryHint";
+import { liveToolIds, showCodexActivity } from "../lib/turn-activity";
 
 export type RetryInfo = {
   attempt: number;
@@ -61,6 +62,9 @@ interface Props {
   // Effort level of the current turn, echoed on thinking status rows the way
   // the CLI does ("thinking with max effort").
   effort?: string;
+  provider?: "claude" | "codex";
+  isRunning?: boolean;
+  turnStartedAt?: number;
 }
 
 export default function MessageList({
@@ -73,6 +77,9 @@ export default function MessageList({
   onPreviewImage,
   compact,
   effort,
+  provider,
+  isRunning,
+  turnStartedAt,
 }: Props) {
   const blocks: Block[] = [];
   // Step ids that still have an unresolved permission card: those steps are
@@ -96,6 +103,15 @@ export default function MessageList({
     }
   }
 
+  const codex = provider === "codex";
+  const activeTools = codex ? liveToolIds(events, !!isRunning) : undefined;
+  if (codex && !retryInfo && showCodexActivity(events, !!isRunning)) {
+    const row: TimelineRow = { id: "live-codex-activity", type: "activity", turnStartedAt };
+    const last = blocks[blocks.length - 1];
+    if (last?.kind === "timeline") last.rows.push(row);
+    else blocks.push({ kind: "timeline", id: row.id, rows: [row] });
+  }
+
   return (
     <div className={`flex flex-col ${compact ? "gap-3" : "gap-5 py-8"}`}>
       {blocks.map((b) => {
@@ -109,6 +125,7 @@ export default function MessageList({
               onToggle={onToggleStep}
               awaitingPermission={awaitingPermission}
               effort={effort}
+              liveToolIds={activeTools}
             />
           );
         }
@@ -132,6 +149,7 @@ export default function MessageList({
                 key={ev.id}
                 text={ev.text}
                 expanded={expandedSteps.has(ev.id)}
+                live={codex ? !!isRunning && ev.status === "pending" : undefined}
                 onToggle={() => onToggleStep(ev.id)}
               />
             );
@@ -173,7 +191,7 @@ export default function MessageList({
           errorStatus={retryInfo.errorStatus}
         />
       ) : (
-        isPending && blocks.length > 0 && <PendingHint />
+        !codex && isPending && blocks.length > 0 && <PendingHint />
       )}
     </div>
   );
