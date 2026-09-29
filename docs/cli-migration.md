@@ -34,7 +34,7 @@
 | 6 | 开关管的是「**2 participant**」能力，不是引擎 | 飞书 p2p 是 1-participant 会话，跑在同一个引擎上，不能一起关 |
 | 7 | flag 关闭时网页群聊入口**彻底不出现**；flag 经 `/api/meta` 运行时下发 | 编译期 flag 会让 `npm run dev` 改一次就得重启 vite |
 | 8 | ~~SDK 落后哪个能力~~ | **已被事实取代**：不是缺能力，是版本钉子（见下） |
-| 9 | 模型：Claude 用**家族别名**；Codex 读 `models_cache.json`**读不到则回退硬编码**；`XHIGH_CLAUDE_MODELS` **继续手维护** | CLI 完全不校验 `--effort`，当不了裁判 |
+| 9 | 模型：Claude 用**家族别名**；Codex 读 `models_cache.json`**读不到则回退内置列表**；`XHIGH_CLAUDE_MODELS` **继续手维护** | CLI 完全不校验 `--effort`，当不了裁判 |
 | 10 | **两个 SDK 都扔掉，自己写驱动** | 用户明确决定。注意：`pathToClaudeCodeExecutable` / `codexPathOverride` 是 SDK 的 option，本方案不用 SDK，故与它们无关 |
 | 11 | 二进制定位：`CC_WEBUI_CLAUDE_BIN` / `CC_WEBUI_CODEX_BIN`，**为空则从 PATH 解析** | 版本跟随默认开 |
 | 12 | 开关只在 turn 层面截断，**config 和 transcript 一行不改** | 改 `validateConfig` 会让已存 2-agent 群 `readConfig` 直接抛，并搞挂绑到它们的飞书 chat |
@@ -603,3 +603,10 @@ finally 里自己管。
 实测 Codex CLI 0.157.1 会将 user config 的 `features.child_agents_md` / `features.goal` 不认识提示输出成两条重复 `item.completed` + `item.type=error`，后续仍有正常的 `agent_message` 和 `turn.completed`。它读取的是服务端 OS 用户的 `~/.codex/config.toml`，不是网页 rebecca 账号的配置。
 
 `shared/codex-notices.ts` 仅过滤这两个非安全 feature 的完整 ignored 提示，以及既有 model-mismatch advisory；未知 key、审批/沙箱配置警告、top-level error、turn.failed 都保留。网页 live / history、群聊使用同一判定，不修改原生 rollout 或用户全局配置。官方全局/项目配置层次见 [Config basics](https://learn.chatgpt.com/docs/config-file/config-basic)。
+
+### 2026-09-29：Codex 反馈与动态模型目录已实施
+
+- 保留 `codex exec --experimental-json`，不伪造 delta 或 reasoning token。工具前后无输出的阶段用运行态 activity 行显示旋转 sparkle、回合耗时与请求的真实 effort；工具 started → spinner / 可展开参数，completed → 输出 / 绿勾（isError 则红色）。历史 reasoning 摘要不自动冒充 live 思考。
+- 单聊第一帧新增控制 `turn_meta { effort, startedAt, provider: "codex" }`，POST / attach 共享 buffer；不进原生历史内容。群聊共用 MessageList 的同款临时状态，未收到首个事件时也能显示。
+- 决策 #9 的模型目录路径已完成：`server/codex-models.ts` 读受大小约束的 CLI 缓存，/api/meta 每次单独刷新模型（不受 slashCommands 60s 缓存影响）；浏览器初始化后再应用账号默认值。管理员 API 从同一目录校验 model + effort。
+- 本机缓存（client_version 0.158.0）已列 GPT-6 Astra / Sol / Luna；CLI 实际二进制为 0.157.1，支持 ultra 配置解析。模型展示及 tiers 以缓存为准，未宣称逐模型/逐档位均已做真实请求验收；用户要求先发布自测。59 项测试及 typecheck/build 通过。

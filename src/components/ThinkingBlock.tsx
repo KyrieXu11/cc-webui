@@ -6,6 +6,7 @@ interface Props {
   expanded: boolean;
   onToggle: () => void;
   delay?: number;
+  live?: boolean;
 }
 
 export default function ThinkingBlock({
@@ -13,18 +14,21 @@ export default function ThinkingBlock({
   expanded,
   onToggle,
   delay = 0,
+  live,
 }: Props) {
   const [label, setLabel] = useState(() => pickThinkingWord());
-  const [active, setActive] = useState(true);
+  const [textActive, setActive] = useState(true);
+  const active = live ?? textActive;
   const prevTextRef = useRef(text);
 
   // Mark active whenever the content changes; flip to inactive after a quiet gap.
   useEffect(() => {
+    if (live !== undefined) return;
     prevTextRef.current = text;
     setActive(true);
     const t = setTimeout(() => setActive(false), 2500);
     return () => clearTimeout(t);
-  }, [text]);
+  }, [text, live]);
 
   // While thinking is active, rotate through verbs.
   useEffect(() => {

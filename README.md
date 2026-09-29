@@ -53,6 +53,7 @@
   - 右键文件或文件夹进入多选 → 下载（多个打成 zip，文件夹不能下载）/ 删除（真删、无回收站、留痕；**文件夹只删空的**）
   - 拖到文件夹＝移动，拖到对话框＝插入相对路径；悬停出现的铅笔＝重命名
 - **AI 共用项目记忆（可选）** — `CC_WEBUI_PROJECT_MEMORY_ENABLED=1` 后，网页 Claude / Codex 通过独立 Memory MCP 使用同一项目的记忆（有权打开该项目的账号共用，不按账号分库）。每轮加载索引，按需读取正文；保存会原子更新正文与索引，带版本冲突和幂等保护。左栏书本只展示这一份统一记忆；旧 Claude 记忆可用显式迁移脚本导入，原生文件不改动。Plan 禁止保存/删除；其它模式下五个范围固定的 memory 工具不另弹通用文件权限卡。详见 [项目记忆](docs/project-memory.md)
+- **Codex 实时反馈与模型目录** — 使用和 Claude 同款动态 sparkle 显示回合等待 / 耗时；工具进行中旋转、完成后可展开输入/输出，工具间空档继续显示活动状态。模型与对应 effort 从服务端 CLI 缓存动态读取，包括 GPT‑6 家族，不再靠手工更新列表；缓存缺失/损坏会明确回退。不伪造 CLI 未输出的思考原文/token。
 - **成员可用 AI** — 管理 → 用户：勾选允许 Claude / Codex，再设置默认 AI、该 AI 的模型和 effort。可用 AI 是服务端限制，默认值每版只套用一次，对方之后仍可自行调整模型/effort。普通账号默认仅 Claude，管理员可明确开放 Codex，不必升为管理员。**Codex CLI 没有逐工具确认通道，工具写入会自动执行；普通账号仍不能使用 Bypass。** 群聊仍只供管理员发起。
 - **文件上传** — composer 支持点击 / 拖拽 / 粘贴：
   - **图片** → base64 直接作为 image content block 发给模型，1 个回合看见（等价于终端粘贴）
@@ -136,6 +137,7 @@ npm run dev
 | `CC_WEBUI_SESSION_INDEX` | 旧 Codex 会话索引文件路径，现仅用于首次启动时一次性导入进 SQLite | `~/.cc-webui/sessions.json` |
 | `CC_WEBUI_DB` | SQLite 数据库路径（索引与关系：最近项目 / 飞书绑定 / 群聊索引 / Codex 会话索引） | `~/.cc-webui/cc-webui.db` |
 | `CC_WEBUI_GROUPS_DIR` | 多 agent 群聊数据目录（`<gid>/config.json` + `transcript.jsonl` + `index.json`） | `~/.cc-webui/groups` |
+| `CC_WEBUI_CODEX_MODELS_CACHE` | Codex 模型目录缓存；默认读取 CLI 当前用户的公开模型列表与支持的 effort | `$CODEX_HOME/models_cache.json`，缺省 `~/.codex/models_cache.json` |
 | `CC_WEBUI_PROJECT_MEMORY_ENABLED` | 启用网页单聊的项目 Memory MCP；仅本次 CLI 调用禁用原生自动记忆，不改全局配置 | 关闭 |
 | `CC_WEBUI_PROJECT_MEMORY_DIR` | 项目记忆正文库；只接受空目录或带本应用标记的目录，不可填现有项目/原生记忆目录 | `~/.cc-webui/project-memory` |
 | `CC_WEBUI_GROUPS_ENABLED` | 是否启用**多 agent 群聊**（一个 turn 里多个 agent 接话）。未开启时网页群聊入口不出现、`/api/groups` 不挂载；飞书和网页单聊不受影响 | 关闭 |

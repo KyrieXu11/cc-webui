@@ -122,7 +122,7 @@ try {
     defaults: {
       provider: "codex",
       model,
-      effort: "max"
+      effort: "not-a-tier"
     }
   })).status, 400);
   const foreign = randomUUID();

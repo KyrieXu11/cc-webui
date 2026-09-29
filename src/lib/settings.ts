@@ -5,7 +5,7 @@ export type PermissionMode =
   | "plan"
   | "bypassPermissions";
 
-export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+export type EffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type AgentProvider = "claude" | "codex";
 
@@ -33,8 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "opus",
   // auto = 模型自己的行为分类器决定要不要问（决策 12 保留了它，禁掉的是 bypass）。
   permissionMode: "auto",
-  // max 是 Claude 独有的顶档；切到 Codex 时 modelOptionsForProvider/EFFORT_OPTIONS
-  // 会把它过滤掉，落回 xhigh。
+  // 根据实际模型目录限制档位；模型不支持 max 时 clamp 到更低档。
   effort: "max",
 };
 
@@ -106,6 +105,8 @@ export type ModelOption = {
   // effort rules key on (an alias is its own family).
   family?: string;
   pinned?: boolean;
+  supportedEfforts?: EffortLevel[];
+  defaultEffort?: EffortLevel;
 };
 
 // Family aliases first, then a few pinned versions.
@@ -184,30 +185,66 @@ function claudeFamily(id: string): string {
   return canonicalizeClaudeModel(id);
 }
 
-// ⚠️ Codex has **no family aliases** — an exact slug or a 400. So unlike the
-// Claude list above, this one cannot follow the CLI on its own and WILL go
-// stale. It went stale once already: on 2026-09-17 four of the five entries
-// here (`gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.2`) were measured
-// returning `The '<id>' model is not supported when using Codex with a ChatGPT
-// account.` — i.e. the picker offered one working model out of five.
-//
-// The list below is every model with `visibility: "list"` in
-// `~/.codex/models_cache.json` (client_version 0.144.1), each one verified with
-// a real turn. **When you touch this list, verify the same way** — the CLI
-// cannot enumerate models (`codex models` → "stdin is not a terminal") and it
-// does not validate `--model` client-side either.
-//
-// Reading that cache at runtime is decision #9 in docs/cli-migration.md and is
-// still the right end state; it needs a server route + a fallback, because the
-// file is a server-fetched cache that is sometimes corrupt (it was, during the
-// migration research) and its schema is Codex-internal.
-const CODEX_MODEL_OPTIONS: ModelOption[] =
-  [
-    { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", hint: "日常 agent 主力" },
-    { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", hint: "均衡 · 编码日常" },
-    { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", hint: "快 · 便宜" },
-    { id: "gpt-5.5", label: "GPT-5.5", hint: "上一代 · 编码与通用" },
-  ];
+// Runtime metadata from the service's CLI cache is authoritative. This list is
+// only a conservative fallback when that file is unavailable/malformed.
+export const CODEX_FALLBACK_MODELS: ModelOption[] = [
+  { id: "gpt-6-sol", label: "GPT-6-Sol", hint: "日常编码与 agent 主力" },
+  { id: "gpt-6-astra", label: "GPT-6-Astra", hint: "复杂任务与深入推理" },
+  { id: "gpt-6-luna", label: "GPT-6-Luna", hint: "更快 · 轻量任务" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", hint: "上一代编码主力" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", hint: "上一代均衡模型" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", hint: "上一代轻量模型" },
+  { id: "gpt-5.5", label: "GPT-5.5", hint: "旧版本" },
+].map(m => ({ ...m, supportedEfforts: ["low", "medium", "high", "xhigh"] as EffortLevel[] }));
+let CODEX_MODEL_OPTIONS = CODEX_FALLBACK_MODELS;
+let catalogVersion = 0;
+let catalogSource: "cli-cache" | "fallback" = "fallback";
+export const codexCatalogSource = () => catalogSource;
+const catalogListeners = new Set<() => void>();
+export const modelCatalogVersion = () => catalogVersion;
+export const subscribeModelCatalog = (listener: () => void) => {
+  catalogListeners.add(listener);
+  return () => { catalogListeners.delete(listener); };
+};
+export function defaultCodexModel(models: ModelOption[]): string {
+  return models.find(m => m.id === "gpt-6-sol")?.id ?? models.find(m => m.id === "gpt-5.6-sol")?.id ?? models[0]?.id ?? "gpt-6-sol";
+}
+
+// Parse only public model metadata, never cache identity/account/token fields.
+export function parseCodexModelsCache(raw: unknown): ModelOption[] | null {
+  if (!raw || typeof raw !== "object" || !("models" in raw) || !Array.isArray(raw.models)) return null;
+  const seen = new Set<string>();
+  const models = raw.models.slice(0, 200).flatMap((m: any, index: number) => {
+    if (!m || m.visibility !== "list" || typeof m.slug !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(m.slug) || seen.has(m.slug)) return [];
+    const levels = Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [];
+    const supported = EFFORT_OPTIONS.map(o => o.id).filter(effort => levels.some((l: any) => l?.effort === effort));
+    if (!supported.length) return [];
+    seen.add(m.slug);
+    const model: ModelOption = {
+      id: m.slug,
+      label: typeof m.display_name === "string" ? m.display_name.slice(0, 100) : m.slug,
+      hint: typeof m.description === "string" ? m.description.slice(0, 256) : "Codex CLI 模型",
+      supportedEfforts: supported,
+      ...(supported.includes(m.default_reasoning_level) ? { defaultEffort: m.default_reasoning_level } : {}),
+    };
+    return [{ model, order: Number.isFinite(m.priority) ? m.priority : index + 1000 }];
+  }).sort((a, b) => a.order - b.order).map(m => m.model);
+  return models.length ? models : null;
+}
+export function configureCodexModels(raw: unknown, source: "cli-cache" | "fallback" = "cli-cache"): boolean {
+  if (!Array.isArray(raw)) return false;
+  const models = parseCodexModelsCache({ models: raw.map(m => ({
+    slug: m?.id, display_name: m?.label, description: m?.hint, visibility: "list",
+    supported_reasoning_levels: Array.isArray(m?.supportedEfforts) ? m.supportedEfforts.map((effort: unknown) => ({ effort })) : [],
+    default_reasoning_level: m?.defaultEffort,
+  })) });
+  if (!models) return false;
+  if (source !== catalogSource || JSON.stringify(models) !== JSON.stringify(CODEX_MODEL_OPTIONS)) {
+    CODEX_MODEL_OPTIONS = models; catalogSource = source; catalogVersion++;
+    for (const listener of catalogListeners) listener();
+  }
+  return true;
+}
 
 export const MODEL_OPTIONS = CLAUDE_MODEL_OPTIONS;
 
@@ -220,7 +257,7 @@ export function modelOptionsForProvider(provider: AgentProvider) {
 }
 
 export function defaultModelForProvider(provider: AgentProvider): string {
-  return modelOptionsForProvider(provider)[0]?.id ?? DEFAULT_SETTINGS.model;
+  return provider === "codex" ? defaultCodexModel(CODEX_MODEL_OPTIONS) : DEFAULT_SETTINGS.model;
 }
 
 export const MODE_OPTIONS: Array<{
@@ -269,11 +306,12 @@ export const EFFORT_OPTIONS: Array<{
   hint: string;
   // Tier only available on Claude Opus / Codex (not Sonnet/Haiku).
   xhighTier?: boolean;
-  // `max` is a Claude-only label; the Codex SDK's top tier is xhigh,
-  // so we hide max in Codex UI to avoid implying a real tier above xhigh.
-  claudeOnly?: boolean;
+  // Extra Codex tiers are shown only when the CLI model metadata supports them.
+  codexOnly?: boolean;
 }> = [
-  { id: "low", label: "Low", hint: "几乎不思考 · 最快" },
+  { id: "none", label: "None", hint: "不使用推理", codexOnly: true },
+  { id: "minimal", label: "Minimal", hint: "最少推理", codexOnly: true },
+  { id: "low", label: "Low", hint: "较少推理 · 更快" },
   { id: "medium", label: "Medium", hint: "均衡（默认）" },
   { id: "high", label: "High", hint: "更深入的推理" },
   { id: "xhigh", label: "xHigh", hint: "长时间思考", xhighTier: true },
@@ -281,12 +319,12 @@ export const EFFORT_OPTIONS: Array<{
     id: "max",
     label: "Max",
     hint: "最大限度 · 最慢",
-    claudeOnly: true,
   },
+  { id: "ultra", label: "Ultra", hint: "最深入推理 · 可自动委派", codexOnly: true },
 ];
 
 function isCodexModel(model: string): boolean {
-  return CODEX_MODEL_OPTIONS.some((m) => m.id === model);
+  return CODEX_MODEL_OPTIONS.some((m) => m.id === model) || /^(?:gpt-|codex-|o\d)/.test(model);
 }
 
 // Which Claude families expose the xhigh effort tier. Hand-maintained on
@@ -303,9 +341,7 @@ export function supportsXhighEffort(model: string): boolean {
 }
 
 // Clamp an effort to what this model actually offers, preferring the closest
-// tier below. Needed now that the DEFAULT is `max`: that tier is Claude-only,
-// so switching to Codex (or to Sonnet/Haiku, which lack xhigh too) would
-// otherwise carry an effort the target does not have.
+// tier below. The supported Codex tiers come from the runtime model metadata.
 export function clampEffort(effort: EffortLevel, model: string): EffortLevel {
   const available = availableEffortOptions(model).map((o) => o.id);
   if (available.includes(effort)) return effort;
@@ -316,18 +352,13 @@ export function clampEffort(effort: EffortLevel, model: string): EffortLevel {
   return available[0] ?? "medium";
 }
 
-export function availableEffortOptions(model: string) {
-  const codex = isCodexModel(model);
+export function availableEffortOptions(model: string, codexModels = CODEX_MODEL_OPTIONS) {
+  if (isCodexModel(model) || codexModels.some(m => m.id === model)) {
+    const supported = codexModels.find(m => m.id === model)?.supportedEfforts ?? ["low", "medium", "high", "xhigh"];
+    return EFFORT_OPTIONS.filter(o => supported.includes(o.id));
+  }
   const family = claudeFamily(model);
-  return EFFORT_OPTIONS.filter((o) => {
-    // xhigh: only top-tier Claude (Opus/Fable) + Codex models
-    if (o.xhighTier && !XHIGH_CLAUDE_MODELS.has(family) && !codex) {
-      return false;
-    }
-    // max: Claude-only (Codex's top tier IS xhigh)
-    if (o.claudeOnly && codex) return false;
-    return true;
-  });
+  return EFFORT_OPTIONS.filter(o => !o.codexOnly && (!o.xhighTier || XHIGH_CLAUDE_MODELS.has(family)));
 }
 
 export function effortLabel(id: EffortLevel): string {

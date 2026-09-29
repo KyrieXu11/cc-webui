@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import Popover from "./Popover";
 import {
   modelLabel,
+  codexCatalogSource,
   modelOptionsForProvider,
   providerLabel,
   type AgentProvider,
@@ -46,6 +47,10 @@ export default function ModelSelector({
               当前会话仅支持本 provider 的模型
             </span>
           </div>
+          {provider === "codex" && <div className="px-2.5 pb-1 text-[10px] text-subtle">
+            {codexCatalogSource() === "cli-cache" ? "来自服务端 Codex CLI 模型目录" : "CLI 目录暂不可用 · 使用内置回退列表"}
+          </div>}
+          <div className="max-h-[min(60vh,460px)] overflow-y-auto">
           {models.map((m, i) => {
             const active = value === m.id;
             // 跟随最新的别名在上，固定版本在下，中间隔一道线——两类的区别
@@ -84,6 +89,7 @@ export default function ModelSelector({
               </Fragment>
             );
           })}
+          </div>
         </div>
       )}
     </Popover>

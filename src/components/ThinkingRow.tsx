@@ -28,45 +28,50 @@ function formatElapsed(sec: number): string {
 
 interface Props {
   tokens: number;
+  // Explicit turn liveness for Codex: no made-up tokens or thought content.
+  live?: boolean;
+  turnStartedAt?: number;
   // Shown as the trailing "· max effort", mirroring the CLI's
   // "thinking with max effort". Omitted when the caller has no effort context.
   effort?: string;
 }
 
-export default function ThinkingRow({ tokens, effort }: Props) {
+export default function ThinkingRow({ tokens, effort, live, turnStartedAt }: Props) {
   const [label, setLabel] = useState(() => pickThinkingWord());
   // Deliberately starts inactive: a row replayed from history has a fixed token
   // count and must not spin. Only an actual token bump means "thinking now".
   const initialTokens = useRef(tokens);
-  const [active, setActive] = useState(false);
+  const [tokenActive, setActive] = useState(false);
+  const active = live ?? tokenActive;
   const [elapsed, setElapsed] = useState<number | null>(null);
-  const startedAt = useRef<number | null>(null);
+  const startedAt = useRef<number | null>(live ? turnStartedAt ?? Date.now() : null);
 
   useEffect(() => {
-    if (tokens === initialTokens.current) return;
+    if (live !== undefined || tokens === initialTokens.current) return;
     if (startedAt.current === null) startedAt.current = Date.now();
     setActive(true);
     // Thinking is bursty; a few quiet seconds means the block is done. The
     // stream gives no content_block_stop we can rely on here.
     const t = setTimeout(() => setActive(false), 4000);
     return () => clearTimeout(t);
-  }, [tokens]);
+  }, [tokens, live]);
 
   useEffect(() => {
     if (!active) return;
+    if (live && turnStartedAt !== undefined) startedAt.current = turnStartedAt;
+    const tick = () => {
+      if (startedAt.current !== null) setElapsed(Math.max(0, Math.floor((Date.now() - startedAt.current) / 1000)));
+    };
+    tick();
     const verbTimer = setInterval(() => {
       setLabel((cur) => pickThinkingWord(cur));
     }, 1800);
-    const tickTimer = setInterval(() => {
-      if (startedAt.current !== null) {
-        setElapsed(Math.floor((Date.now() - startedAt.current) / 1000));
-      }
-    }, 1000);
+    const tickTimer = setInterval(tick, 1000);
     return () => {
       clearInterval(verbTimer);
       clearInterval(tickTimer);
     };
-  }, [active]);
+  }, [active, live, turnStartedAt]);
 
   const meta = [
     // Elapsed is measured from the first token bump, so it only exists for a
@@ -77,7 +82,9 @@ export default function ThinkingRow({ tokens, effort }: Props) {
   ].filter(Boolean);
 
   return (
-    <div className="relative flex items-center py-[6px] gap-3 w-full text-left">
+    <div className="relative flex items-center py-[6px] gap-3 w-full text-left"
+      aria-label={live ? "思考中" : undefined}
+      title={live ? "当前回合仍在处理；耗时为回合等待时长，不代表已获得思考原文或 token 数" : undefined}>
       <div className="relative z-10 shrink-0 bg-canvas">
         <Sparkle active={active} />
       </div>

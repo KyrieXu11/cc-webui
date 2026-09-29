@@ -104,6 +104,13 @@ try {
     assert.equal(res.status, 200);
     const text = await res.text();
     assert.match(text, /ok/);
+    if (provider === "codex") {
+      const first = text.split("\n\n")[0];
+      assert.match(first, /^event: turn_meta/);
+      const meta = JSON.parse(first.split("\n").find(line => line.startsWith("data:"))!.slice(5));
+      assert.equal(meta.provider, "codex"); assert.equal(meta.effort, null);
+      assert.ok(Number.isFinite(meta.startedAt));
+    }
   };
   await send("claude");
   await send("codex");

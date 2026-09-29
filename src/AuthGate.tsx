@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useSyncExternalStore,
 } from "react";
 import LoginView from "./components/LoginView";
 import {
@@ -14,7 +15,7 @@ import {
   type AuthUser,
   type Me,
 } from "./lib/auth";
-import type { AgentProvider } from "./lib/settings";
+import { configureCodexModels, modelCatalogVersion, subscribeModelCatalog, type AgentProvider } from "./lib/settings";
 import type { UserDefaults } from "./lib/user-defaults";
 
 type AuthValue = {
@@ -23,6 +24,7 @@ type AuthValue = {
   allowedProviders: AgentProvider[];
   isAdmin: boolean;
   defaults: UserDefaults | null;
+  modelCatalogRevision: number;
   signOut: () => void;
 };
 
@@ -43,6 +45,25 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   // know who is looking would flash the whole UI at an anonymous visitor before
   // snapping to the login screen.
   const [me, setMe] = useState<Me | "loading">("loading");
+  const revision = useSyncExternalStore(subscribeModelCatalog, modelCatalogVersion);
+  const [catalogReadyFor, setCatalogReadyFor] = useState<string | null>(null);
+  const accountId = me !== "loading" ? me.user?.id : null;
+  useEffect(() => {
+    if (!accountId) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const r = await fetch("/api/meta", { signal: AbortSignal.timeout(5000) });
+        if (r.ok) { const data = await r.json(); if (!cancelled) configureCodexModels(data.models?.codex?.models, data.models?.codex?.source === "fallback" ? "fallback" : "cli-cache"); }
+      } catch { /* retain conservative fallback / last valid catalogue */ }
+      finally { if (!cancelled) setCatalogReadyFor(accountId); }
+    };
+    void refresh();
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 60_000);
+    return () => { cancelled = true; clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+  }, [accountId]);
 
   useEffect(() => {
     installUnauthorizedInterceptor();
@@ -93,7 +114,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     void postLogout().then(() => setMe({ user: null }));
   }, []);
 
-  if (me === "loading") {
+  if (me === "loading" || (me.user && catalogReadyFor !== me.user.id)) {
     return <div className="h-full bg-canvas" />;
   }
 
@@ -109,6 +130,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         allowedProviders: me.allowedProviders ?? (me.user.role === "admin" ? ["claude", "codex"] : ["claude"]),
         isAdmin: me.user.role === "admin",
         defaults: me.defaults ?? null,
+        modelCatalogRevision: revision,
         signOut,
       }}
     >

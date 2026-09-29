@@ -271,6 +271,7 @@ codexChat.post("/chat", async (c) => {
   if (clientTurnId) activeCodexChatsByClientTurn.set(clientTurnId, entry);
 
   const fanout = fanoutFactory(entry);
+  fanout("turn_meta", JSON.stringify({ type: "turn_meta", effort: effort ?? null, startedAt, provider: "codex" }));
 
   (async () => {
     let unsubscribeForeground: (() => void) | undefined;
