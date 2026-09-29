@@ -1,3 +1,4 @@
+import { isCodexNonFatalNotice } from "../../shared/codex-notices";
 import type { ChatEvent, ImageAttachment, StepStatus } from "./types";
 import type { CodexSessionTurn, SessionHistoryItem, SessionMessage } from "./sessions";
 
@@ -58,6 +59,8 @@ export function applySDKMessage(
   msg: any,
   onSession: OnSession
 ): ChatEvent[] {
+  if (isCodexNonFatalNotice(msg)) return events;
+
   if (!msg || typeof msg !== "object") return events;
 
   if (msg.type === "thread.started" && msg.thread_id) {

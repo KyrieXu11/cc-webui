@@ -36,7 +36,7 @@ route.get("/", async c => {
     provider: r.provider
   }));
   return c.json({
-    dir: "cc-webui · 当前账号 / 当前项目",
+    dir: "cc-webui · 当前项目共用",
     index: memories.map(m => `- [${m.name}](${m.file}) — ${m.description}`).join("\n"),
     memories,
     enabled: projectMemoryEnabled(),

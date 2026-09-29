@@ -9,7 +9,7 @@ import {
   type ProjectMemory,
 } from "../lib/memory";
 
-// 唯一日常入口：当前账号的统一项目记忆。保存/更新仅通过 Memory MCP。
+// 唯一日常入口：项目内共用记忆，访问由当前账号的目录白名单决定。
 
 interface Props {
   cwd: string;
@@ -143,8 +143,8 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
         </header>
 
         <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-muted">Claude / Codex 共用</span>
-          {data && <span className="text-[11px] text-subtle">仅当前账号 / 当前项目 · {data.total ?? data.memories.length} 条{data.enabled ? " · 已启用" : " · 运行时未启用"}</span>}
+          <span className="text-[12px] text-muted">项目内共用 · Claude / Codex</span>
+          {data && <span className="text-[11px] text-subtle">当前项目 · {data.total ?? data.memories.length} 条{data.enabled ? " · 已启用" : " · 运行时未启用"}</span>}
           {data?.nextCursor != null && <button onClick={() => void loadMore()} className="text-[12px] text-blue">加载更多</button>}
         </div>
         {notice && <div className="px-4 py-2 text-[12px] text-muted border-b border-line">{notice}</div>}

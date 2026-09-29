@@ -26,13 +26,13 @@ export async function resolveMemoryScope(actorId: string, cwd: string): Promise<
   }
   const projectKey = digest(canonical);
   const scope = {
-    id: digest(JSON.stringify([actorId, canonical])),
+    id: projectKey,
     actorId,
     cwd: canonical,
     projectKey
   };
-  getDb().prepare(`INSERT INTO project_memory_scopes(id,user_id,cwd,project_key) VALUES(?,?,?,?)
-    ON CONFLICT(id) DO NOTHING`).run(scope.id, actorId, canonical, projectKey);
+  getDb().prepare(`INSERT INTO project_memory_scopes(id,cwd,project_key) VALUES(?,?,?)
+    ON CONFLICT(id) DO NOTHING`).run(scope.id, canonical, projectKey);
   return scope;
 }
 export async function validateMemoryScope(scope: MemoryScope): Promise<void> {

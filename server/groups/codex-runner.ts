@@ -9,7 +9,7 @@ import {
 import { codexExecutor } from "../executors/codex-executor.ts";
 import type { McpServerSpec } from "../executors/types.ts";
 import { systemPromptFor } from "./input-builder.ts";
-import { isCodexModelMismatchNotice } from "../codex-events.ts";
+import { isCodexNonFatalNotice } from "../codex-events.ts";
 import type { GroupConfig, Participant } from "./config.ts";
 import type { ImageAttachment } from "./store.ts";
 import type { RunnerEvent, RunnerCtx } from "./runner-types.ts";
@@ -103,10 +103,9 @@ export async function* runCodex(args: {
 
       const ev = frame.payload as any;
 
-      // Drop the benign "recorded with model X but resuming with Y" advisory
-      // so it never leaks into the chat card / transcript. The turn proceeds
-      // under the requested model regardless.
-      if (isCodexModelMismatchNotice(ev)) continue;
+      // Known model/config compatibility notices are not turn failures.
+      // Unknown warnings and genuine errors still reach the card/transcript.
+      if (isCodexNonFatalNotice(ev)) continue;
 
       // Re-key MCP context to the real thread id once Codex emits it.
       if (ev.type === "thread.started" && ev.thread_id) {

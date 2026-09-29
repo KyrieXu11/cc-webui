@@ -63,7 +63,7 @@ export function dbPath(): string {
 // SQLite treats NULLs as distinct in a UNIQUE index, so a nullable owner would
 // silently allow duplicate rows per path. '' means "no owner yet" until the
 // permissions module fills it in.
-const MIGRATIONS: string[] = [
+const MIGRATIONS: Array<string | ((db: Database) => void)> = [
   // 1 — replaces ~/.cc-webui/recents.json (one shared file, capped at 20, which
   // with several users would simply squeeze everyone else out),
   // ~/.cc-webui/feishu/bindings.json, ~/.cc-webui/groups/index.json (the
@@ -333,7 +333,87 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY(scope_id, operation_id)
   );
   `,
+  // 10 — 用户确认只按项目共享；actor 只负责授权及幂等请求的归属，不再拥有记忆。
+  migrateProjectOnlyMemory,
 ];
+
+function migrateProjectOnlyMemory(db: Database): void {
+  // Build new tables before dropping the old ones: keep foreign_keys enabled
+  // and preserve immutable body pointers/revisions without touching any files.
+  db.exec(`
+    CREATE TABLE project_memory_scopes_new (
+      id TEXT PRIMARY KEY, cwd TEXT NOT NULL UNIQUE, project_key TEXT NOT NULL UNIQUE,
+      revision INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO project_memory_scopes_new(id,cwd,project_key,revision)
+      SELECT project_key,cwd,project_key,SUM(revision) + CASE WHEN COUNT(*)>1 THEN 1 ELSE 0 END
+      FROM project_memory_scopes GROUP BY project_key,cwd;
+    CREATE TABLE project_memories_new (
+      id TEXT PRIMARY KEY,
+      scope_id TEXT NOT NULL REFERENCES project_memory_scopes_new(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, description TEXT NOT NULL, type TEXT NOT NULL,
+      revision INTEGER NOT NULL, file TEXT NOT NULL, hash TEXT NOT NULL, body_offset INTEGER NOT NULL,
+      provider TEXT NOT NULL, session_id TEXT NOT NULL, updated_at INTEGER NOT NULL,
+      UNIQUE(scope_id,name)
+    );
+    CREATE TABLE project_memory_revisions_new (
+      memory_id TEXT NOT NULL REFERENCES project_memories_new(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL, parent_revision INTEGER NOT NULL, file TEXT NOT NULL,
+      hash TEXT NOT NULL, body_offset INTEGER NOT NULL, provider TEXT NOT NULL, session_id TEXT NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY(memory_id,revision)
+    );
+    CREATE TABLE project_memory_operations_new (
+      scope_id TEXT NOT NULL REFERENCES project_memory_scopes_new(id) ON DELETE CASCADE,
+      actor_id TEXT NOT NULL, operation_id TEXT NOT NULL, request_hash TEXT NOT NULL, result TEXT NOT NULL,
+      PRIMARY KEY(scope_id,actor_id,operation_id)
+    );
+  `);
+  const rows = db.prepare(`SELECT m.*,s.project_key FROM project_memories m
+    JOIN project_memory_scopes s ON s.id=m.scope_id ORDER BY m.updated_at DESC,m.id`).all() as Array<{
+    id: string; project_key: string; name: string; description: string; type: string;
+    revision: number; file: string; hash: string; body_offset: number;
+    provider: string; session_id: string; updated_at: number;
+  }>;
+  // Reserve ALL original names first, so an auto-suffix never steals the name
+  // of an unrelated entry. Preserve both conflicting records, including IDs.
+  const reserved = new Set(rows.map(r => JSON.stringify([r.project_key,r.name])));
+  const used = new Set<string>();
+  const insert = db.prepare(`INSERT INTO project_memories_new
+    (id,scope_id,name,description,type,revision,file,hash,body_offset,provider,session_id,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+  let conflicts = 0;
+  for (const r of rows) {
+    let name = r.name;
+    const key = (n: string) => JSON.stringify([r.project_key,n]);
+    if (used.has(key(name))) {
+      let n = 0;
+      do {
+        const suffix = `-${r.id.slice(0,8)}${n ? `-${n}` : ""}`;
+        name = r.name.slice(0,64-suffix.length) + suffix;
+        n++;
+      } while (reserved.has(key(name)) || used.has(key(name)));
+      conflicts++;
+    }
+    used.add(key(name));
+    insert.run(r.id,r.project_key,name,r.description,r.type,r.revision,r.file,r.hash,r.body_offset,r.provider,r.session_id,r.updated_at);
+  }
+  db.exec(`
+    INSERT INTO project_memory_revisions_new SELECT * FROM project_memory_revisions;
+    INSERT INTO project_memory_operations_new(scope_id,actor_id,operation_id,request_hash,result)
+      SELECT s.project_key,s.user_id,o.operation_id,o.request_hash,o.result
+      FROM project_memory_operations o JOIN project_memory_scopes s ON s.id=o.scope_id;
+    DROP TABLE project_memory_operations;
+    DROP TABLE project_memory_revisions;
+    DROP TABLE project_memories;
+    DROP TABLE project_memory_scopes;
+    ALTER TABLE project_memory_scopes_new RENAME TO project_memory_scopes;
+    ALTER TABLE project_memories_new RENAME TO project_memories;
+    ALTER TABLE project_memory_revisions_new RENAME TO project_memory_revisions;
+    ALTER TABLE project_memory_operations_new RENAME TO project_memory_operations;
+    CREATE INDEX idx_project_memory_scope ON project_memories(scope_id,updated_at DESC,id);
+  `);
+  if (conflicts) console.log(`[cc-webui] project memory: preserved ${conflicts} same-name records with unique suffixes`);
+}
 
 let handle: Database | null = null;
 
@@ -357,7 +437,9 @@ export function getDb(): Database {
   for (let i = current; i < MIGRATIONS.length; i++) {
     db.exec("BEGIN");
     try {
-      db.exec(MIGRATIONS[i]);
+      const migration = MIGRATIONS[i];
+      if (typeof migration === "string") db.exec(migration);
+      else migration(db);
       db.exec(`PRAGMA user_version = ${i + 1}`);
       db.exec("COMMIT");
     } catch (err) {

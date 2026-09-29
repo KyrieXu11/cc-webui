@@ -56,7 +56,7 @@ function serverFor(token: string) {
     }
   }, a => run(false, ctx => listMemory(ctx.projectMemory!.scope, a.cursor, a.limit)));
   server.registerTool("search", {
-    description: "Literal name/description search across all memories in the current account/project, including records omitted from the snapshot.",
+    description: "Literal name/description search across all memories in the current project, including records omitted from the snapshot.",
     inputSchema: {
       query: z.string().min(1).max(512),
       limit: z.number().int().min(1).max(20).optional()
