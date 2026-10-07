@@ -618,7 +618,7 @@ export default function App() {
     setTurnEffort(undefined);
     setTurnStartedAt(undefined);
     setAttachedStreaming(true);
-    const finishAttach = (reason: "done" | "error" | "no-inflight") => {
+    const finishAttach = (reason: "done" | "error" | "no-inflight", message?: string) => {
       if (closed) return;
       setAttachedStreaming(false);
       setRetryInfo(null);
@@ -634,7 +634,7 @@ export default function App() {
           {
             id: `e-${Date.now()}`,
             type: "assistant",
-            text: "[错误] 流式连接中断，请重新打开会话确认历史消息。",
+            text: `[错误] ${message || "流式连接中断，请重新打开会话确认历史消息。"}`,
           },
         ]);
       }
@@ -1383,7 +1383,7 @@ export default function App() {
     // ⚠️ relative：右上角那颗「文件面板」开关是绝对定位的（照律枢
     // `.paneltgl.docktoggle{position:absolute;top:11px;right:12px}`）——它必须
     // **位置不动、图标不变**，不能一会儿长在顶栏里、一会儿变成右侧格里的 ✗。
-    <div className="relative flex h-full bg-canvas overflow-hidden">
+    <div className="app-workbench relative flex h-full bg-canvas overflow-hidden">
       {/* 桌面：rail(56) + 会话栏(260) 两根常驻列。
           窄屏：同样两个组件原封不动，只是整体变成一个 316px 的左抽屉滑出来
           —— 这是选方案 B 的理由，侧栏组件本身一行都不用改。 */}

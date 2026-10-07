@@ -1,25 +1,25 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Press+Start+2P&display=swap");
 @import "tailwindcss";
-@import "./soft-card.css";
+@import "./liquid-glass.css";
 
 @theme static {
-  --color-canvas: #101724;
-  --color-surface: #192335;
-  --color-raised: #212e43;
-  --color-surface-2: #1d293c;
-  --color-sunken: #121c2c;
+  --color-canvas: #0d1720;
+  --color-surface: #17232e;
+  --color-raised: #233846;
+  --color-surface-2: #1d2c38;
+  --color-sunken: #111f2c;
 
-  --color-fg: #edf2fb;
-  --color-muted: #b5c1d5;
-  --color-subtle: #98a8c1;
+  --color-fg: #f1f7fa;
+  --color-muted: #b7cbd6;
+  --color-subtle: #a3b8c5;
 
-  --color-line: #29374c;
-  --color-line-strong: #40516b;
+  --color-line: #2a3d49;
+  --color-line-strong: #405b6c;
 
-  --color-blue: #9caeff;
-  --color-blue-hover: #b2bfff;
-  --color-on-brand: #101a2e;
-  --color-wash: #27375a;
+  --color-blue: #95cfff;
+  --color-blue-hover: #b6deff;
+  --color-on-brand: #09223c;
+  --color-wash: #223a50;
   --color-green: #74daa0;
   --color-amber: #e9bd69;
   --color-orange: #efad79;
@@ -28,9 +28,9 @@
   --color-provider-codex: #74daa0;
   --color-on-status: #101a2e;
 
-  --radius-card: 18px;
-  --radius-panel: 12px;
-  --radius-control: 9px;
+  --radius-card: 24px;
+  --radius-panel: 18px;
+  --radius-control: 12px;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 24px -10px rgba(0, 0, 0, 0.32);
   --shadow-float: 0 2px 4px rgba(0, 0, 0, 0.12), 0 18px 40px -16px rgba(0, 0, 0, 0.5);
   --shadow-chip: 0 1px 2px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -49,37 +49,59 @@
    所以 TextEditor 必须显式加 appSyntaxHighlighting 把它盖掉。 */
 :root {
   color-scheme: dark;
+  /* Liquid-inspired chrome. Content surfaces above stay opaque and readable.
+     Keep blur on a decoration pseudo-element, never on a container of fixed
+     dialogs: backdrop-filter would turn that container into their viewport. */
+  --glass-nav-rgb: 24 38 48;
+  --glass-nav-alpha: 0.82;
+  --glass-regular-rgb: 23 35 46;
+  --glass-regular-alpha: 0.96;
+  --glass-clear-rgb: 34 54 68;
+  --glass-clear-alpha: 0.56;
+  --glass-edge: rgb(199 229 246 / 0.18);
+  --glass-edge-light: rgb(229 248 255 / 0.35);
+  --glass-edge-low: rgb(175 212 235 / 0.12);
+  --glass-sheen: rgb(231 247 255 / 0.07);
+  --glass-blur-clear: 4px;
+  --glass-blur-regular: 12px;
+  --glass-saturation: 115%;
+  --glass-shadow: 0 8px 28px -14px rgb(0 0 0 / 0.50), 0 2px 5px rgb(0 0 0 / 0.12);
+  --glass-shadow-float: 0 24px 64px -18px rgb(0 0 0 / 0.55), 0 4px 12px rgb(0 0 0 / 0.18);
+  --glass-ambient-a: #24444d;
+  --glass-ambient-b: #193852;
+  --glass-ambient-c: #2f354b;
+  --glass-workspace: radial-gradient(ellipse at 0% 85%, var(--glass-ambient-a), transparent 52%), radial-gradient(ellipse at 85% 0%, var(--glass-ambient-b), transparent 54%), radial-gradient(ellipse at 100% 100%, var(--glass-ambient-c), transparent 48%), var(--color-canvas);
   --syn-keyword: #b78cff;
   --syn-string: #7ee0a8;
   --syn-number: #ef9d5a;
-  --syn-comment: #98a8c1;
+  --syn-comment: #a3b8c5;
   --syn-func: #7aa2f7;
   --syn-type: #5ecfd6;
   --syn-var: #c3c8d4;
   --syn-def: #e8eaed;
-  --syn-punct: #8a90a0;
+  --syn-punct: #9aa6b5;
   --syn-meta: #e0a030;
   --syn-invalid: #ff928b;
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-canvas: #eef2f8;
-  --color-surface: #ffffff;
-  --color-raised: #f1f4fa;
-  --color-surface-2: #f7f9fc;
-  --color-sunken: #e3e9f3;
-  --color-fg: #101a2e;
-  --color-muted: #47546b;
+  --color-canvas: #eaf0f4;
+  --color-surface: #fbfdfe;
+  --color-raised: #e5eff3;
+  --color-surface-2: #f0f5f7;
+  --color-sunken: #dee8ee;
+  --color-fg: #132837;
+  --color-muted: #3e5767;
   /* Deeper than the kit's ink-3: tiny workbench labels also sit on the canvas
      and inset controls, not just white cards. Keep those readable too. */
-  --color-subtle: #59677c;
-  --color-line: #edf1f7;
-  --color-line-strong: #e2e8f2;
-  --color-blue: #2b49ce;
-  --color-blue-hover: #1e36a4;
+  --color-subtle: #506575;
+  --color-line: #e1e9ee;
+  --color-line-strong: #cbdbe4;
+  --color-blue: #1663bf;
+  --color-blue-hover: #0e4f9f;
   --color-on-brand: #ffffff;
-  --color-wash: #eef2fe;
+  --color-wash: #e5effb;
   --color-green: #0a7534;
   --color-amber: #8a5b08;
   --color-orange: #a2531d;
@@ -91,6 +113,21 @@
   --shadow-float: 0 2px 4px rgba(16, 26, 46, 0.05), 0 18px 40px -16px rgba(16, 26, 46, 0.16);
   --shadow-chip: 0 1px 2px rgba(16, 26, 46, 0.10), inset 0 1px 0 #ffffff;
   --shadow-inset: inset 0 1px 2px rgba(16, 26, 46, 0.07);
+  --glass-nav-rgb: 246 251 254;
+  --glass-nav-alpha: 0.76;
+  --glass-regular-rgb: 248 252 254;
+  --glass-regular-alpha: 0.96;
+  --glass-clear-rgb: 248 253 255;
+  --glass-clear-alpha: 0.58;
+  --glass-edge: rgb(255 255 255 / 0.72);
+  --glass-edge-light: rgb(255 255 255 / 0.98);
+  --glass-edge-low: rgb(158 190 207 / 0.30);
+  --glass-sheen: rgb(255 255 255 / 0.36);
+  --glass-shadow: 0 8px 28px -16px rgb(38 76 100 / 0.28), 0 2px 5px rgb(38 76 100 / 0.05);
+  --glass-shadow-float: 0 24px 64px -18px rgb(33 66 88 / 0.28), 0 4px 12px rgb(33 66 88 / 0.08);
+  --glass-ambient-a: #cee5e3;
+  --glass-ambient-b: #c6dce9;
+  --glass-ambient-c: #ece2d7;
 
   --syn-keyword: #8250df;
   --syn-string: #0a7c42;
@@ -101,7 +138,7 @@
   --syn-var: #24292f;
   --syn-def: #111827;
   --syn-punct: #57606a;
-  --syn-meta: #9a6700;
+  --syn-meta: #906000;
   --syn-invalid: #cf222e;
 }
 
@@ -308,4 +345,10 @@ body.resizing .dockcol {
 }
 body.resizing .docktree {
   transition: none;
+}
+
+/* Keep after the normal animation/transition rules, at equal specificity. */
+@media (prefers-reduced-motion: reduce) {
+  .msg-enter, .sparkle-spin { animation: none; }
+  .dockcol, .docktree { transition: none; }
 }

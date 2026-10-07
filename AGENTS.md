@@ -84,11 +84,11 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 
 ### 前端目录地图（`src/`）
 
-- **视觉规范**：`index.css` 管明暗主题令牌，`soft-card.css` 管软卡片工作台的共用样式，
-  参考与适配边界见 [`docs/frontend-style.md`](./docs/frontend-style.md)。面板靠阴影分层，
+- **视觉规范**：`index.css` 管明暗主题令牌，`liquid-glass.css` 管液态玻璃工作台的共用样式，
+  参考与适配边界见 [`docs/frontend-style.md`](./docs/frontend-style.md)。控制/导航用玻璃，正文/代码/编辑器保持不透明；`soft-*` 类名仅兼容钩子。**backdrop-filter 放装饰伪元素，不能放含 fixed 弹窗的 Header/侧栏宿主**。面板靠阴影分层，
   用户气泡用浅色 wash；不要把助理回复 / 工具行逐条包成卡片。主色按钮文字用
   `on-brand`，状态图标用 `on-status`，不能写死白色；小字对比度由
-  `src/lib/soft-card-theme.test.ts` 守住。**字体保留原来的 IBM Plex Sans / IBM Plex Mono**
+  `src/lib/soft-card-theme.test.ts` 与 `liquid-glass-theme.test.ts` 守住。**字体保留原来的 IBM Plex Sans / IBM Plex Mono**
   （用户明确偏好，不跟设计参考换字体）。**仅验证构建要指定隔离 outDir**，默认 dist 即上线。
 - `App.tsx` — 中枢：路由/视图切换、发送、session 打开、attach、in-flight 轮询。
 - `lib/` — `api.ts`（SSE 客户端）、`processor.ts`（**SDK 事件 → UI 状态映射**，很关键）、
@@ -432,8 +432,8 @@ claude CLI（你 Mac 上的子进程）
   事件白名单里，别删；`server/chat-turn-meta.test.ts` 用假 CLI 钉住「第一帧、值来自请求」。
   同一天顺手修的：首页上文件面板关不掉（开关只在项目里有，面板却按 `dockOpen` 在哪都显示；
   现在 `open={inProject && dockOpen}`）。
-- **[低] attach/重连路径吞掉真实错误**：`api.ts` 的 attach error 监听器丢弃 payload，前端只显示固定的
-  「流式连接中断」。首屏和重连行为不一致。
+- **[已修] attach/重连保留真实错误**：`api.ts` 的 attach error 监听器把命名 SSE error 帧的 `message`
+  交给 App，传输断线/坏帧才用「流式连接中断」。`src/lib/api-attach.test.ts` 钉住这条。
 - **[低] 打开任意非 in-flight 会话会闪一下 busy**：`App` 同步 `setAttachedStreaming(true)` 后服务端
   才回 `no-inflight`，Composer 短暂禁用。
 

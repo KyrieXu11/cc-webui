@@ -147,7 +147,7 @@ export default function ProjectSidebar({
   };
 
   return (
-    <aside className="w-[260px] shrink-0 flex flex-col bg-surface">
+    <aside className="session-sidebar w-[260px] shrink-0 flex flex-col">
       <div className="px-4 pt-4 pb-3 border-b border-line">
         <div className="min-w-0 mb-3">
           <div className="text-fg text-[14px] font-semibold truncate">
@@ -193,9 +193,8 @@ export default function ProjectSidebar({
               const active =
                 s.sessionId === currentSessionId && s.provider === currentProvider;
               return (
-                <button
+                <div
                   key={`${s.provider}:${s.sessionId}`}
-                  onClick={() => onOpenSession(s)}
                   title={
                     s.sharedBy
                       ? `${s.sharedBy} 共享给你的会话 —— 可以接着聊，但删不掉`
@@ -210,43 +209,49 @@ export default function ProjectSidebar({
                       : "text-muted hover:text-fg"
                   }`}
                 >
-                  <div
-                    className={`w-0.5 self-stretch rounded-sm shrink-0 ${
-                      active ? "bg-blue" : "bg-transparent"
-                    }`}
-                  />
-                  {inflight.has(s.sessionId) && (
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-amber pulse-dot shrink-0"
-                      aria-label="正在生成"
-                      title="该会话有活跃的 SDK 对话"
+                  <button
+                    onClick={() => onOpenSession(s)}
+                    className="flex flex-1 min-w-0 items-center gap-2 text-left"
+                    aria-current={active ? "true" : undefined}
+                  >
+                    <div
+                      className={`w-0.5 self-stretch rounded-sm shrink-0 ${
+                        active ? "bg-blue" : "bg-transparent"
+                      }`}
                     />
-                  )}
-                  <span className="text-[12.5px] truncate flex-1">
-                    {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
-                  </span>
-                  {/* 常驻标记。只在**有动作按钮要顶上来**时 hover 隐藏，
-                      否则一行挤三个图标；被共享进来的行没有动作按钮，
-                      藏掉它只会让标记在鼠标下凭空消失。 */}
-                  {(() => {
-                    const canManage = !!s.mine || isAdmin;
-                    const hideOnHover = canManage ? " group-hover:hidden" : "";
-                    if (s.sharedBy) {
+                    {inflight.has(s.sessionId) && (
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-amber pulse-dot shrink-0"
+                        aria-label="正在生成"
+                        title="该会话有活跃的 SDK 对话"
+                      />
+                    )}
+                    <span className="text-[12.5px] truncate flex-1">
+                      {s.customTitle || s.summary || s.firstPrompt || "（无摘要）"}
+                    </span>
+                    {/* 常驻标记。只在**有动作按钮要顶上来**时 hover 隐藏，
+                        否则一行挤三个图标；被共享进来的行没有动作按钮，
+                        藏掉它只会让标记在鼠标下凭空消失。 */}
+                    {(() => {
+                      const canManage = !!s.mine || isAdmin;
+                      const hideOnHover = canManage ? " group-hover:hidden group-focus-within:hidden" : "";
+                      if (s.sharedBy) {
+                        return (
+                          <ShareIcon
+                            className={`text-blue shrink-0${hideOnHover}`}
+                            label={`由 ${s.sharedBy} 共享`}
+                          />
+                        );
+                      }
+                      if (!s.sharedCount) return null;
                       return (
                         <ShareIcon
-                          className={`text-blue shrink-0${hideOnHover}`}
-                          label={`由 ${s.sharedBy} 共享`}
+                          className={`text-subtle shrink-0${hideOnHover}`}
+                          label={`已共享给 ${s.sharedCount} 人`}
                         />
                       );
-                    }
-                    if (!s.sharedCount) return null;
-                    return (
-                      <ShareIcon
-                        className={`text-subtle shrink-0${hideOnHover}`}
-                        label={`已共享给 ${s.sharedCount} 人`}
-                      />
-                    );
-                  })()}
+                    })()}
+                  </button>
                   {/* 共享是**管理员专属**（决策 41）；删除是「自己的（或管理员）」——
                       两条守卫不一样，别合并。真正拦住的都是服务端：共享那三条是
                       `auth: "admin"`，DELETE 是不带 access 的 owns。 */}
@@ -258,7 +263,7 @@ export default function ProjectSidebar({
                       }}
                       aria-label="共享"
                       title="共享给其他人 / 转交归属"
-                      className="hidden group-hover:block text-subtle hover:text-fg transition-colors shrink-0"
+                      className="hidden group-hover:block group-focus-within:block max-md:block text-subtle hover:text-fg transition-colors shrink-0"
                     >
                       <ShareIcon />
                     </button>
@@ -267,7 +272,7 @@ export default function ProjectSidebar({
                     <button
                       onClick={(e) => remove(s, e)}
                       aria-label="删除"
-                      className="opacity-0 group-hover:opacity-100 text-subtle hover:text-fg transition-opacity shrink-0"
+                      className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-subtle hover:text-fg transition-opacity shrink-0"
                     >
                       <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                         <path
@@ -279,7 +284,7 @@ export default function ProjectSidebar({
                       </svg>
                     </button>
                   )}
-                </button>
+                </div>
               );
             })}
             {sessions.length > limit && (

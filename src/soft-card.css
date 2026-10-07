@@ -1,4 +1,6 @@
-/* Adapted from quant/design/soft-card-dashboard-kit.
+/* Previous soft-card reference; no longer imported by src/index.css.
+   Current material/compatibility hooks live in liquid-glass.css.
+   Adapted from quant/design/soft-card-dashboard-kit.
    Cards separate work areas, NOT individual assistant replies/tool rows.
    Inset controls + quiet surfaces keep the existing workbench density. */
 @layer base {

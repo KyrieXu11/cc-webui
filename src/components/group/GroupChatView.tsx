@@ -340,7 +340,7 @@ export default function GroupChatView({ gid, home, onBack }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex items-center gap-3 h-14 px-5 shrink-0">
+      <header className="workbench-header flex items-center gap-3 h-14 px-5 shrink-0">
         <button
           onClick={onBack}
           title="回到主页"

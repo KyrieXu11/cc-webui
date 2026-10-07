@@ -113,7 +113,7 @@ export function connectAttach(
     agentProvider?: AgentProvider;
   },
   onMsg: (m: any) => void,
-  onDone?: (reason: "done" | "error" | "no-inflight") => void
+  onDone?: (reason: "done" | "error" | "no-inflight", message?: string) => void
 ): () => void {
   const qs = new URLSearchParams();
   if (params.sessionId) qs.set("sessionId", params.sessionId);
@@ -159,8 +159,18 @@ export function connectAttach(
     onDone?.("done");
     es.close();
   });
-  es.addEventListener("error", () => {
-    onDone?.("error");
+  es.addEventListener("error", (event) => {
+    // A named SSE error has data; a transport ErrorEvent does not. Preserve
+    // the server's actionable message without inventing one for a disconnect.
+    let message: string | undefined;
+    const data = (event as MessageEvent).data;
+    if (typeof data === "string") {
+      try {
+        const payload = JSON.parse(data);
+        if (typeof payload?.message === "string") message = payload.message;
+      } catch { /* malformed error frame uses the transport fallback */ }
+    }
+    onDone?.("error", message);
     es.close();
   });
   es.addEventListener("no-inflight", () => {

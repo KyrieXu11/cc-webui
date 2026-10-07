@@ -27,8 +27,13 @@ export default function LoginView({ onSignedIn }: Props) {
   };
 
   return (
-    <div className="flex h-full items-center justify-center bg-canvas px-6">
-      <form onSubmit={submit} className="soft-panel w-full max-w-[400px] p-8 max-md:p-6">
+    <div className="auth-scene flex h-full items-center justify-center bg-canvas px-6">
+      <form onSubmit={submit} className="login-surface w-full max-w-[400px] p-8 max-md:p-6">
+        <div className="login-material-icon" aria-hidden>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-12-2 18" />
+          </svg>
+        </div>
         <div className="mb-8">
           <h1 className="text-fg text-[19px] font-semibold tracking-tight">
             cc-webui

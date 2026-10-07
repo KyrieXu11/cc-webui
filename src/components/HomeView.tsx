@@ -73,24 +73,35 @@ export default function HomeView({
   const [allSessions, setAllSessions] = useState<SessionSummary[] | null>(null);
   const [wideLoading, setWideLoading] = useState(false);
   const wideFor = useRef<AgentProvider | null>(null);
+  const wideRequest = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadWide = useCallback(() => {
     if (wideFor.current === provider) return;
     wideFor.current = provider;
+    const request = ++wideRequest.current;
     setWideLoading(true);
     listSessions(SEARCH_WINDOW, undefined, provider)
-      .then(setAllSessions)
-      .catch(() => {
-        wideFor.current = null; // 失败就让下次聚焦重试，别永久退化成 60 条
+      .then((rows) => {
+        if (request === wideRequest.current) setAllSessions(rows);
       })
-      .finally(() => setWideLoading(false));
+      .catch(() => {
+        if (request === wideRequest.current) wideFor.current = null;
+      })
+      .finally(() => {
+        if (request === wideRequest.current) setWideLoading(false);
+      });
   }, [provider]);
 
   // 换 provider → 上一批不作数（首页列表本来就是按 provider 过滤的）。
   useEffect(() => {
+    // A slow request for the previous provider must not populate the new
+    // provider's search window (or clear its loading/error state).
+    wideRequest.current++;
     wideFor.current = null;
     setAllSessions(null);
+    setWideLoading(false);
+    return () => { wideRequest.current++; };
   }, [provider]);
 
   // ⌘K / ^K 聚焦搜索框，照律枢侧栏那颗「搜索 ⌘K」。只在首页挂着，所以不会和
@@ -115,7 +126,9 @@ export default function HomeView({
     let cancelled = false;
     setLoading(true);
     listSessions(60, undefined, provider)
-      .then(setSessions)
+      .then((rows) => {
+        if (!cancelled) setSessions(rows);
+      })
       .catch(() => {})
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -251,12 +264,16 @@ export default function HomeView({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[960px] mx-auto px-10 py-12 max-md:px-5 max-md:pt-8 max-md:pb-8">
-        <Wordmark />
-        <div className="flex items-center gap-2 text-[13px] text-muted mb-10 max-md:mb-8 mt-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-green" />
-          <span className="font-mono">{address}</span>
-        </div>
+      <div className="home-workspace max-w-[960px] mx-auto px-10 py-12 max-md:px-5 max-md:pb-8">
+        <header className="home-masthead mb-10 max-md:mb-8">
+          <p className="home-eyebrow font-mono">YOUR CODE AGENT WORKSPACE</p>
+          <Wordmark />
+          <p className="home-caption">从一个项目开始，把想法变成可以运行的东西。</p>
+          <div className="home-address text-[11px] text-muted mt-5">
+            <div className="w-1.5 h-1.5 rounded-full bg-green" />
+            <span className="font-mono">{address}</span>
+          </div>
+        </header>
 
         {visibleChatGroups.length > 0 && (
           <div className="mb-10">
@@ -352,7 +369,7 @@ export default function HomeView({
         {/* ⚠️ `flex-wrap` + 按钮组 `ml-auto`：窄屏上标题和搜索框占第一行、按钮掉到
             第二行靠右，不会把搜索框挤成一条缝（`<input>` 有 ~46px 的内在最小宽度，
             光给 min-w-0 是压不住的，HeaderSearch 那边为此栽过一次）。 */}
-        <div className="flex items-center gap-3 flex-wrap mb-4">
+        <div className="home-section-tools flex items-center gap-3 flex-wrap mb-4">
           <h2 className="text-fg text-[14.5px] font-semibold tracking-tight shrink-0">
             最近项目
           </h2>
@@ -603,7 +620,7 @@ function ProjectBlock({
   const { isAdmin } = useAuth();
   const searching = query.trim() !== "";
   return (
-    <div className="soft-panel group/proj px-5 py-4 max-md:px-4">
+    <div className="home-project soft-panel group/proj px-5 py-4 max-md:px-4">
       <div className="flex items-center justify-between mb-2">
         <button
           onClick={() => onOpenProject(group.cwd)}
@@ -636,52 +653,56 @@ function ProjectBlock({
       </div>
       <div className="flex flex-col">
         {group.sessions.slice(0, cap).map((s) => (
-          <button
+          <div
             key={`${s.provider}:${s.sessionId}`}
-            onClick={() => onOpenSession(s)}
             className="group/conv w-full flex items-center justify-between py-1.5 pl-4 pr-2 -mx-2 rounded text-left hover:bg-fg/[0.025] transition-colors min-w-0"
           >
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <span className="text-subtle shrink-0 font-mono text-[11px] select-none">
-                └
-              </span>
-              <span className="text-[13px] text-muted group-hover/conv:text-fg truncate transition-colors">
-                <Highlighted text={titleOf(s)} query={query} />
-              </span>
-              {s.sharedBy && (
-                <span
-                  className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.1em] text-blue border border-blue/40 rounded px-1 py-px"
-                  title={`${s.sharedBy} 共享给你的会话 —— 可以接着聊，但删不掉`}
-                >
-                  共享
+            <button
+              onClick={() => onOpenSession(s)}
+              className="flex flex-1 min-w-0 items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <span className="text-subtle shrink-0 font-mono text-[11px] select-none">
+                  └
                 </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 shrink-0 pl-3">
-              <span className="text-[11.5px] text-subtle">
-                {timeAgo(s.lastModified)}
-              </span>
-              {/* 共享进来的会话删不掉（policy 里 DELETE 是 owner 级），所以按钮
-                  直接不画：留着就是一个点了只会弹错的 X。（deleteSession 现在会
-                  如实抛错了，但"看得见却删不掉"本身仍然只该出现在意外路径上。） */}
-              {(s.mine || isAdmin) && (
-                <button
-                  onClick={(e) => onRemove(s, e)}
-                  aria-label="删除对话"
-                  className="opacity-0 group-hover/conv:opacity-100 text-subtle hover:text-fg transition-opacity p-1"
-                >
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                    <path
-                      d="M3 3L9 9M9 3L3 9"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </button>
+                <span className="text-[13px] text-muted group-hover/conv:text-fg truncate transition-colors">
+                  <Highlighted text={titleOf(s)} query={query} />
+                </span>
+                {s.sharedBy && (
+                  <span
+                    className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.1em] text-blue border border-blue/40 rounded px-1 py-px"
+                    title={`${s.sharedBy} 共享给你的会话 —— 可以接着聊，但删不掉`}
+                  >
+                    共享
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0 pl-3">
+                <span className="text-[11.5px] text-subtle">
+                  {timeAgo(s.lastModified)}
+                </span>
+              </div>
+            </button>
+            {/* 共享进来的会话删不掉（policy 里 DELETE 是 owner 级），所以按钮
+                直接不画：留着就是一个点了只会弹错的 X。（deleteSession 现在会
+                如实抛错了，但"看得见却删不掉"本身仍然只该出现在意外路径上。） */}
+            {(s.mine || isAdmin) && (
+              <button
+                onClick={(e) => onRemove(s, e)}
+                aria-label="删除对话"
+                className="opacity-0 group-hover/conv:opacity-100 group-focus-within/conv:opacity-100 text-subtle hover:text-fg transition-opacity p-1 ml-2"
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M3 3L9 9M9 3L3 9"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         ))}
         {group.sessions.length > cap && (
           <button

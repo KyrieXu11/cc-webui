@@ -82,7 +82,7 @@ export default function Header({
   return (
     <header
       ref={bar}
-      className={`flex items-center gap-4 max-md:gap-2 h-14 pl-5 max-md:pl-1 shrink-0 ${
+      className={`workbench-header flex items-center gap-4 max-md:gap-2 h-14 pl-5 max-md:pl-1 shrink-0 ${
         reserveRight ? "pr-[52px]" : "pr-5 max-md:pr-2"
       }`}
     >

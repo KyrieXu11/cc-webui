@@ -48,7 +48,7 @@ export default function ParticipantsBar({
                 background: a.color,
                 outline: `3px solid color-mix(in srgb, ${a.color} 12%, transparent)`,
                 outlineOffset: 0,
-                boxShadow: isActive ? `0 0 14px ${a.color}66` : undefined,
+                boxShadow: isActive ? `0 0 14px color-mix(in srgb, ${a.color} 40%, transparent)` : undefined,
               }}
             />
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-subtle">
