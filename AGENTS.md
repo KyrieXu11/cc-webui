@@ -101,6 +101,12 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   两处共用 `Highlighted.tsx` 画命中段，共用 `sessions.ts` 的 `SEARCH_WINDOW`
   （**默认列表 60 条 ≠ 搜索范围**：搜索必须能翻到底，本机 786 个会话全拿是 ~677ms，
   实测数据记在那个常量的注释里；聚焦搜索框才拉，首屏不拉）。
+- **「打开项目」选目录不是会话搜索**：`OpenProjectDialog` 先取当前账号的最近项目和 home，
+  `/api/fs/scan` 后台补齐目录；最近项目和手输绝对路径 / `~/` 路径**不等扫描**。
+  `server/directory-scan-cache.ts` 按 canonical root 缓存原始目录候选 30 秒（最多 32 根），
+  并发扫描合流；**不能缓存跨账号的授权结果**，每次响应仍按当前白名单过滤（最近项目也一样）。
+  「刷新目录」走 `?refresh=1`，新建目录不用等 TTL。TCC 超时黑名单和不递归软链的护栏仍在
+  `server/fs.ts`；不要为了提速无限并发 readdir/stat，那些挂起的系统调用取消不了。
 - **文件树的拖拽**（`FileExplorer.tsx` + `lib/file-drag.ts`）：拖文件 → 文件夹＝移动，
   拖文件 → 对话框＝插入相对路径（Composer 的 drop 要先认我们的 MIME，再落到上传那条）。
   **「@ 插入」那颗按钮已经删掉**（每行一颗 + 多选里的「@ N」），拖拽就是同一件事；

@@ -23,13 +23,13 @@ const history = [
   { type: "user", uuid: "result-1", session_id: sessionId, message: { content: [{ type: "tool_result", tool_use_id: "read-style", content: ":root { --color-surface: #fbfdfe; }" }] } },
   { type: "assistant", uuid: "a-2", session_id: sessionId, message: { id: "assistant-2", content: [{ type: "text", text: "## 已统一界面的层级\n\n保留原有的字体、快捷键与文件操作，把**导航与悬浮控件**整理成同一套材质。\n\n- 导航使用轻薄的玻璃光边。\n- 对话正文保持稳定底色，不随背景变化。\n- 编辑器与文件预览继续使用独立的内部滚动。\n\n```css\n.navigation {\n  border-radius: 24px;\n  color: var(--color-fg);\n}\n```\n\n类型检查与回归测试均已通过。下一步可以检查深浅主题和手机上的抽屉。" }] } },
 ];
-async function setup({ theme = "light", logged = true, project = false, race = false, groups = false, mobile = false } = {}) {
+async function setup({ theme = "light", logged = true, project = false, race = false, groups = false, mobile = false, scanMode = "", noFolders = false, noRecents = false } = {}) {
   const context = await browser.newContext({ viewport: mobile ? { width: 393, height: 851 } : { width: 1440, height: 1000 }, deviceScaleFactor: 1, colorScheme: theme, isMobile: mobile, hasTouch: mobile,
     ...(mobile ? { userAgent: "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36" } : {}),
   });
   const page = await context.newPage();
   page.on("pageerror", e => errors.push(e.message));
-  const held = [];
+  const held = [], scans = [], scanRequests = [];
   await page.addInitScript(({ theme, project, cwd, sessionId }) => {
     localStorage.clear();
     localStorage.setItem("cc-webui:settings", JSON.stringify({ cwd: "", agentProvider: "claude", model: "opus", permissionMode: "auto", effort: "high", theme, themeChosen: true }));
@@ -39,11 +39,16 @@ async function setup({ theme = "light", logged = true, project = false, race = f
     const url = new URL(route.request().url()), path = url.pathname;
     const json = body => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     const sse = (event, body) => route.fulfill({ status: 200, contentType: "text/event-stream", body: `event: ${event}\ndata: ${JSON.stringify(body)}\n\n` });
-    if (path === "/api/auth/me") return json(logged ? { user: { id: "preview-admin", username: "preview", role: "admin", createdAt: now }, allowedPaths: ["/preview/**"], allowedProviders: ["claude", "codex"], defaults: null } : { user: null });
+    if (path === "/api/auth/me") return json(logged ? { user: { id: "preview-admin", username: "preview", role: "admin", createdAt: now }, allowedPaths: noFolders ? [] : ["/preview/**"], allowedProviders: ["claude", "codex"], defaults: null } : { user: null });
     if (path === "/api/meta") return json({ features: { groups, office: false }, skills: ["review", "design"], slashCommands: ["review", "design"], models: { codex: { source: "fallback", models: [] } } });
     if (path === "/api/fs/home") return json({ home: "/preview" });
-    if (path === "/api/fs/scan") return json({ dirs: [cwd, "/preview/code/research"], home: "/preview" });
-    if (path === "/api/fs/recents") return json({ recents: [{ path: cwd, lastUsed: now }] });
+    if (path === "/api/fs/scan") {
+      scanRequests.push(url.search);
+      if (scanMode === "held") { scans.push(route); return; }
+      if (scanMode === "fail" && !url.searchParams.has("refresh")) return route.fulfill({ status: 500, body: '{}' });
+      return json({ dirs: [cwd, "/preview/code/research"], home: "/preview" });
+    }
+    if (path === "/api/fs/recents") return json({ recents: noRecents ? [] : [{ path: cwd, lastUsed: now }] });
     if (path === "/api/sessions") {
       const provider = url.searchParams.get("provider") || "claude";
       if (race && provider === "claude") { held.push(route); return; }
@@ -76,7 +81,7 @@ async function setup({ theme = "light", logged = true, project = false, race = f
     return route.fulfill({ status: 404, contentType: "application/json", body: '{"error":"unhandled preview fixture"}' });
   });
   await page.goto(base);
-  return { page, context, held };
+  return { page, context, held, scans, scanRequests };
 }
 async function ready(page, selector = ".app-workbench") { await page.locator(selector).waitFor(); await page.waitForTimeout(450); }
 async function screenshot(page, name) {
@@ -86,6 +91,89 @@ async function screenshot(page, name) {
 async function layout(page, label) {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${label}: document overflow`);
   assert.equal(await page.locator("button button").count(), 0, `${label}: nested interactive buttons`);
+}
+async function verifyProjectPicker() {
+  const open = async (page) => {
+    await ready(page);
+    await page.getByRole("button", { name: "打开项目", exact: true }).last().click();
+    await page.getByPlaceholder("搜索文件夹，或粘贴绝对路径回车").waitFor();
+    return page.locator(".soft-dialog");
+  };
+  const release = (route) => route.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ dirs: [cwd, "/preview/code/research"], home: "/preview" }) });
+  for (const mobile of [false, true]) {
+    const { page, context, scans } = await setup({ scanMode: "held", mobile, theme: mobile ? "dark" : "light" });
+    try {
+      let dialog = await open(page);
+      await dialog.getByRole("button", { name: "~/code/cc-webui", exact: true }).waitFor();
+      assert.equal(scans.length, 1, "recent project visible while scan still held");
+      if (mobile) {
+        await dialog.getByRole("button", { name: "关闭", exact: true }).tap();
+        assert.equal(await dialog.count(), 0, "Android can close during a pending scan");
+        dialog = await open(page);
+        await dialog.getByRole("button", { name: "~/code/cc-webui", exact: true }).waitFor();
+      }
+      const input = dialog.getByPlaceholder("搜索文件夹，或粘贴绝对路径回车");
+      // Empty-result ArrowDown used to set idx=-1 and break the next Enter.
+      await input.fill("no-such-keyword");
+      await input.press("ArrowDown");
+      await input.press("Enter");
+      assert.equal(await dialog.count(), 1, "bare search text is not opened as a fake absolute path");
+      await input.fill("");
+      await release(scans.at(-1));
+      await dialog.getByRole("button", { name: "~/code/research", exact: true }).waitFor();
+      assert.equal(await dialog.getByRole("button", { name: "~/code/cc-webui", exact: true }).count(), 1, "deduplicate recent/scanned rows");
+      await input.press("ArrowDown");
+      await input.press("Enter");
+      await page.locator(".chat-panel").waitFor();
+      assert.equal(await page.locator(".soft-dialog").count(), 0);
+      await layout(page, `project picker ${mobile ? "Android" : "desktop"}`);
+    } finally { await context.close(); }
+  }
+  const recent = await setup({ scanMode: "held" });
+  try {
+    const dialog = await open(recent.page);
+    await dialog.getByRole("button", { name: "~/code/cc-webui", exact: true }).click();
+    assert.equal(recent.scans.length, 1);
+    await recent.page.locator(".chat-panel").waitFor();
+    assert.equal(await dialog.count(), 0, "recent project is usable, not just visible, before scan resolves");
+  } finally { await recent.context.close(); }
+  for (const path of ["/preview/code/new-project", "~/code/new-project"]) {
+    const { page, context, scans } = await setup({ scanMode: "held", noRecents: true });
+    try {
+      const dialog = await open(page);
+      // Home arrives independently, allowing ~/ expansion before scan resolves.
+      const input = dialog.getByPlaceholder("搜索文件夹，或粘贴绝对路径回车");
+      await input.fill(path);
+      await dialog.getByRole("button", { name: `打开 "${path}"`, exact: true }).waitFor();
+      assert.equal(scans.length, 1);
+      await input.press("Enter");
+      await page.locator(".chat-panel").waitFor();
+      assert.equal(await page.locator(".soft-dialog").count(), 0, "manual path opens before scan completes");
+    } finally { await context.close(); }
+  }
+  const failed = await setup({ scanMode: "fail" });
+  try {
+    const dialog = await open(failed.page);
+    await dialog.getByText("目录扫描失败；仍可打开最近项目或直接输入路径。", { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "~/code/cc-webui", exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "重试扫描", exact: true }).click();
+    await dialog.getByRole("button", { name: "~/code/research", exact: true }).waitFor();
+    assert.deepEqual(failed.scanRequests, ["", "?refresh=1"]);
+    // Focused Close must close, not bubble Enter into opening the first result.
+    await dialog.getByRole("button", { name: "关闭", exact: true }).press("Enter");
+    assert.equal(await dialog.count(), 0);
+    assert.equal(await failed.page.locator(".chat-panel").count(), 0);
+  } finally { await failed.context.close(); }
+  const denied = await setup({ noFolders: true });
+  try {
+    await ready(denied.page);
+    await denied.page.getByRole("button", { name: "打开项目", exact: true }).last().click();
+    await denied.page.getByText("你的账号还没有被授权任何文件夹。", { exact: true }).waitFor();
+    assert.deepEqual(denied.scanRequests, []);
+    assert.equal(await denied.page.getByPlaceholder("搜索文件夹，或粘贴绝对路径回车").count(), 0);
+  } finally { await denied.context.close(); }
+  checks.push("Project picker: recent-first, background merge/dedup, keyboard, immediate absolute/~ paths, retry and current grants (desktop + Android touch)");
 }
 async function verifyMobileNavigation() {
   for (const theme of ["light", "dark"]) for (const project of [false, true]) {
@@ -140,6 +228,13 @@ async function verifyMobileNavigation() {
   }
 }
 try {
+  await verifyProjectPicker();
+  if (process.env.PICKER_ONLY === "1") {
+    assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
+    console.log(JSON.stringify({ checks, errors, unexpected }, null, 2));
+    await browser.close();
+    process.exit(0);
+  }
   if (process.env.DRAWER_ONLY === "1") {
     await verifyMobileNavigation();
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { scanProjects, tildify } from "../lib/fs";
+import { getHome, getRecents, scanProjects, tildify } from "../lib/fs";
 import { useAuth } from "../AuthGate";
 
 interface Props {
@@ -17,31 +17,63 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
   // the same position (assertCanOpen has no admin bypass).
   const { allowedPaths } = useAuth();
   const noFolders = allowedPaths.length === 0;
-  const [all, setAll] = useState<Entry[]>([]);
+  const [recents, setRecents] = useState<string[]>([]);
+  const [dirs, setDirs] = useState<string[]>([]);
   const [home, setHome] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [scanFailed, setScanFailed] = useState(false);
+  const [scanVersion, setScanVersion] = useState(0);
   const [idx, setIdx] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (noFolders) {
-      setLoading(false);
+      setRecents([]);
+      setHome("");
       return;
     }
     let cancelled = false;
-    scanProjects()
-      .then(({ dirs, home }) => {
-        if (cancelled) return;
-        setHome(home);
-        setAll(dirs.map((p) => ({ path: p, display: tildify(p, home) })));
-      })
-      .catch(() => {})
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+    // Neither recent projects nor hand-typed paths should wait for a walk of
+    // the filesystem. Recents are account-scoped and freshly authorised.
+    getRecents().then((items) => {
+      if (!cancelled) setRecents(items.map((item) => item.path));
+    }).catch(() => {});
+    getHome().then((value) => {
+      if (!cancelled) setHome(value);
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [noFolders]);
+
+  useEffect(() => {
+    if (noFolders) {
+      setDirs([]);
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    setScanFailed(false);
+    scanProjects({ refresh: scanVersion > 0, signal: controller.signal })
+      .then(({ dirs, home }) => {
+        if (controller.signal.aborted) return;
+        setHome(home);
+        setDirs(dirs);
+      })
+      .catch(() => { if (!controller.signal.aborted) setScanFailed(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [noFolders, scanVersion]);
+
+  const all = useMemo<Entry[]>(() => [...new Set([...recents, ...dirs])]
+    .map((p) => ({ path: p, display: tildify(p, home) })), [recents, dirs, home]);
+
+  const customPath = useMemo(() => {
+    const q = query.trim();
+    if (q.startsWith("/")) return q;
+    if (home && (q === "~" || q.startsWith("~/"))) return home + q.slice(1);
+    return null;
+  }, [query, home]);
 
   const filtered = useMemo<Entry[]>(() => {
     const q = query.trim().toLowerCase();
@@ -74,6 +106,7 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
   }, [all, query]);
 
   useEffect(() => setIdx(0), [query]);
+  useEffect(() => setIdx((i) => Math.min(i, Math.max(0, filtered.length - 1))), [filtered.length]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -83,27 +116,24 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
   }, [idx]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    // Let buttons keep their native Enter activation (especially Close).
+    if (noFolders || !(e.target instanceof HTMLInputElement)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setIdx((i) => Math.min(i + 1, filtered.length - 1));
+      setIdx((i) => Math.min(i + 1, Math.max(0, filtered.length - 1)));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" && filtered[idx]) {
+    } else if (e.key === "Enter" && (customPath || filtered[idx])) {
       e.preventDefault();
-      onOpen(filtered[idx].path);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
+      onOpen(customPath || filtered[idx].path);
     }
-  };
-
-  const submitCustom = () => {
-    const q = query.trim();
-    if (!q) return;
-    let p = q;
-    if (p.startsWith("~")) p = home + p.slice(1);
-    onOpen(p);
   };
 
   return (
@@ -123,7 +153,7 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
           <button
             onClick={onClose}
             aria-label="关闭"
-            className="text-subtle hover:text-fg p-1 rounded"
+            className="text-subtle hover:text-fg w-11 h-11 flex items-center justify-center rounded"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path
@@ -174,13 +204,21 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
             />
           </div>
         </div>
-        <div className="px-5 pt-2 pb-1 text-[10.5px] font-mono text-subtle uppercase tracking-[0.08em]">
-          {loading
-            ? "扫描中…"
-            : filtered.length > 0
+        <div className="px-5 pt-2 pb-1 flex items-center justify-between gap-3 text-[11px] text-subtle" aria-live="polite">
+          <span>
+            {customPath ? "↵ 直接打开输入的路径" : filtered.length > 0
               ? `${filtered.length} 个结果 · ↑↓ 选择 · ↵ 打开`
-              : "未找到匹配；按回车将把你输入的路径作为绝对路径打开"}
+              : loading ? "正在查找文件夹；也可直接粘贴路径" : "未找到匹配；可粘贴绝对路径或 ~/ 路径"}
+            {loading && filtered.length > 0 && " · 后台扫描中…"}
+          </span>
+          <button disabled={loading} onClick={() => setScanVersion((v) => v + 1)}
+            className="shrink-0 text-muted hover:text-fg disabled:opacity-50">
+            {loading ? "扫描中…" : scanFailed ? "重试扫描" : "刷新目录"}
+          </button>
         </div>
+        {scanFailed && <p role="status" className="px-5 py-1 text-[12px] text-muted">
+          目录扫描失败；仍可打开最近项目或直接输入路径。
+        </p>}
         <div ref={listRef} className="max-h-[380px] overflow-y-auto py-1">
           {filtered.map((f, i) => (
             <button
@@ -196,9 +234,9 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
               <Highlighted text={f.display} query={query} />
             </button>
           ))}
-          {!loading && filtered.length === 0 && query.trim() && (
+          {customPath && (
             <button
-              onClick={submitCustom}
+              onClick={() => onOpen(customPath)}
               className="w-full flex items-center px-5 py-2 text-left font-mono text-[12.5px] text-fg bg-blue/[0.15]"
             >
               打开 "{query}"
