@@ -1,17 +1,55 @@
 import assert from "node:assert/strict";
 import { applySDKMessage, sessionMessagesToEvents } from "./processor.ts";
-import { liveToolIds, showCodexActivity } from "./turn-activity.ts";
+import { activityLabel, formatActivityElapsed, liveThinkingIds, liveToolIds, showCodexActivity } from "./turn-activity.ts";
 import type { ChatEvent } from "./types.ts";
+
+// Regression: the screenshot's Decoding (14m35s) was turn liveness with a
+// thinking label. Codex must explicitly identify it as total turn time.
+for (const word of ["Decoding", "Whirring", "Tinkering"]) {
+  assert.equal(activityLabel(true, word, true), "处理中…");
+}
+assert.equal(formatActivityElapsed(14 * 60 + 35, true), "回合已用 14m35s");
+assert.equal(formatActivityElapsed(0, true), "回合已用 0s");
+assert.equal(formatActivityElapsed(59, true), "回合已用 59s");
+assert.equal(formatActivityElapsed(60, true), "回合已用 1m00s");
+assert.equal(formatActivityElapsed(61, true), "回合已用 1m01s");
+assert.equal(activityLabel(true, "Decoding"), "Decoding…", "Claude keeps its own token-activity label");
+assert.equal(activityLabel(false, "Decoding"), "thought");
+assert.equal(formatActivityElapsed(875), "14m35s");
+assert.equal(activityLabel(true, "Decoding", false), "Decoding…", "real reasoning retains the designed animation label");
+
+let reasoning: ChatEvent[] = [{ id: "reason-u", type: "user", text: "test" }];
+const reasoningItem = { id: "reason", type: "reasoning", text: "" };
+reasoning = applySDKMessage(reasoning, { type: "item.started", item: reasoningItem }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 1, "explicit reasoning start counts even without public text");
+assert.equal(showCodexActivity(reasoning, true), false, "real reasoning replaces generic processing");
+assert.equal(liveThinkingIds(reasoning, false).size, 0, "history/cancel is never live reasoning");
+reasoning = applySDKMessage(reasoning, { type: "item.started", item: { id: "tool", type: "command_execution", command: "echo ok" } }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 0, "tool execution does not animate a thinking row");
+assert.equal(showCodexActivity(reasoning, true), false);
+reasoning = applySDKMessage(reasoning, { type: "item.completed", item: { id: "tool", type: "command_execution", command: "echo ok" } }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 0, "tool completion cannot revive old reasoning");
+assert.equal(showCodexActivity(reasoning, true), true, "without a new reasoning signal only processing is known");
+reasoning = applySDKMessage(reasoning, { type: "item.started", item: { ...reasoningItem, id: "next-reason" } }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 1, "a new reasoning stage restores the designed animation");
+reasoning = applySDKMessage(reasoning, { type: "item.completed", item: { ...reasoningItem, id: "next-reason", text: "public summary" } }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 0, "a completed reasoning summary is not live thinking");
+assert.equal(showCodexActivity(reasoning, true), true);
+reasoning = applySDKMessage(reasoning, { type: "item.started", item: { ...reasoningItem, id: "final-reason" } }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 1);
+reasoning = applySDKMessage(reasoning, { type: "item.started", item: { id: "answer", type: "agent_message", text: "" } }, () => {});
+assert.equal(liveThinkingIds(reasoning, true).size, 0, "answer generation also ends the reasoning phase, even before text arrives");
+assert.equal(showCodexActivity(reasoning, true), true);
 
 let events: ChatEvent[] = [{ id: "u", type: "user", text: "列出记忆" }];
 const emit = (phase: string, item: unknown) => { events = applySDKMessage(events, { type: phase, item }, () => {}); };
 assert.equal(showCodexActivity(events, true), true, "quiet time before first output stays active");
 emit("item.started", { id: "memory", type: "mcp_tool_call", server: "memory", tool: "list", arguments: {}, status: "in_progress" });
-assert.equal(showCodexActivity(events, true), false, "tool spinner replaces thinking status");
-assert.deepEqual([...liveToolIds(events, true)], ["s-codex-memory"]);
+assert.equal(showCodexActivity(events, true), false, "tool spinner replaces turn activity");
+assert.deepEqual([...liveToolIds(events, true)], ["s-codex-u-memory"]);
 emit("item.completed", { id: "memory", type: "mcp_tool_call", server: "memory", tool: "list", arguments: {}, status: "completed", result: { content: [{ type: "text", text: '{"total":22}' }] } });
 assert.equal(events.filter(e => e.type === "step").length, 1, "completion updates the same tool row");
-assert.equal(showCodexActivity(events, true), true, "thinking resumes after the tool, even without more reasoning events");
+assert.equal(showCodexActivity(events, true), true, "turn activity resumes after the tool, without inventing reasoning events");
 assert.match((events[1] as Extract<ChatEvent,{type:"step"}>).output!, /22/);
 assert.equal(showCodexActivity(events, false), false, "done/cancel/disconnect stops the spinner");
 assert.deepEqual([...liveToolIds(events, false)], []);

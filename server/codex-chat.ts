@@ -272,6 +272,13 @@ codexChat.post("/chat", async (c) => {
 
   const fanout = fanoutFactory(entry);
   fanout("turn_meta", JSON.stringify({ type: "turn_meta", effort: effort ?? null, startedAt, provider: "codex" }));
+  // Codex exec never echoes the user request. A viewer attaching from another
+  // tab/account has no browser-local ActiveTurn, and the current turn isn't in
+  // our persisted history yet. Replay the raw request BEFORE any CLI output.
+  fanout("turn_user", JSON.stringify({
+    type: "turn_user", provider: "codex", startedAt, clientTurnId, prompt,
+    images: validImages(rawImages),
+  }));
 
   (async () => {
     let unsubscribeForeground: (() => void) | undefined;

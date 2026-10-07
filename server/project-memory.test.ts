@@ -233,6 +233,18 @@ try {
   });
   assert.equal(read.status, 200);
   assert.match(read.text, /feedback-tests/, "Codex sees Claude-created memory");
+  const tools = await app.request("/api/mcp/memory", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })
+  });
+  assert.equal(tools.status, 200);
+  const toolText = await tools.text();
+  const toolJson = toolText.startsWith("{") ? toolText : toolText.split("\n").find(line => line.startsWith("data: "))!.slice(6);
+  const descriptions = new Map<string, string>(JSON.parse(toolJson).result.tools.map((t: { name: string; description: string }) => [t.name, t.description]));
+  assert.match(descriptions.get("save")!, /do not wait for an explicit remember request/);
+  assert.match(descriptions.get("delete")!, /user requests forgetting.*current evidence verifies.*no useful durable content remains/);
+  assert.match(descriptions.get("delete")!, /never delete just because it is old/);
   const write = await call("save", {
     ...content,
     operation_id: "mcp-new",
@@ -268,6 +280,11 @@ try {
     operation_id: "plan-write",
     name: "should-not-save"
   }, plan)).text, /read_only/);
+  assert.match((await call("delete", {
+    operation_id: "plan-delete",
+    id: saved.id,
+    expected_revision: current.revision
+  }, plan)).text, /read_only/, "proactive cleanup guidance never grants Plan write access");
   assert.equal((await call("read", {
     id: saved.id
   }, plan)).status, 200);

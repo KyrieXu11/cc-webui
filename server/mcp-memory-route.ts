@@ -66,7 +66,7 @@ function serverFor(token: string) {
     }
   }, a => run(false, ctx => searchMemory(ctx.projectMemory!.scope, a.query, a.limit)));
   server.registerTool("read", {
-    description: "Read a currently active memory, its body and revision before using or updating it.",
+    description: "Read an active memory, its body and current revision before relying on it, updating it or deleting it. Treat its facts as past context to verify against current sources.",
     inputSchema: {
       id: z.string().uuid()
     },
@@ -75,7 +75,7 @@ function serverFor(token: string) {
     }
   }, a => run(false, ctx => readMemory(ctx.projectMemory!.scope, a.id)));
   server.registerTool("save", {
-    description: "Atomically save body and index. Search for duplicates first. Updating requires id + expected_revision; conflicts require rereading. Do not claim remembered until success.",
+    description: "Atomically save body and index for suitable durable user information, corrections or confirmed approaches, non-code project context, or external-resource pointers; do not wait for an explicit remember request. Search for duplicates and read an existing record before updating it. Convert relative deadlines to absolute dates. Updates require id + expected_revision; conflicts require rereading. Do not claim success until confirmed.",
     inputSchema: {
       operation_id: operation,
       id: z.string().uuid().optional(),
@@ -94,7 +94,7 @@ function serverFor(token: string) {
     sessionId: ctx.sessionId
   })));
   server.registerTool("delete", {
-    description: "Forget exactly one memory requested by the user. Read its current revision first. Removes all body versions, but not old conversation history.",
+    description: "Delete exactly one memory when the user requests forgetting it, or current evidence verifies it is wrong or obsolete and no useful durable content remains. Prefer updating otherwise; never delete just because it is old or omitted from an index. Read its current revision first. Removes managed body versions and index entry, not old conversation history. Do not claim complete deletion before success.",
     inputSchema: {
       operation_id: operation,
       id: z.string().uuid(),

@@ -106,7 +106,7 @@ export default function HelpModal({ onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[640px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[640px] soft-dialog overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">

@@ -981,14 +981,17 @@ export default function App() {
         // session_id 是这个 turn 的**身份**，用户还在不在看都要认领：
         // activeTurn 靠它，之后的 attach 也靠它找回这条 turn。
         if (
-          msg?.type === "system" &&
-          msg.subtype === "init" &&
-          typeof msg.session_id === "string"
+          (msg?.type === "system" && msg.subtype === "init" && typeof msg.session_id === "string") ||
+          (msg?.type === "thread.started" && typeof msg.thread_id === "string")
         ) {
+          const id = msg.session_id ?? msg.thread_id;
           const wasViewing = stillViewing();
-          turnSession = msg.session_id;
-          updateActiveTurnSession(msg.session_id);
-          if (wasViewing && !handedOff) setSessionId(msg.session_id);
+          turnSession = id;
+          updateActiveTurnSession(id);
+          if (wasViewing && !handedOff) {
+            viewRef.current = { cwd: turnCwd, sessionId: id };
+            setSessionId(id);
+          }
         }
         // ⚠️⚠️ **用户可能在 turn 还没跑完时就切到别的会话去了**（服务端本来就是
         // 脱钩的，turn 会继续跑）。它的事件绝不能再往**当前显示的那个会话**的
@@ -1388,12 +1391,13 @@ export default function App() {
         // ⚠️ 这个属性是右侧格那条分隔条的**量尺**：它按实测宽度给主栏留活路
         //    （rail 56 / 展开会话列表 316），别删，也别挪到内层去。见 lib/pane-width.ts。
         data-railcol
-        className={`flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[316px] max-md:bg-canvas max-md:transition-transform max-md:duration-200 ${
+        className={`workbench-nav flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[316px] max-md:bg-canvas max-md:transition-transform max-md:duration-200 ${
           narrow && !navOpen
             ? "max-md:-translate-x-full"
             : "max-md:shadow-[0_0_60px_rgba(0,0,0,0.55)]"
         }`}
       >
+      <div className="nav-panel">
       {/* ⚠️ **窄屏下这颗按钮是「关抽屉」，不是「切会话栏」。** 窄屏时会话栏的渲染条件
           是 `(sidebarOpen || narrow)` —— `narrow` 已经把它顶成 true，所以在手机上切
           `sidebarOpen` 一点效果都没有：用户点抽屉左上角这颗最显眼的按钮，什么都不发生
@@ -1405,6 +1409,7 @@ export default function App() {
           narrow ? setNavOpen(false) : setSidebarOpen((o) => !o)
         }
         narrow={narrow}
+        expanded={narrow ? navOpen : sidebarOpen}
         onOpenProject={() => setDialogOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenAdmin={() => setAdminOpen(true)}
@@ -1444,6 +1449,7 @@ export default function App() {
           />
         ))}
       </div>
+      </div>
 
       {/* 遮罩：抽屉开着时点空白处关掉。只在窄屏存在。 */}
       {narrow && (navOpen || (inProject && dockOpen)) && (
@@ -1477,88 +1483,90 @@ export default function App() {
               onSharesChanged={() => setSessionsRefreshKey((n) => n + 1)}
               reserveRight={!dockOpen}
             />
-            <main className="flex-1 relative overflow-hidden">
-              <div ref={scrollRef} className="h-full overflow-y-auto">
-                <div className="max-w-[820px] mx-auto px-6 max-md:px-3.5 pb-4">
-                  {loadingSession ? (
-                    <div className="flex items-center gap-2 text-subtle text-[12.5px] py-10 font-mono">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue pulse-dot" />
-                      加载会话中…
-                    </div>
-                  ) : (
-                    <>
-                      {canLoadMore && (
-                        <div
-                          ref={loadMoreRef}
-                          className="flex items-center justify-center py-3 text-subtle text-[11px] font-mono gap-1.5"
-                        >
-                          <span className="w-1 h-1 rounded-full bg-subtle animate-pulse" />
-                          加载更早消息… ({allEvents.length - visibleCount})
-                        </div>
-                      )}
-                      <MessageList
-                        events={events}
-                        expandedSteps={expandedSteps}
-                        onToggleStep={toggleStep}
-                        onAnswerPermission={answerPermission}
-                        isPending={shouldShowPending(allEvents, busy)}
-                        retryInfo={retryInfo}
-                        onPreviewImage={previewAttachedImage}
-                        effort={turnEffort}
-                        provider={settings.agentProvider}
-                        isRunning={streamingHere || (attachedStreaming && turnStartedAt !== undefined)}
-                        turnStartedAt={turnStartedAt ?? liveTurn?.startedAt}
+            <section aria-label="对话" className="chat-panel flex flex-1 min-h-0 flex-col">
+              <main className="conversation-messages flex-1 min-h-0 relative overflow-hidden">
+                <div ref={scrollRef} className="h-full overflow-y-auto">
+                  <div className="conversation-content max-w-[820px] mx-auto px-6 max-md:px-3.5">
+                    {loadingSession ? (
+                      <div className="flex items-center gap-2 text-subtle text-[12.5px] py-10 font-mono">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue pulse-dot" />
+                        加载会话中…
+                      </div>
+                    ) : (
+                      <>
+                        {canLoadMore && (
+                          <div
+                            ref={loadMoreRef}
+                            className="flex items-center justify-center py-3 text-subtle text-[11px] font-mono gap-1.5"
+                          >
+                            <span className="w-1 h-1 rounded-full bg-subtle animate-pulse" />
+                            加载更早消息… ({allEvents.length - visibleCount})
+                          </div>
+                        )}
+                        <MessageList
+                          events={events}
+                          expandedSteps={expandedSteps}
+                          onToggleStep={toggleStep}
+                          onAnswerPermission={answerPermission}
+                          isPending={shouldShowPending(allEvents, busy)}
+                          retryInfo={retryInfo}
+                          onPreviewImage={previewAttachedImage}
+                          effort={turnEffort}
+                          provider={settings.agentProvider}
+                          isRunning={streamingHere || (attachedStreaming && turnStartedAt !== undefined)}
+                          turnStartedAt={turnStartedAt ?? liveTurn?.startedAt}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface to-transparent"
+                />
+              </main>
+              <div className="shrink-0">
+                <div className="max-w-[820px] mx-auto w-full">
+                  {!allowedProviders.includes(settings.agentProvider) && <div className="mb-2 text-[12px] text-muted flex items-center gap-2">
+                    此 AI 已停用，当前对话仅供查看。
+                    <button className="text-blue" onClick={handleNewChat}>新建可用 AI 对话</button>
+                  </div>}
+                  <Composer
+                    onSend={submitOrQueue}
+                    onCancel={handleCancel}
+                    disabled={busy || !allowedProviders.includes(settings.agentProvider)}
+                    queued={queued}
+                    onUnqueue={(id) =>
+                      setQueued((q) => q.filter((m) => m.id !== id))
+                    }
+                    onSendQueued={(id) => void sendQueued(id)}
+                    onResumeQueue={resumeQueue}
+                    canSteer={
+                      busy && settings.agentProvider === "claude" && !!liveTurn
+                    }
+                    provider={settings.agentProvider}
+                    model={settings.model}
+                    onModelChange={updateModel}
+                    mode={settings.permissionMode}
+                    onModeChange={updateMode}
+                    effort={settings.effort}
+                    onEffortChange={updateEffort}
+                    value={composerValue}
+                    onChange={setComposerValue}
+                    onInsertFile={insertFile}
+                    slashCommands={mergedSlashCommands}
+                    onPickSlash={handlePickSlash}
+                    rightSlot={
+                      <TasksButton
+                        sessionId={sessionId}
+                        onOpen={() => setTasksOpen(true)}
+                        refreshKey={tasksRefreshKey}
                       />
-                    </>
-                  )}
+                    }
+                  />
                 </div>
               </div>
-              <div
-                aria-hidden
-                className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-canvas to-transparent"
-              />
-            </main>
-            <div className="shrink-0">
-              <div className="max-w-[820px] mx-auto w-full">
-                {!allowedProviders.includes(settings.agentProvider) && <div className="mb-2 text-[12px] text-muted flex items-center gap-2">
-                  此 AI 已停用，当前对话仅供查看。
-                  <button className="text-blue" onClick={handleNewChat}>新建可用 AI 对话</button>
-                </div>}
-                <Composer
-                  onSend={submitOrQueue}
-                  onCancel={handleCancel}
-                  disabled={busy || !allowedProviders.includes(settings.agentProvider)}
-                  queued={queued}
-                  onUnqueue={(id) =>
-                    setQueued((q) => q.filter((m) => m.id !== id))
-                  }
-                  onSendQueued={(id) => void sendQueued(id)}
-                  onResumeQueue={resumeQueue}
-                  canSteer={
-                    busy && settings.agentProvider === "claude" && !!liveTurn
-                  }
-                  provider={settings.agentProvider}
-                  model={settings.model}
-                  onModelChange={updateModel}
-                  mode={settings.permissionMode}
-                  onModeChange={updateMode}
-                  effort={settings.effort}
-                  onEffortChange={updateEffort}
-                  value={composerValue}
-                  onChange={setComposerValue}
-                  onInsertFile={insertFile}
-                  slashCommands={mergedSlashCommands}
-                  onPickSlash={handlePickSlash}
-                  rightSlot={
-                    <TasksButton
-                      sessionId={sessionId}
-                      onOpen={() => setTasksOpen(true)}
-                      refreshKey={tasksRefreshKey}
-                    />
-                  }
-                />
-              </div>
-            </div>
+            </section>
           </>
         ) : (
           <>
@@ -1601,11 +1609,9 @@ export default function App() {
           aria-label="切换文件面板"
           title="文件面板（项目文件）"
           onClick={() => setDockOpen((o) => !o)}
-          className={`absolute top-[11px] right-3 z-50 p-2 rounded-md border transition-colors ${
-            dockOpen
-              ? "text-fg bg-fg/[0.06] border-line-strong"
-              : "text-muted hover:text-fg border-transparent hover:bg-fg/5"
-          }`}
+          aria-expanded={dockOpen}
+          data-expanded={dockOpen}
+          className="panel-toggle absolute top-[11px] right-3 z-50 p-2"
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <rect

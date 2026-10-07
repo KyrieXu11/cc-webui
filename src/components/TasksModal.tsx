@@ -172,8 +172,7 @@ export default function TasksModal({ sessionId, scope, onClose }: Props) {
       <div
         className={[
           "w-full max-w-[880px] h-[560px]",
-          "bg-surface border border-line-strong rounded-xl overflow-hidden",
-          "shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]",
+          "soft-dialog overflow-hidden",
           "flex flex-col",
         ].join(" ")}
         onClick={(e) => e.stopPropagation()}

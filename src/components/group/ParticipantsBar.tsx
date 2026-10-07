@@ -6,8 +6,8 @@ import type {
 } from "../../lib/types";
 
 const AGENT_ACCENT: Record<GroupAgentId, { label: string; color: string }> = {
-  claude: { label: "Claude", color: "#ef9d5a" },
-  codex: { label: "Codex", color: "#3ecf8e" },
+  claude: { label: "Claude", color: "var(--color-provider-claude)" },
+  codex: { label: "Codex", color: "var(--color-provider-codex)" },
 };
 
 type Props = {
@@ -46,7 +46,7 @@ export default function ParticipantsBar({
               }`}
               style={{
                 background: a.color,
-                outline: `3px solid ${a.color}22`,
+                outline: `3px solid color-mix(in srgb, ${a.color} 12%, transparent)`,
                 outlineOffset: 0,
                 boxShadow: isActive ? `0 0 14px ${a.color}66` : undefined,
               }}
@@ -95,7 +95,7 @@ export default function ParticipantsBar({
           <span className="flex items-center gap-1.5">
             {config.pipeline.map((id, i) => (
               <span key={i} className="inline-flex items-center gap-1.5">
-                {i > 0 && <span className="text-subtle/60">→</span>}
+                {i > 0 && <span className="text-subtle">→</span>}
                 <span
                   className="w-1.5 h-1.5 rounded-full"
                   style={{ background: AGENT_ACCENT[id].color }}

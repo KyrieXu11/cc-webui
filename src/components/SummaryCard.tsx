@@ -20,7 +20,7 @@ function renderInline(text: string) {
 export default function SummaryCard({ title, body, delay = 0 }: Props) {
   return (
     <div
-      className="msg-enter bg-surface border border-line-strong rounded-lg p-5"
+      className="msg-enter bg-surface-2 rounded-panel p-5"
       style={{ animationDelay: `${delay}ms` }}
     >
       <div className="flex items-center gap-2 mb-3">

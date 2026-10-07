@@ -91,16 +91,13 @@ export default function AdminView({ onClose }: Props) {
           ← 返回
         </button>
         <h1 className="text-fg text-[14.5px] font-semibold tracking-tight">管理</h1>
-        <nav className="flex gap-1 ml-4">
+        <nav className="soft-segmented flex ml-4" aria-label="管理分类">
           {SECTIONS.map(([id, label]) => (
             <button
               key={id}
               onClick={() => setSection(id)}
-              className={`h-8 px-3 rounded-md text-[12.5px] transition-colors ${
-                section === id
-                  ? "bg-raised text-fg"
-                  : "text-muted hover:text-fg hover:bg-fg/5"
-              }`}
+              aria-pressed={section === id}
+              className={`h-8 px-3 rounded-control text-[12.5px] ${section === id ? "bg-surface text-fg shadow-chip" : "text-muted hover:text-fg"}`}
             >
               {label}
             </button>
@@ -167,7 +164,7 @@ function UsersSection({
         hint="可用 AI 是服务端限制；默认 AI / 模型 / effort 不是锁定值。Codex CLI 不提供逐工具确认，开放后工具写入会自动执行（普通账号仍不能选 Bypass）。目录白名单决定用户能在哪些文件夹里工作。它是使用便利，不是安全隔离——agent 有 shell，能读写服务进程用户能碰的一切。默认模型 / effort 只是默认值：对方下次打开页面（或切回这个标签页）时会换成你设的，之后自己改的会保留，直到你再保存。"
       />
 
-      <div className="border border-line rounded-lg overflow-hidden mb-7">
+      <div className="soft-panel overflow-hidden mb-7">
         {users.map((u) => (
           <UserRow
             key={u.id}
@@ -586,7 +583,7 @@ function FeishuSection({
         hint="把飞书的 open_id 对应到账号。没有映射的人 @ 机器人会被拒绝。"
       />
 
-      <div className="border border-line rounded-lg overflow-hidden mb-7">
+      <div className="soft-panel overflow-hidden mb-7">
         {mappings.map((m) => (
           <div
             key={m.openId}
@@ -683,9 +680,9 @@ function Field({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       style={width ? { width } : undefined}
-      className={`${small ? "h-8" : "h-9"} px-2.5 rounded-md bg-surface border border-line-strong ${
+      className={`soft-input ${small ? "h-8" : "h-9"} px-2.5 ${
         mono ? "font-mono text-[12.5px]" : "text-[13px]"
-      } text-fg outline-none focus:border-fg/30 transition-colors`}
+      }`}
     />
   );
 }
@@ -705,7 +702,7 @@ function Primary({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`${small ? "h-8 px-3 text-[12px]" : "h-9 px-3.5 text-[12.5px]"} rounded-md bg-fg text-canvas font-medium disabled:opacity-30 hover:opacity-90 transition-opacity`}
+      className={`soft-primary ${small ? "h-8 px-3 text-[12px]" : "h-9 px-3.5 text-[12.5px]"} disabled:opacity-30`}
     >
       {children}
     </button>
@@ -728,7 +725,7 @@ function Ghost({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="h-8 px-3 rounded-md bg-surface border border-line-strong text-[12px] text-fg hover:bg-raised disabled:opacity-30 transition-colors"
+      className="soft-button h-8 px-3 text-[12px] disabled:opacity-30"
     >
       {children}
     </button>

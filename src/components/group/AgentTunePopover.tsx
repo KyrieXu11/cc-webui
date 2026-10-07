@@ -7,8 +7,8 @@ import { clampEffort, type EffortLevel, type PermissionMode } from "../../lib/se
 import type { GroupAgentId, GroupParticipant } from "../../lib/types";
 
 const AGENT_ACCENT: Record<GroupAgentId, string> = {
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 type Props = {
@@ -99,7 +99,7 @@ function PopoverBody({
           className="w-1.5 h-1.5 rounded-full"
           style={{
             background: accent,
-            outline: `3px solid ${accent}22`,
+            outline: `3px solid color-mix(in srgb, ${accent} 12%, transparent)`,
           }}
         />
         <span
@@ -108,7 +108,7 @@ function PopoverBody({
         >
           {agent}
         </span>
-        <span className="font-mono text-[10.5px] text-subtle/80 truncate">
+        <span className="font-mono text-[10.5px] text-subtle truncate">
           {draft.model}
         </span>
         <button
@@ -206,7 +206,7 @@ function PopoverBody({
           onClick={submit}
           type="button"
           disabled={busy || !dirty}
-          className="h-7 px-3 rounded-md bg-blue hover:bg-blue-hover disabled:opacity-40 disabled:cursor-not-allowed text-white text-[12px] font-medium tracking-tight transition-colors flex items-center gap-1.5"
+          className="h-7 px-3 rounded-md bg-blue hover:bg-blue-hover disabled:opacity-40 disabled:cursor-not-allowed text-on-brand text-[12px] font-medium tracking-tight transition-colors flex items-center gap-1.5"
         >
           {busy ? (
             <>

@@ -172,7 +172,9 @@ export default function RightDock({
           //    时被挤没的是主栏（1512 窗口 + 展开侧栏：1512−316−1285 = −98）。
           //    用户 2026-09-17 那张图就是这个：对话只剩一条竖条，只看得到「idle」。
           reserveSelector="[data-railcol]"
-          reserveMin={MIN_MAIN_WIDTH}
+          // Include the chat card's 12px trailing gutter and the splitter's
+          // 1px net width, so the visible panel still has MIN_MAIN_WIDTH.
+          reserveMin={MIN_MAIN_WIDTH + 13}
           title="拖动调整右侧那格的宽度"
         />
       )}
@@ -182,8 +184,8 @@ export default function RightDock({
           !open
             ? "hidden"
             : narrow || maxed
-              ? "fixed inset-0 z-40 bg-canvas flex"
-              : "dockcol border-l border-line bg-canvas"
+              ? "fixed inset-0 z-40 bg-surface flex"
+              : "dockcol dock-surface"
         }
       >
         {/* ── 左栏：项目树（常驻导航，点文件不会把它换掉）───────────────── */}
@@ -241,9 +243,10 @@ export default function RightDock({
               {docs.map((t) => (
                 <div
                   key={t.path}
-                  className={`flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-t-md text-[12px] border-b-2 shrink-0 max-w-[200px] ${
+                  data-active={active === t.path}
+                  className={`dock-tab flex items-center gap-1.5 pl-2.5 pr-1.5 h-8 text-[12px] border-b-2 shrink-0 max-w-[200px] ${
                     active === t.path
-                      ? "text-fg border-fg/60 bg-fg/[0.03]"
+                      ? ""
                       : "text-subtle border-transparent hover:text-muted"
                   }`}
                 >

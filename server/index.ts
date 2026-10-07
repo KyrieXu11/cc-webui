@@ -6,6 +6,7 @@ import { startFeishuChannels } from "./feishu/index.ts";
 import { countUsers, seedAdminFromEnv } from "./auth/users.ts";
 import { groupsEnabled, projectMemoryEnabled } from "./features.ts";
 import { recoverMemoryFiles } from "./project-memory/store.ts";
+import { MEMORY_PROMPT_VERSION } from "./project-memory/prompt.ts";
 import { createDeviceWs, DEVICE_WS_PATH } from "./devices/ws.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import { codexExecutor, CODEX_JSON_FLAG } from "./executors/codex-executor.ts";
@@ -58,6 +59,7 @@ const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
       ? "[cc-webui] groups: enabled"
       : "[cc-webui] groups: disabled (set CC_WEBUI_GROUPS_ENABLED=1 to enable)",
   );
+  console.log(`[cc-webui] project memory: ${projectMemoryEnabled() ? "enabled" : "disabled"} (prompt=${MEMORY_PROMPT_VERSION})`);
   const users = countUsers();
   console.log(
     users === 0

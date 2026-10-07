@@ -28,7 +28,7 @@ export default function LoginView({ onSignedIn }: Props) {
 
   return (
     <div className="flex h-full items-center justify-center bg-canvas px-6">
-      <form onSubmit={submit} className="w-full max-w-[340px]">
+      <form onSubmit={submit} className="soft-panel w-full max-w-[400px] p-8 max-md:p-6">
         <div className="mb-8">
           <h1 className="text-fg text-[19px] font-semibold tracking-tight">
             cc-webui
@@ -45,7 +45,7 @@ export default function LoginView({ onSignedIn }: Props) {
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
             autoComplete="username"
-            className="w-full h-10 px-3 rounded-lg bg-surface border border-line-strong text-[13.5px] text-fg outline-none focus:border-fg/30 transition-colors"
+            className="w-full h-10 px-3 soft-input text-[13.5px]"
           />
         </label>
 
@@ -58,7 +58,7 @@ export default function LoginView({ onSignedIn }: Props) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            className="w-full h-10 px-3 rounded-lg bg-surface border border-line-strong text-[13.5px] text-fg outline-none focus:border-fg/30 transition-colors"
+            className="w-full h-10 px-3 soft-input text-[13.5px]"
           />
         </label>
 
@@ -71,7 +71,7 @@ export default function LoginView({ onSignedIn }: Props) {
         <button
           type="submit"
           disabled={busy || !username.trim() || !password}
-          className="w-full h-10 rounded-lg bg-fg text-canvas text-[13.5px] font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+          className="soft-primary w-full h-10 text-[13.5px] disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {busy ? "登录中…" : "登录"}
         </button>

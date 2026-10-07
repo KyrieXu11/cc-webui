@@ -30,7 +30,7 @@ export default function UserBubble({
       className="flex justify-end msg-enter"
       style={{ animationDelay: `${delay}ms` }}
     >
-      <div className="user-bubble max-w-[78%] bg-blue text-white px-4 py-2.5 rounded-2xl text-[14.5px] leading-[1.6] flex flex-col gap-2">
+      <div className="user-bubble max-w-[78%] max-md:max-w-[90%] px-4 py-3 text-[14.5px] leading-[1.6] flex flex-col gap-2">
         {hasImages && (
           <div className="flex flex-wrap gap-1.5">
             {images!.map((img, i) => (
@@ -49,7 +49,7 @@ export default function UserBubble({
                     triggerPreview(img, i);
                   }
                 }}
-                className="max-w-[220px] max-h-[220px] rounded-lg object-cover border border-white/20 cursor-zoom-in hover:brightness-110 transition"
+                className="max-w-[220px] max-h-[220px] rounded-panel object-cover border border-line-strong cursor-zoom-in hover:brightness-105 transition"
               />
             ))}
           </div>
@@ -60,7 +60,7 @@ export default function UserBubble({
               <span
                 key={f.path}
                 title={f.path}
-                className="inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded-md bg-white/15 border border-white/20 text-[12.5px] leading-tight"
+                className="user-attachment inline-flex items-center gap-1.5 max-w-full px-2.5 py-1.5 text-[12.5px] leading-tight"
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0 opacity-80">
                   <path

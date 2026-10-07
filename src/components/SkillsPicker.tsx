@@ -47,7 +47,7 @@ export default function SkillsPicker({ skills, onPick, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[560px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[560px] soft-dialog overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
       >

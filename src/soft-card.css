@@ -1,0 +1,169 @@
+/* Adapted from quant/design/soft-card-dashboard-kit.
+   Cards separate work areas, NOT individual assistant replies/tool rows.
+   Inset controls + quiet surfaces keep the existing workbench density. */
+@layer base {
+  button:not(:disabled), [role="button"] { cursor: pointer; }
+  button:focus-visible, a:focus-visible, [role="button"]:focus-visible {
+    outline: 2px solid var(--color-blue);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .soft-panel, .soft-dialog, .soft-popover {
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .soft-dialog, .soft-popover { box-shadow: var(--shadow-float); }
+  .soft-popover { border-radius: var(--radius-panel); }
+  .soft-button, .soft-primary {
+    border-radius: var(--radius-control);
+    font-weight: 600;
+    transition: background-color 160ms, color 160ms, box-shadow 160ms;
+  }
+  .soft-button {
+    background: var(--color-surface-2);
+    color: var(--color-fg);
+    border: 1px solid var(--color-line-strong);
+  }
+  .soft-button:hover:not(:disabled) { background: var(--color-raised); }
+  .soft-primary {
+    background: var(--color-blue);
+    color: var(--color-on-brand);
+  }
+  .soft-primary:hover:not(:disabled) { background: var(--color-blue-hover); }
+  .soft-input {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+    color: var(--color-fg);
+    transition: border-color 160ms, box-shadow 160ms;
+  }
+  .soft-input:focus {
+    outline: none;
+    border-color: var(--color-blue);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-blue) 12%, transparent);
+  }
+  .soft-segmented {
+    background: var(--color-sunken);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-inset);
+    padding: 3px;
+  }
+  .soft-segment {
+    border-radius: 7px;
+    color: var(--color-muted);
+    transition: background-color 160ms, color 160ms;
+  }
+  .soft-segment[aria-selected="true"] {
+    background: var(--color-surface);
+    color: var(--color-fg);
+    box-shadow: var(--shadow-chip);
+  }
+  .soft-segment:hover { color: var(--color-fg); }
+
+  /* Padding belongs to the measured railcol: Splitter reserves its entire
+     width. No horizontal margins outside it that the width clamp could miss. */
+  .workbench-nav { padding: 12px 12px 12px 10px; }
+  .nav-panel {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .chat-panel {
+    margin: 0 12px 12px 0;
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  /* One outer card contains both messages and composer. Clip only the message
+     viewport: model/slash menus must still open upwards over the history. */
+  .conversation-messages {
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+  }
+  .conversation-content { padding-top: 24px; padding-bottom: 24px; }
+  .composer-surface {
+    background: var(--color-surface-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-card);
+    transition: border-color 160ms, box-shadow 160ms;
+  }
+  .composer-surface:focus-within {
+    border-color: color-mix(in srgb, var(--color-blue) 45%, transparent);
+  }
+  .composer-surface[data-drag-over="true"] {
+    border-color: var(--color-blue);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-blue) 14%, transparent);
+  }
+  .user-bubble {
+    background: var(--color-wash);
+    color: var(--color-fg);
+    border-radius: var(--radius-card);
+  }
+  .user-attachment {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+  }
+  .conversation-row, .navigation-row { border-radius: var(--radius-control); }
+  .navigation-row { color: var(--color-muted); }
+  .conversation-row:hover, .navigation-row:hover {
+    background: var(--color-raised);
+    color: var(--color-fg);
+  }
+  .conversation-row[aria-current="true"], .navigation-row[data-active="true"] {
+    background: var(--color-wash);
+    color: var(--color-fg);
+  }
+  .navigation-row[data-drop-over="true"] {
+    background: color-mix(in srgb, var(--color-blue) 18%, var(--color-surface));
+    color: var(--color-fg);
+  }
+  /* Both panel disclosures share the same neutral icon / wash treatment.
+     Selection or visibility must not introduce a second navigation palette. */
+  .panel-toggle {
+    background: var(--color-surface);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    color: var(--color-muted);
+    transition: background-color 160ms, border-color 160ms, color 160ms;
+  }
+  .panel-toggle:hover {
+    background: var(--color-raised);
+    color: var(--color-fg);
+  }
+  .panel-toggle[data-expanded="true"] {
+    background: var(--color-wash);
+    border-color: var(--color-line-strong);
+  }
+  .dock-surface {
+    background: var(--color-surface);
+    border-radius: var(--radius-card) 0 0 var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .dock-tab {
+    border-radius: var(--radius-control) var(--radius-control) 0 0;
+  }
+  .dock-tab[data-active="true"] {
+    background: var(--color-wash);
+    border-color: var(--color-blue);
+    color: var(--color-blue);
+  }
+  .soft-empty {
+    background: var(--color-surface-2);
+    border-radius: var(--radius-panel);
+    padding: 24px;
+  }
+}
+
+@media (max-width: 767px) {
+  .workbench-nav { padding: 0; }
+  .nav-panel { border-radius: 0; box-shadow: none; }
+  .chat-panel { margin: 0 8px 8px; border-radius: var(--radius-panel); }
+  .conversation-content { padding-top: 16px; padding-bottom: 16px; }
+}

@@ -42,7 +42,7 @@ export default function Popover({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={
-          triggerClassName ?? "inline-flex items-center focus:outline-none"
+          triggerClassName ?? "inline-flex items-center"
         }
       >
         {trigger}
@@ -52,7 +52,7 @@ export default function Popover({
           style={{ minWidth: width }}
           className={`absolute z-50 ${align === "left" ? "left-0" : "right-0"} ${
             direction === "up" ? "bottom-full mb-2" : "top-full mt-2"
-          } bg-surface border border-line-strong rounded-lg shadow-[0_16px_48px_-12px_rgba(0,0,0,0.8)]`}
+          } soft-popover`}
         >
           {children({ close: () => setOpen(false) })}
         </div>

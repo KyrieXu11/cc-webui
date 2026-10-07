@@ -40,12 +40,12 @@ const THEME_VARS: Record<string, Record<string, string>> = {
     color: "var(--color-subtle)",
     border: "none",
   },
-  ".cm-activeLine": { backgroundColor: "rgba(127,127,127,0.06)" },
+  ".cm-activeLine": { backgroundColor: "var(--color-surface-2)" },
   ".cm-activeLineGutter": { backgroundColor: "transparent" },
   ".cm-cursor": { borderLeftColor: "var(--color-fg)" },
   "&.cm-focused": { outline: "none" },
   ".cm-selectionBackground, ::selection": {
-    backgroundColor: "rgba(90,140,255,0.25)",
+    backgroundColor: "color-mix(in srgb, var(--color-blue) 22%, transparent)",
   },
 };
 

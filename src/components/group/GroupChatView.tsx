@@ -27,8 +27,8 @@ import type {
 } from "../../lib/types";
 
 const AGENT_ACCENT: Record<GroupAgentId, string> = {
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 type Block =
@@ -340,7 +340,7 @@ export default function GroupChatView({ gid, home, onBack }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex items-center gap-3 h-14 px-5 border-b border-line shrink-0">
+      <header className="flex items-center gap-3 h-14 px-5 shrink-0">
         <button
           onClick={onBack}
           title="回到主页"
@@ -385,68 +385,70 @@ export default function GroupChatView({ gid, home, onBack }: Props) {
           setConfig({ ...cur, participants, updatedAt: Date.now() });
         }}
       />
-      <main ref={scrollRef} className="flex-1 relative overflow-hidden">
-        <div className="h-full overflow-y-auto">
-          <div className="max-w-[820px] mx-auto px-6 pb-4">
-            {blocks.length === 0 && !running ? (
-              <EmptyState />
-            ) : (
-              <div className="flex flex-col gap-5 py-8">
-                {blocks.map((b, i) =>
-                  b.kind === "user" ? (
-                    <UserBlock
-                      key={`u-${b.entry.event.id}-${i}`}
-                      entry={b.entry}
-                    />
-                  ) : (
-                    <AgentBlock
-                      key={`a-${b.agent}-${i}`}
-                      agent={b.agent}
-                      events={b.events}
-                      pipelineStep={b.pipelineStep}
-                      isLive={b.isLive}
-                      expandedSteps={expandedSteps}
-                      onToggleStep={toggleStep}
-                      onAnswerPermission={resolvePerm}
-                      onQuote={handleQuote}
-                      modelHint={modelOf(config, b.agent)}
-                    />
-                  ),
-                )}
-              </div>
-            )}
-            {error && (
-              <div className="mt-4 amber-card rounded-lg px-3 py-2 text-[13px] text-fg font-mono">
-                {error}
-              </div>
-            )}
+      <section aria-label="对话" className="chat-panel flex flex-1 min-h-0 flex-col">
+        <main ref={scrollRef} className="conversation-messages flex-1 min-h-0 relative overflow-hidden">
+          <div className="h-full overflow-y-auto">
+            <div className="conversation-content max-w-[820px] mx-auto px-6 max-md:px-3.5">
+              {blocks.length === 0 && !running ? (
+                <EmptyState />
+              ) : (
+                <div className="flex flex-col gap-5 py-8">
+                  {blocks.map((b, i) =>
+                    b.kind === "user" ? (
+                      <UserBlock
+                        key={`u-${b.entry.event.id}-${i}`}
+                        entry={b.entry}
+                      />
+                    ) : (
+                      <AgentBlock
+                        key={`a-${b.agent}-${i}`}
+                        agent={b.agent}
+                        events={b.events}
+                        pipelineStep={b.pipelineStep}
+                        isLive={b.isLive}
+                        expandedSteps={expandedSteps}
+                        onToggleStep={toggleStep}
+                        onAnswerPermission={resolvePerm}
+                        onQuote={handleQuote}
+                        modelHint={modelOf(config, b.agent)}
+                      />
+                    ),
+                  )}
+                </div>
+              )}
+              {error && (
+                <div className="mt-4 amber-card rounded-lg px-3 py-2 text-[13px] text-fg font-mono">
+                  {error}
+                </div>
+              )}
+            </div>
+          </div>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface to-transparent"
+          />
+        </main>
+        <div className="shrink-0">
+          <div className="max-w-[820px] mx-auto w-full">
+            <GroupComposer
+              running={running}
+              value={composerValue}
+              onChange={setComposerValue}
+              quote={quote}
+              onClearQuote={() => setQuote(null)}
+              onSend={handleSend}
+              onStop={handleStop}
+              rightSlot={
+                <TasksButton
+                  scope={tasksScope}
+                  onOpen={() => setTasksOpen(true)}
+                  refreshKey={tasksRefreshKey}
+                />
+              }
+            />
           </div>
         </div>
-        <div
-          aria-hidden
-          className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-canvas to-transparent"
-        />
-      </main>
-      <div className="shrink-0">
-        <div className="max-w-[820px] mx-auto w-full">
-          <GroupComposer
-            running={running}
-            value={composerValue}
-            onChange={setComposerValue}
-            quote={quote}
-            onClearQuote={() => setQuote(null)}
-            onSend={handleSend}
-            onStop={handleStop}
-            rightSlot={
-              <TasksButton
-                scope={tasksScope}
-                onOpen={() => setTasksOpen(true)}
-                refreshKey={tasksRefreshKey}
-              />
-            }
-          />
-        </div>
-      </div>
+      </section>
       {editing && config && (
         <GroupConfigDialog
           mode={{
@@ -525,7 +527,7 @@ function EmptyState() {
         <code className="font-mono text-fg">@claude</code> /{" "}
         <code className="font-mono text-fg">@codex</code> 开始对话
       </div>
-      <div className="font-mono text-[11px] text-subtle/70 mt-2">
+      <div className="font-mono text-[11px] text-subtle mt-2">
         无 @ 前缀 → @all 流水线
       </div>
     </div>
@@ -541,26 +543,26 @@ function UserBlock({ entry }: { entry: GroupTurnEntry }) {
       className="flex justify-end msg-enter pt-3"
       style={{ animationDelay: "0ms" }}
     >
-      <div className="user-bubble max-w-[78%] bg-blue text-white px-3.5 py-2.5 rounded-2xl text-[14.5px] leading-[1.6] flex flex-col gap-1.5">
+      <div className="user-bubble max-w-[78%] max-md:max-w-[90%] px-3.5 py-3 text-[14.5px] leading-[1.6] flex flex-col gap-1.5">
         {quote && quote.text && (
           <div
-            className="bg-white/[0.08] rounded-md pl-2.5 pr-2.5 py-1.5"
+            className="bg-surface rounded-control pl-2.5 pr-2.5 py-1.5"
             style={{
               borderLeft: `2px solid ${
                 AGENT_ACCENT[quote.agent as GroupAgentId]
               }`,
             }}
           >
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/75 mb-0.5">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted mb-0.5">
               引用 {quote.agent}
             </div>
-            <div className="whitespace-pre-wrap line-clamp-3 leading-[1.5] text-[12.5px] text-white/90">
+            <div className="whitespace-pre-wrap line-clamp-3 leading-[1.5] text-[12.5px] text-fg">
               {quote.text}
             </div>
           </div>
         )}
         {recipients && recipients.length === 1 && (
-          <div className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-white/70">
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-muted">
             → @{recipients[0]}
           </div>
         )}
@@ -612,9 +614,9 @@ function AgentBlock({
           className="w-1.5 h-1.5 rounded-full shrink-0"
           style={{
             background: accent,
-            outline: `3px solid ${accent}22`,
+            outline: `3px solid color-mix(in srgb, ${accent} 12%, transparent)`,
             outlineOffset: 0,
-            boxShadow: isLive ? `0 0 14px ${accent}66` : undefined,
+            boxShadow: isLive ? `0 0 14px color-mix(in srgb, ${accent} 40%, transparent)` : undefined,
           }}
         />
         <span
@@ -624,7 +626,7 @@ function AgentBlock({
           {agent}
         </span>
         {modelHint && (
-          <span className="font-mono text-[10.5px] text-subtle/70 truncate">
+          <span className="font-mono text-[10.5px] text-subtle truncate">
             {modelHint}
           </span>
         )}

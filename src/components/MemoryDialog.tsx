@@ -114,7 +114,7 @@ export default function MemoryDialog({ cwd, onClose }: Props) {
         role="dialog"
         aria-label="项目记忆"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[980px] h-[80vh] flex flex-col bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[980px] h-[80vh] flex flex-col soft-dialog overflow-hidden"
       >
         <header className="flex items-center gap-2.5 px-5 h-12 border-b border-line shrink-0">
           <h2 className="text-fg text-[14px] font-semibold tracking-tight">项目记忆</h2>

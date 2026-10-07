@@ -1,24 +1,40 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Press+Start+2P&display=swap");
 @import "tailwindcss";
+@import "./soft-card.css";
 
-@theme {
-  --color-canvas: #0a0d14;
-  --color-surface: #121620;
-  --color-raised: #191e2a;
+@theme static {
+  --color-canvas: #101724;
+  --color-surface: #192335;
+  --color-raised: #212e43;
+  --color-surface-2: #1d293c;
+  --color-sunken: #121c2c;
 
-  --color-fg: #e8eaed;
-  --color-muted: #a0a4ad;
-  --color-subtle: #6b7079;
+  --color-fg: #edf2fb;
+  --color-muted: #b5c1d5;
+  --color-subtle: #98a8c1;
 
-  --color-line: rgba(255, 255, 255, 0.06);
-  --color-line-strong: rgba(255, 255, 255, 0.12);
+  --color-line: #29374c;
+  --color-line-strong: #40516b;
 
-  --color-blue: #5b6bff;
-  --color-blue-hover: #6e7cff;
-  --color-green: #3ecf8e;
-  --color-amber: #e0a030;
-  --color-orange: #ef9d5a;
-  --color-red: #e05252;
+  --color-blue: #9caeff;
+  --color-blue-hover: #b2bfff;
+  --color-on-brand: #101a2e;
+  --color-wash: #27375a;
+  --color-green: #74daa0;
+  --color-amber: #e9bd69;
+  --color-orange: #efad79;
+  --color-red: #ff928b;
+  --color-provider-claude: #efad79;
+  --color-provider-codex: #74daa0;
+  --color-on-status: #101a2e;
+
+  --radius-card: 18px;
+  --radius-panel: 12px;
+  --radius-control: 9px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 24px -10px rgba(0, 0, 0, 0.32);
+  --shadow-float: 0 2px 4px rgba(0, 0, 0, 0.12), 0 18px 40px -16px rgba(0, 0, 0, 0.5);
+  --shadow-chip: 0 1px 2px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.18);
 
   --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -32,33 +48,54 @@
    （关键字 #708 深紫、标识符 #00f 纯蓝），落在本项目近黑的 #0a0d14 上基本读不出来。
    所以 TextEditor 必须显式加 appSyntaxHighlighting 把它盖掉。 */
 :root {
+  color-scheme: dark;
   --syn-keyword: #b78cff;
   --syn-string: #7ee0a8;
   --syn-number: #ef9d5a;
-  --syn-comment: #6b7079;
+  --syn-comment: #98a8c1;
   --syn-func: #7aa2f7;
   --syn-type: #5ecfd6;
   --syn-var: #c3c8d4;
   --syn-def: #e8eaed;
   --syn-punct: #8a90a0;
   --syn-meta: #e0a030;
-  --syn-invalid: #e05252;
+  --syn-invalid: #ff928b;
 }
 
 :root[data-theme="light"] {
-  --color-canvas: #fafafa;
+  color-scheme: light;
+  --color-canvas: #eef2f8;
   --color-surface: #ffffff;
-  --color-raised: #f3f4f6;
-  --color-fg: #111827;
-  --color-muted: #4b5563;
-  --color-subtle: #9ca3af;
-  --color-line: rgba(0, 0, 0, 0.08);
-  --color-line-strong: rgba(0, 0, 0, 0.14);
+  --color-raised: #f1f4fa;
+  --color-surface-2: #f7f9fc;
+  --color-sunken: #e3e9f3;
+  --color-fg: #101a2e;
+  --color-muted: #47546b;
+  /* Deeper than the kit's ink-3: tiny workbench labels also sit on the canvas
+     and inset controls, not just white cards. Keep those readable too. */
+  --color-subtle: #59677c;
+  --color-line: #edf1f7;
+  --color-line-strong: #e2e8f2;
+  --color-blue: #2b49ce;
+  --color-blue-hover: #1e36a4;
+  --color-on-brand: #ffffff;
+  --color-wash: #eef2fe;
+  --color-green: #0a7534;
+  --color-amber: #8a5b08;
+  --color-orange: #a2531d;
+  --color-red: #c4231c;
+  --color-provider-claude: #a2531d;
+  --color-provider-codex: #0a7534;
+  --color-on-status: #ffffff;
+  --shadow-card: 0 1px 2px rgba(16, 26, 46, 0.04), 0 8px 24px -10px rgba(16, 26, 46, 0.10);
+  --shadow-float: 0 2px 4px rgba(16, 26, 46, 0.05), 0 18px 40px -16px rgba(16, 26, 46, 0.16);
+  --shadow-chip: 0 1px 2px rgba(16, 26, 46, 0.10), inset 0 1px 0 #ffffff;
+  --shadow-inset: inset 0 1px 2px rgba(16, 26, 46, 0.07);
 
   --syn-keyword: #8250df;
   --syn-string: #0a7c42;
   --syn-number: #b3541e;
-  --syn-comment: #6e7781;
+  --syn-comment: #59677c;
   --syn-func: #1f5edb;
   --syn-type: #0e7490;
   --syn-var: #24292f;
@@ -114,13 +151,13 @@ body {
 }
 
 ::selection {
-  background: rgba(91, 107, 255, 0.3);
+  background: color-mix(in srgb, var(--color-blue) 22%, transparent);
 }
 
 .user-bubble ::selection,
 .user-bubble::selection {
-  background: #ffffff;
-  color: var(--color-blue);
+  background: color-mix(in srgb, var(--color-blue) 25%, var(--color-wash));
+  color: var(--color-fg);
 }
 
 textarea {
@@ -154,15 +191,13 @@ textarea {
 }
 
 .amber-card {
-  background: rgba(224, 160, 48, 0.025);
-  border: 1px solid rgba(224, 160, 48, 0.35);
-  box-shadow:
-    0 0 0 1px rgba(224, 160, 48, 0.04),
-    0 24px 60px -24px rgba(224, 160, 48, 0.18);
+  background: color-mix(in srgb, var(--color-amber) 8%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-amber) 32%, transparent);
+  box-shadow: var(--shadow-card);
 }
 
 .pulse-dot {
-  box-shadow: 0 0 14px rgba(91, 107, 255, 0.5);
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
 }
 
 /* Pixel-arcade wordmark: double-layer stack (shadow + gradient fill). */

@@ -84,7 +84,7 @@ export default function Markdown({ text }: Props) {
           );
         },
         pre: ({ children }) => (
-          <pre className="my-3 p-3.5 rounded-md bg-surface border border-line overflow-x-auto font-mono text-[12.5px] leading-[1.65]">
+          <pre className="my-3 p-3.5 rounded-panel bg-surface-2 overflow-x-auto font-mono text-[12.5px] leading-[1.65]">
             {children}
           </pre>
         ),

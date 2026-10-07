@@ -84,6 +84,12 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 
 ### 前端目录地图（`src/`）
 
+- **视觉规范**：`index.css` 管明暗主题令牌，`soft-card.css` 管软卡片工作台的共用样式，
+  参考与适配边界见 [`docs/frontend-style.md`](./docs/frontend-style.md)。面板靠阴影分层，
+  用户气泡用浅色 wash；不要把助理回复 / 工具行逐条包成卡片。主色按钮文字用
+  `on-brand`，状态图标用 `on-status`，不能写死白色；小字对比度由
+  `src/lib/soft-card-theme.test.ts` 守住。**字体保留原来的 IBM Plex Sans / IBM Plex Mono**
+  （用户明确偏好，不跟设计参考换字体）。**仅验证构建要指定隔离 outDir**，默认 dist 即上线。
 - `App.tsx` — 中枢：路由/视图切换、发送、session 打开、attach、in-flight 轮询。
 - `lib/` — `api.ts`（SSE 客户端）、`processor.ts`（**SDK 事件 → UI 状态映射**，很关键）、
   `settings.ts`（**model / mode / effort 选项与默认值**）、`groups.ts`、`sessions.ts`、`types.ts` 等。
@@ -310,6 +316,7 @@ claude CLI（你 Mac 上的子进程）
 - `shared/project-memory-envelope.ts` 同时用于请求注入和历史/标题剥离；换 envelope 要一起改，不能把索引显示成用户气泡。steer 必须在原有消息内携带快照；跨 actor 插话改为 409 排队，不能把他人的记忆送给当前运行者。
 - `user_ai_access` 管成员可用 provider；无行仍仅 Claude，管理员默认两种。`user_defaults.provider` 与模型/effort 一样是默认值而非锁定。Codex 无逐工具审批，授予必须明确，不等于授予管理员角色；Bypass 仍按角色拒绝。参见 `docs/user-permissions.md` 决策 48-50。
 - 新表/存储测试要设置 `CC_WEBUI_DB`、`CC_WEBUI_PROJECT_MEMORY_DIR`，建账号仍要隔离工作区。新根有专用标记，恢复只清扫版本文件，**不能清扫任意 .md**。
+- 2026-10-03 规则模板升级为 `project-memory-v2`：按已捕获的普通 Claude Code 2.1.283 提示补齐四类型主动保存、明确检查/回忆/记住的召回、纠错更新/删除、相对日期转绝对日期。删除须当前证据确认错误/过期且无可保留内容，优先更新，不按年代/索引省略/最近使用情况删除；Plan 仍在服务端拒绝所有写入。**规则版本 v2 不等于存储/信封升级**：`cc-webui-project-memory-v1` 的 source、根标记、schema 10、scope 和旧正文全部保持。逐字 fixture 在 `server/project-memory/fixtures/`，与原生默认提示的对照见 `docs/claude-memory-prompts.md`；不得混入未启用的 stone-shell 强制每回复保存或 pinned 规则。
 
 ## 数据与存储布局
 
@@ -554,7 +561,9 @@ claude CLI（你 Mac 上的子进程）
 
 ### Codex 运行反馈与模型目录（2026-09-29）
 
-- `codex exec` 无 reasoning/text delta，工具有 `item.started/updated/completed`。`MessageList` 为真实 live Codex turn 渲染临时 activity 行（同一 sparkle / 耗时 / turn effort），不是伪造 thinking ChatEvent/token。工具执行时用工具 spinner，完成后继续 activity；done/cancel/no-inflight/历史不转圈。
+- `codex exec` 无 reasoning/text delta，工具有 `item.started/updated/completed`。**思考动效是用户设计，不能一刀切删掉**：有显式 pending reasoning item（即使无正文）时保留 `Decoding` 等动态文案；工具执行时只转工具 spinner；没有明确 reasoning 信号时才显示临时「处理中」activity。activity 时间明确写「回合已用」，包括模型等待和工具执行，**不得放进 reasoning 行当作思考时长**；没有可靠的独立思考时间就不显示。后续工具/回答 started 要结束旧 reasoning 动画，不能等工具结束又把它复活；done/cancel/no-inflight/历史不转圈。
 - CodeX 单聊 buffer 第一帧 `turn_meta {effort,startedAt,provider}`；attach 重放同一帧。未确认 attach 真在运行前不显示历史活动动画。
+- 第二帧 `turn_user` 回放本轮原始提问和图片（不含 memory envelope）。**不能靠浏览器的 ActiveTurn 补用户气泡**：管理员看别人的活跃会话时根本没有它。attach 先替换当前轮历史后缀，再回放 buffer；`item_N` 每次 exec 从头编号，UI id 必须按 user/turn 分 scope，否则后轮覆盖前轮。`codex-attach.test.ts` / `codex-turn.test.ts` 钉住这两条。
+- Codex 0.157.1 的 native rollout 已换成 `event_msg/item_completed`，item 是 `UserMessage` / `AgentMessage` / `CommandExecution` 等 PascalCase；旧 `user_message` / `agent_message` 解析器会丢掉提问。`session-store.ts` 同时支持新旧格式，只读公开消息/工具字段，**不读 Reasoning.raw_content**；memory envelope 必须在压缩换行**之前**剥离。
 - MCP `result.isError` 也必须映射 error，不可因为 transport completed 就画绿勾；web search/file change 的 started 帧亦需 pending。
 - `CC_WEBUI_CODEX_MODELS_CACHE` 可覆盖默认 `$CODEX_HOME/models_cache.json`（缺省 `~/.codex`）。只下发 visibility=list 的公开模型信息；不下发 identity/账号/token/文件路径。

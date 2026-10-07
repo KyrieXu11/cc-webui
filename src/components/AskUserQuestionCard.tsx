@@ -81,7 +81,7 @@ export default function AskUserQuestionCard({
 
   return (
     <div
-      className="msg-enter rounded-lg p-5 bg-surface border border-blue/25"
+      className="msg-enter rounded-panel p-5 bg-wash border border-blue/25"
       style={{ animationDelay: `${delay}ms` }}
     >
       <div className="flex items-center gap-2 mb-4">
@@ -183,7 +183,7 @@ export default function AskUserQuestionCard({
           <button
             disabled={!complete}
             onClick={submit}
-            className="px-3.5 h-8 rounded-md text-[12.5px] border transition-all bg-blue border-blue text-white disabled:opacity-35 disabled:cursor-not-allowed"
+            className="px-3.5 h-8 rounded-md text-[12.5px] border transition-all bg-blue border-blue text-on-brand disabled:opacity-35 disabled:cursor-not-allowed"
           >
             提交
           </button>

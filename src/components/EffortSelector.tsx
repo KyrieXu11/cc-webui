@@ -26,7 +26,7 @@ export default function EffortSelector({
       align={align}
       direction={direction}
       width={220}
-      triggerClassName="inline-flex items-center focus:outline-none rounded px-1.5 py-0.5 hover:bg-fg/5 transition-colors group"
+      triggerClassName="inline-flex items-center rounded-control px-1.5 py-0.5 hover:bg-raised transition-colors group"
       trigger={
         <span className="font-mono text-[11px] text-subtle group-hover:text-fg transition-colors flex items-center gap-1">
           {effortLabel(value)}

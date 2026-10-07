@@ -4,8 +4,8 @@ import { tildify } from "../../lib/fs";
 import type { GroupIndexRow } from "../../lib/types";
 
 const POLL_MS = 3000;
-const CLAUDE_ACCENT = "#ef9d5a";
-const CODEX_ACCENT = "#3ecf8e";
+const CLAUDE_ACCENT = "var(--color-provider-claude)";
+const CODEX_ACCENT = "var(--color-provider-codex)";
 
 interface Props {
   home: string;
@@ -52,7 +52,7 @@ export default function GroupSidebar({
   };
 
   return (
-    <aside className="w-[260px] shrink-0 border-r border-line flex flex-col bg-canvas">
+    <aside className="w-[260px] shrink-0 flex flex-col bg-surface">
       <div className="px-4 pt-4 pb-3 border-b border-line">
         <div className="flex items-center gap-2 mb-3">
           <div className="flex -space-x-1">
@@ -80,7 +80,7 @@ export default function GroupSidebar({
         </div>
         <button
           onClick={onCreateGroup}
-          className="w-full h-9 rounded-md bg-raised border border-line-strong text-[12.5px] text-fg hover:border-fg/25 hover:bg-fg/5 transition-colors flex items-center justify-center gap-2"
+          className="soft-button w-full h-9 text-[12.5px] flex items-center justify-center gap-2"
         >
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
             <path
@@ -94,7 +94,7 @@ export default function GroupSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto py-2 px-2">
         {loading ? (
           <div className="px-4 py-3 text-[12px] text-subtle font-mono">加载中…</div>
         ) : groups.length === 0 ? (
@@ -107,10 +107,11 @@ export default function GroupSidebar({
             return (
               <div
                 key={g.id}
-                className={`group/g flex items-center gap-2 transition-colors min-w-0 ${
+                aria-current={active ? "true" : undefined}
+                className={`conversation-row group/g my-0.5 flex items-center gap-2 transition-colors min-w-0 ${
                   active
-                    ? "bg-surface text-fg"
-                    : "text-muted hover:text-fg hover:bg-fg/[0.02]"
+                    ? "text-fg"
+                    : "text-muted hover:text-fg"
                 }`}
               >
                 <button
@@ -127,7 +128,7 @@ export default function GroupSidebar({
                       className="w-1.5 h-1.5 rounded-full"
                       style={{
                         background: CLAUDE_ACCENT,
-                        outline: `3px solid ${CLAUDE_ACCENT}22`,
+                        outline: `3px solid color-mix(in srgb, ${CLAUDE_ACCENT} 12%, transparent)`,
                       }}
                     />
                     <span className="text-subtle/40 text-[9px] mx-px">×</span>
@@ -135,7 +136,7 @@ export default function GroupSidebar({
                       className="w-1.5 h-1.5 rounded-full"
                       style={{
                         background: CODEX_ACCENT,
-                        outline: `3px solid ${CODEX_ACCENT}22`,
+                        outline: `3px solid color-mix(in srgb, ${CODEX_ACCENT} 12%, transparent)`,
                       }}
                     />
                     {g.inFlight && (
@@ -153,7 +154,7 @@ export default function GroupSidebar({
                     >
                       {g.title}
                     </span>
-                    <span className="font-mono text-[10px] text-subtle/70 truncate">
+                    <span className="font-mono text-[10px] text-subtle truncate">
                       {tildify(g.cwd, home)}
                     </span>
                   </div>

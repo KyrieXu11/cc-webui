@@ -291,11 +291,8 @@ export default function Composer({
           setDragKind(null);
         }}
         onDrop={onDrop}
-        className={`relative bg-raised border rounded-2xl transition-colors ${
-          dragOver
-            ? "border-blue/70 ring-2 ring-blue/20"
-            : "border-line-strong focus-within:border-fg/25"
-        }`}
+        data-drag-over={dragOver}
+        className="composer-surface relative"
       >
         {slashOpen && slashInfo && (
           <SlashCommandMenu
@@ -477,7 +474,7 @@ export default function Composer({
                 className="w-9 h-9 rounded-full bg-red hover:brightness-110 flex items-center justify-center transition-all active:scale-95"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <rect x="2" y="2" width="8" height="8" rx="1.5" fill="white" />
+                  <rect x="2" y="2" width="8" height="8" rx="1.5" fill="var(--color-on-status)" />
                 </svg>
               </button>
             )}
@@ -495,7 +492,7 @@ export default function Composer({
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
                 <path
                   d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
-                  stroke={disabled ? "currentColor" : "white"}
+                  stroke={disabled ? "currentColor" : "var(--color-on-brand)"}
                   strokeWidth="1.7"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -524,7 +521,7 @@ export default function Composer({
         <div className="flex items-center gap-2">
           {rightSlot}
           <span className="text-[11px] text-subtle font-mono px-1">
-            {disabled ? "thinking…" : uploading ? "uploading…" : "idle"}
+            {disabled ? provider === "codex" ? "processing…" : "thinking…" : uploading ? "uploading…" : "idle"}
           </span>
         </div>
       </div>

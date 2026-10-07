@@ -112,7 +112,7 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[620px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[620px] soft-dialog overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
       >
@@ -170,7 +170,7 @@ export default function OpenProjectDialog({ onClose, onOpen }: Props) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索文件夹，或粘贴绝对路径回车"
-              className="w-full h-9 pl-9 pr-3 rounded-md bg-canvas border border-line-strong text-[13px] text-fg placeholder:text-subtle focus:outline-none focus:border-blue/60"
+              className="w-full h-9 pl-9 pr-3 soft-input text-[13px] placeholder:text-subtle"
             />
           </div>
         </div>

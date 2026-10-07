@@ -11,14 +11,14 @@ const TARGETS = ["all", "claude", "codex"] as const;
 type Target = (typeof TARGETS)[number];
 
 const TARGET_ACCENT: Record<Target, string> = {
-  all: "#5b6bff",
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  all: "var(--color-blue)",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 const AGENT_ACCENT: Record<"claude" | "codex", string> = {
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 const TARGET_HINT: Record<Target, string> = {
@@ -216,12 +216,12 @@ export default function GroupComposer({
           </button>
         </div>
       )}
-      <div className="relative bg-raised border border-line-strong rounded-2xl transition-colors focus-within:border-fg/25">
+      <div className="composer-surface relative">
         {showMenu && filtered.length > 0 && (
-          <div className="absolute left-2 right-2 bottom-full mb-2 bg-surface border border-line-strong rounded-lg shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] overflow-hidden z-50">
+          <div className="absolute left-2 right-2 bottom-full mb-2 soft-popover overflow-hidden z-50">
             <div className="px-3 py-1.5 text-[10px] font-mono text-subtle uppercase tracking-[0.08em] border-b border-line flex items-center justify-between">
               <span>mention 收件人</span>
-              <span className="text-subtle/60">↑↓ · ↵ 选择 · esc 取消</span>
+              <span className="text-subtle">↑↓ · ↵ 选择 · esc 取消</span>
             </div>
             <div className="py-1">
               {filtered.map((t, i) => {
@@ -240,12 +240,12 @@ export default function GroupComposer({
                       className="w-1.5 h-1.5 rounded-full shrink-0"
                       style={{
                         background: TARGET_ACCENT[t],
-                        outline: `3px solid ${TARGET_ACCENT[t]}22`,
+                        outline: `3px solid color-mix(in srgb, ${TARGET_ACCENT[t]} 12%, transparent)`,
                       }}
                     />
                     <span className="text-subtle">@</span>
                     <span>{t}</span>
-                    <span className="ml-auto text-[10.5px] text-subtle/80 normal-case tracking-normal font-sans">
+                    <span className="ml-auto text-[10.5px] text-subtle normal-case tracking-normal font-sans">
                       {TARGET_HINT[t]}
                     </span>
                   </button>
@@ -290,7 +290,7 @@ export default function GroupComposer({
               className="w-9 h-9 rounded-full bg-red hover:brightness-110 flex items-center justify-center transition-all active:scale-95"
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <rect x="2" y="2" width="8" height="8" rx="1.5" fill="white" />
+                <rect x="2" y="2" width="8" height="8" rx="1.5" fill="var(--color-on-status)" />
               </svg>
             </button>
           ) : (
@@ -304,7 +304,7 @@ export default function GroupComposer({
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
                 <path
                   d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5"
-                  stroke="white"
+                  stroke="var(--color-on-brand)"
                   strokeWidth="1.7"
                   strokeLinecap="round"
                   strokeLinejoin="round"

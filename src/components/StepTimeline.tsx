@@ -36,10 +36,10 @@ const CheckIcon = ({
   if (status === "error") {
     return (
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-        <circle cx="7" cy="7" r="7" fill="#E05252" />
+        <circle cx="7" cy="7" r="7" fill="var(--color-red)" />
         <path
           d="M4.5 4.5L9.5 9.5M9.5 4.5L4.5 9.5"
-          stroke="#0A0D14"
+          stroke="var(--color-on-status)"
           strokeWidth="1.7"
           strokeLinecap="round"
         />
@@ -93,7 +93,7 @@ const CheckIcon = ({
       <circle cx="7" cy="7" r="7" fill="var(--color-green)" />
       <path
         d="M4 7.1L6.2 9.1L10 5.2"
-        stroke="#0A0D14"
+        stroke="var(--color-on-status)"
         strokeWidth="1.7"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -151,7 +151,7 @@ function StepDetails({
           <div className="text-[10px] font-mono text-subtle uppercase tracking-[0.08em] mb-1">
             input
           </div>
-          <pre className="bg-surface border border-line rounded-md p-2.5 overflow-x-auto font-mono text-[11.5px] leading-[1.6] text-fg">
+          <pre className="bg-surface-2 rounded-panel p-2.5 overflow-x-auto font-mono text-[11.5px] leading-[1.6] text-fg">
             {JSON.stringify(input, null, 2)}
           </pre>
         </div>
@@ -161,7 +161,7 @@ function StepDetails({
           <div className="text-[10px] font-mono text-subtle uppercase tracking-[0.08em] mb-1">
             output
           </div>
-          <pre className="bg-surface border border-line rounded-md p-2.5 overflow-auto max-h-[360px] font-mono text-[11.5px] leading-[1.6] text-muted whitespace-pre-wrap">
+          <pre className="bg-surface-2 rounded-panel p-2.5 overflow-auto max-h-[360px] font-mono text-[11.5px] leading-[1.6] text-muted whitespace-pre-wrap">
             {output}
           </pre>
         </div>
@@ -181,6 +181,7 @@ interface Props {
   // Effort level of the turn, shown on thinking rows ("· max effort").
   effort?: string;
   liveToolIds?: Set<string>;
+  liveThinkingIds?: Set<string>;
 }
 
 export default function StepTimeline({
@@ -191,6 +192,7 @@ export default function StepTimeline({
   awaitingPermission,
   effort,
   liveToolIds,
+  liveThinkingIds,
 }: Props) {
   return (
     <div
@@ -202,13 +204,14 @@ export default function StepTimeline({
       )}
       <div className="flex flex-col">
         {rows.map((row) => {
-          if (row.type === "activity") return <ThinkingRow key={row.id} tokens={0} live turnStartedAt={row.turnStartedAt} effort={effort} />;
+          if (row.type === "activity") return <ThinkingRow key={row.id} tokens={0} kind="turn" live turnStartedAt={row.turnStartedAt} effort={effort} />;
           if (row.type === "thinking") {
             return (
               <ThinkingRow
                 key={row.id}
                 tokens={row.tokens ?? 0}
                 effort={effort}
+                live={liveThinkingIds === undefined ? undefined : liveThinkingIds.has(row.id)}
               />
             );
           }
@@ -220,7 +223,7 @@ export default function StepTimeline({
                 onClick={() => onToggle(s.id)}
                 className="relative flex items-center py-[6px] gap-3 w-full text-left group hover:bg-fg/[0.02] rounded-sm transition-colors"
               >
-                <div className="relative z-10 shrink-0 bg-canvas">
+                <div className="relative z-10 shrink-0 bg-surface">
                   <CheckIcon
                     status={s.status}
                     waiting={awaitingPermission?.has(s.id) || (liveToolIds !== undefined && !liveToolIds.has(s.id))}
