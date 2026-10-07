@@ -28,7 +28,7 @@ export default function Sidebar({
 }: Props) {
   const { user, isAdmin, signOut } = useAuth();
   return (
-    <aside className="flex flex-col items-center justify-between w-14 border-r border-line py-3 shrink-0">
+    <aside className="workbench-rail flex flex-col items-center justify-between w-14 border-r border-line py-3 shrink-0">
       <div className="flex flex-col items-center gap-1">
         {/* 窄屏下这颗按钮做的是「关掉抽屉」，所以画成 ✕ 并改文案 —— 同一个图标同一个
             位置却做两件事，用户没法知道点下去会发生什么。 */}

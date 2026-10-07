@@ -41,9 +41,9 @@ function readable(palette: Record<string, string>, fg: string, bg: string, theme
   assert.ok(ratio >= minimum, `${theme}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1 (needs ${minimum}:1)`);
 }
 
-assert.equal(light["--color-canvas"], "#eef2f8");
-assert.equal(light["--color-surface"], "#ffffff");
-assert.equal(light["--color-blue"], "#2b49ce");
+assert.equal(light["--color-canvas"], "#eaf0f4");
+assert.equal(light["--color-surface"], "#fbfdfe");
+assert.equal(light["--color-blue"], "#1663bf");
 assert.notEqual(dark["--color-on-brand"], light["--color-on-brand"]);
 for (const [theme, palette] of [["light", light], ["dark", dark]] as const) {
   for (const fg of ["--color-fg", "--color-muted", "--color-subtle"]) {
@@ -61,4 +61,4 @@ for (const [theme, palette] of [["light", light], ["dark", dark]] as const) {
     }
   }
 }
-console.log("Soft-card themes: text, controls and editor syntax have readable contrast");
+console.log("Workbench themes: text, controls and editor syntax have readable contrast");
