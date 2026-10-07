@@ -68,6 +68,24 @@ export function applySDKMessage(
 
   if (!msg || typeof msg !== "object") return events;
 
+  if (msg.type === "turn_user" && msg.provider === "codex" &&
+      typeof msg.prompt === "string" && Number.isFinite(msg.startedAt)) {
+    // Replace the current-turn suffix, then let the buffer replay rebuild it.
+    // Native rollout IDs/timestamps differ from exec's item_N IDs. Keeping
+    // that suffix would duplicate history on attach. Never match by prose:
+    // two consecutive requests can legitimately contain the same words.
+    const id = `u-codex-${msg.startedAt}`;
+    const start = events.findIndex(e => e.type === "user" && (
+      e.id === id || (msg.clientTurnId && e.id === `u-${msg.clientTurnId}`) ||
+      e.id.startsWith("u-codex-") && Number(e.id.slice(8)) >= msg.startedAt
+    ));
+    const user: ChatEvent = {
+      id, type: "user", text: msg.prompt,
+      images: Array.isArray(msg.images) && msg.images.length ? msg.images : undefined,
+    };
+    return [...events.slice(0, start >= 0 ? start : events.length), user];
+  }
+
   if (msg.type === "thread.started" && msg.thread_id) {
     onSession(msg.thread_id);
     return events;
@@ -395,25 +413,35 @@ export function applySDKMessage(
 }
 
 function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEvent[] {
+  // exec restarts item_N numbering on every turn, including resumed threads.
+  // Scope IDs to the user boundary or later replies overwrite earlier turns.
+  const userIndex = findLastEventIndex(events, "user");
+  const itemId = userIndex >= 0 ? `${events[userIndex].id}-${item.id}` : item.id;
+  // A tool or answer starting is a phase boundary, even when that answer has
+  // no text yet. Do not keep an earlier reasoning item animated indefinitely.
+  if (phase === "item.started" && item.type !== "reasoning") {
+    events = events.map((ev, i) => i > userIndex && ev.type === "thinking" && ev.status === "pending"
+      ? { ...ev, status: "ok" } : ev);
+  }
   const status = item.error || item.result?.isError === true || item.result?.is_error === true
     ? "error" : codexStatus(item.status ?? (phase === "item.completed" ? "completed" : "in_progress"));
   switch (item.type) {
     case "agent_message":
       return upsertTextEvent(events, {
-        id: `a-codex-${item.id}`,
+        id: `a-codex-${itemId}`,
         type: "assistant",
         text: item.text ?? "",
       });
     case "reasoning":
       return upsertTextEvent(events, {
-        id: `t-codex-${item.id}`,
+        id: `t-codex-${itemId}`,
         type: "thinking",
         text: item.text ?? "",
         status: phase === "item.completed" ? "ok" : "pending",
       });
     case "command_execution":
       return upsertStepEvent(events, {
-        id: `s-codex-${item.id}`,
+        id: `s-codex-${itemId}`,
         type: "step",
         tool: "CodexShell",
         arg: truncate(item.command, 96),
@@ -423,7 +451,7 @@ function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEven
       });
     case "file_change":
       return upsertStepEvent(events, {
-        id: `s-codex-${item.id}`,
+        id: `s-codex-${itemId}`,
         type: "step",
         tool: "ApplyPatch",
         arg: `${(item.changes ?? []).length} files`,
@@ -435,7 +463,7 @@ function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEven
       const rawTool = `${item.server ?? "mcp"}.${item.tool ?? "tool"}`;
       const toolName = normalizeToolName(rawTool);
       return upsertStepEvent(events, {
-        id: `s-codex-${item.id}`,
+        id: `s-codex-${itemId}`,
         type: "step",
         tool: toolName,
         arg: summarize(toolName, item.arguments),
@@ -449,7 +477,7 @@ function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEven
     }
     case "web_search":
       return upsertStepEvent(events, {
-        id: `s-codex-${item.id}`,
+        id: `s-codex-${itemId}`,
         type: "step",
         tool: "WebSearch",
         arg: item.query,
@@ -459,14 +487,14 @@ function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEven
     case "collab_tool_call":
     case "collab_agent_tool_call":
       return upsertStepEvent(events, {
-        id: `s-codex-${item.id}`, type: "step", tool: "Agent",
+        id: `s-codex-${itemId}`, type: "step", tool: "Agent",
         arg: item.tool ?? "agent collaboration", status,
         input: { tool: item.tool, agents: item.receiver_thread_ids ?? [] },
         output: stringifyToolResult(item.agents_states ?? item.result),
       });
     case "todo_list":
       return upsertStepEvent(events, {
-        id: `s-codex-${item.id}`,
+        id: `s-codex-${itemId}`,
         type: "step",
         tool: "TodoWrite",
         arg: `${(item.items ?? []).length} items`,
@@ -477,7 +505,7 @@ function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEven
       return [
         ...events,
         {
-          id: `e-codex-${item.id ?? Date.now()}`,
+          id: `e-codex-${itemId ?? Date.now()}`,
           type: "assistant",
           text: `[错误] ${item.message ?? "Codex error"}`,
         },
@@ -498,7 +526,9 @@ function upsertTextEvent(
   next: Extract<ChatEvent, { type: "assistant" | "thinking" }>
 ): ChatEvent[] {
   const idx = events.findIndex((e) => e.id === next.id);
-  if (idx < 0) return next.text ? [...events, next] : events;
+  // An empty pending reasoning item is still a real phase signal; hiding it
+  // here would incorrectly replace the user's thinking animation with liveness.
+  if (idx < 0) return next.text || next.type === "thinking" && next.status === "pending" ? [...events, next] : events;
   return [...events.slice(0, idx), next, ...events.slice(idx + 1)];
 }
 

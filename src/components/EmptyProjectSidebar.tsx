@@ -4,9 +4,9 @@ interface Props {
 
 export default function EmptyProjectSidebar({ onOpenProject }: Props) {
   return (
-    <aside className="w-[260px] shrink-0 border-r border-line flex flex-col bg-canvas">
+    <aside className="w-[260px] shrink-0 flex flex-col bg-surface">
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
-        <div className="w-10 h-10 rounded-xl bg-surface border border-line flex items-center justify-center mb-4">
+        <div className="w-10 h-10 rounded-panel bg-wash text-blue flex items-center justify-center mb-4">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path
               d="M2 5V13C2 13.55 2.45 14 3 14H15C15.55 14 16 13.55 16 13V6.5C16 5.95 15.55 5.5 15 5.5H9L7 4H3C2.45 4 2 4.45 2 5Z"
@@ -26,7 +26,7 @@ export default function EmptyProjectSidebar({ onOpenProject }: Props) {
         </p>
         <button
           onClick={onOpenProject}
-          className="h-8 px-3.5 rounded-md bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+          className="soft-button h-8 px-3.5 text-[12.5px] flex items-center gap-2"
         >
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
             <path

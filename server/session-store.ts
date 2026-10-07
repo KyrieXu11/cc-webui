@@ -84,6 +84,26 @@ function compactText(value: unknown): string {
   return "";
 }
 
+// Preserve newlines until AFTER unwrapping the runtime envelope. Compacting
+// first destroys its delimiters and leaks the memory index into user bubbles.
+function contentText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(contentText).filter(Boolean).join("\n");
+  if (value && typeof value === "object") {
+    const block = value as Record<string, unknown>;
+    return contentText(block.text ?? block.output_text ?? block.content ?? block.message);
+  }
+  return "";
+}
+
+function userPrompt(value: unknown): string {
+  const text = unwrapMemoryPrompt(contentText(value));
+  const marker = "\n\nUSER REQUEST:\n";
+  const boundary = text.indexOf(marker);
+  return text.startsWith("WEBUI RUNTIME:") && boundary >= 0
+    ? text.slice(boundary + marker.length) : text;
+}
+
 function timestampMs(raw: unknown): number | null {
   if (typeof raw !== "string") return null;
   const value = Date.parse(raw);
@@ -165,7 +185,9 @@ async function parseNativeCodexSummary(
       if (typeof payload.cwd === "string") cwd = payload.cwd;
     } else if (record.type === "event_msg") {
       if (payload.type === "user_message" && !firstPrompt) {
-        firstPrompt = unwrapMemoryPrompt(compactText(payload.message));
+        firstPrompt = userPrompt(payload.message);
+      } else if (payload.type === "item_completed" && payload.item?.type === "UserMessage" && !firstPrompt) {
+        firstPrompt = userPrompt(payload.item.content);
       } else if (
         payload.type === "thread_name_updated" &&
         typeof payload.thread_name === "string"
@@ -177,7 +199,11 @@ async function parseNativeCodexSummary(
       payload.role === "user" &&
       !fallbackPrompt
     ) {
-      fallbackPrompt = unwrapMemoryPrompt(compactText(payload.content));
+      const text = contentText(payload.content);
+      // CLI-injected context also has role=user, but is not a user request.
+      if (!text.startsWith("<environment_context>") && !text.startsWith("# AGENTS.md instructions")) {
+        fallbackPrompt = userPrompt(payload.content);
+      }
     }
   }
 
@@ -243,6 +269,32 @@ function ensureNativeTurn(
   return next;
 }
 
+// Current rollouts use event_msg/item_completed with PascalCase items rather
+// than user_message/agent_message/exec_command_end. Convert only public chat
+// and tool data; never surface Reasoning.raw_content from the native store.
+function nativeCompletedItem(item: any): Record<string, unknown> | null {
+  const base = { id: item.id, status: item.status };
+  switch (item.type) {
+    case "AgentMessage":
+      return { ...base, type: "agent_message", text: contentText(item.content) };
+    case "CommandExecution":
+      return { ...base, type: "command_execution", command: commandText(item.command),
+        aggregated_output: truncateTranscriptText(item.aggregated_output ?? item.stdout ?? item.stderr ?? "") };
+    case "FileChange":
+      return { ...base, type: "file_change", changes: Object.entries(item.changes ?? {}).map(([file, change]) => ({
+        file, ...(change && typeof change === "object" ? change : {}),
+      })) };
+    case "McpToolCall":
+      return { ...base, type: "mcp_tool_call", server: item.server, tool: item.tool,
+        arguments: item.arguments, result: item.result?.Ok ?? item.result,
+        error: item.result?.Err };
+    case "WebSearch":
+      return { ...base, type: "web_search", query: item.query };
+    default:
+      return null;
+  }
+}
+
 async function readNativeCodexTurns(
   filePath: string
 ): Promise<CodexStoredTurn[]> {
@@ -275,11 +327,12 @@ async function readNativeCodexTurns(
     const payload = record.payload;
     const startedAt = timestampMs(record.timestamp) ?? Date.now();
 
-    if (payload.type === "user_message") {
+    const modernItem = payload.type === "item_completed" ? payload.item : undefined;
+    if (payload.type === "user_message" || modernItem?.type === "UserMessage") {
       pushCurrent();
       current = {
         provider: "codex",
-        prompt: unwrapMemoryPrompt(compactText(payload.message)),
+        prompt: userPrompt(modernItem?.content ?? payload.message),
         startedAt,
         events: [],
       };
@@ -290,8 +343,14 @@ async function readNativeCodexTurns(
     const turn = ensureNativeTurn(turns, current, startedAt);
     current = turn;
 
+    if (modernItem) {
+      const item = nativeCompletedItem(modernItem);
+      if (item) turn.events.push({ type: "item.completed", item });
+      continue;
+    }
+
     if (payload.type === "agent_message") {
-      const text = compactText(payload.message);
+      const text = contentText(payload.message);
       if (!text || text === lastAgentText) continue;
       lastAgentText = text;
       turn.events.push({

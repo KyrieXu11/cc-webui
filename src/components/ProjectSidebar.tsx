@@ -147,7 +147,7 @@ export default function ProjectSidebar({
   };
 
   return (
-    <aside className="w-[260px] shrink-0 border-r border-line flex flex-col bg-canvas">
+    <aside className="w-[260px] shrink-0 flex flex-col bg-surface">
       <div className="px-4 pt-4 pb-3 border-b border-line">
         <div className="min-w-0 mb-3">
           <div className="text-fg text-[14px] font-semibold truncate">
@@ -159,7 +159,7 @@ export default function ProjectSidebar({
         </div>
         <button
           onClick={onNewChat}
-          className="w-full h-9 rounded-md bg-raised border border-line-strong text-[12.5px] text-fg hover:border-fg/25 hover:bg-fg/5 transition-colors flex items-center justify-center gap-2"
+          className="soft-button w-full h-9 text-[12.5px] flex items-center justify-center gap-2"
         >
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
             <path
@@ -180,7 +180,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto py-2 px-2">
         {loading ? (
           <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
         ) : sessions.length === 0 ? (
@@ -203,10 +203,11 @@ export default function ProjectSidebar({
                         ? `已共享给 ${s.sharedCount} 人`
                         : undefined
                   }
-                  className={`group w-full text-left px-3.5 py-2 flex items-center gap-2 transition-colors min-w-0 ${
+                  aria-current={active ? "true" : undefined}
+                  className={`conversation-row group w-full text-left px-2.5 py-2.5 my-0.5 flex items-center gap-2 transition-colors min-w-0 ${
                     active
-                      ? "bg-surface text-fg"
-                      : "text-muted hover:text-fg hover:bg-fg/[0.02]"
+                      ? "text-fg"
+                      : "text-muted hover:text-fg"
                   }`}
                 >
                   <div
@@ -313,4 +314,3 @@ export default function ProjectSidebar({
     </aside>
   );
 }
-

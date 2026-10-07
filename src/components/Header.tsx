@@ -28,8 +28,8 @@ interface Props {
 }
 
 const PROVIDER_ACCENT: Record<AgentProvider, string> = {
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 export default function Header({
@@ -82,7 +82,7 @@ export default function Header({
   return (
     <header
       ref={bar}
-      className={`flex items-center gap-4 max-md:gap-2 h-14 pl-5 max-md:pl-1 border-b border-line shrink-0 ${
+      className={`flex items-center gap-4 max-md:gap-2 h-14 pl-5 max-md:pl-1 shrink-0 ${
         reserveRight ? "pr-[52px]" : "pr-5 max-md:pr-2"
       }`}
     >
@@ -171,7 +171,7 @@ export default function Header({
             className="w-1.5 h-1.5 rounded-full"
             style={{
               background: accent,
-              outline: `3px solid ${accent}22`,
+              outline: `3px solid color-mix(in srgb, ${accent} 12%, transparent)`,
               outlineOffset: 0,
             }}
           />

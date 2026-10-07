@@ -53,7 +53,8 @@ const {
   resolveMemoryScope
 } = await import("./project-memory/scope.ts");
 const {
-  saveMemory
+  saveMemory,
+  listMemory
 } = await import("./project-memory/store.ts");
 const {
   memoryPrompt
@@ -87,7 +88,7 @@ try {
     sessionId: ""
   });
   const app = createApp();
-  const send = async (provider: "claude" | "codex") => {
+  const send = async (provider: "claude" | "codex", permissionMode = "auto") => {
     const res = await app.request(provider === "claude" ? "/api/chat" : "/api/codex/chat", {
       method: "POST",
       headers: {
@@ -98,7 +99,7 @@ try {
         cwd: tmp,
         prompt: "hello",
         clientTurnId: randomUUID(),
-        permissionMode: "auto"
+        permissionMode
       })
     });
     assert.equal(res.status, 200);
@@ -130,12 +131,37 @@ try {
   assert.ok(codex.args.some((s: string) => s.startsWith("mcp_servers.memory.url=")));
   assert.ok(!codex.args.some((s: string) => s.includes("Bearer ")), "Codex capability stays in env, not argv");
   assert.ok(codex.prompt.includes(memoryPrompt(true)), "same business rules for both providers");
+  const expected = await fs.readFile(new URL("./project-memory/fixtures/prompt-v2-writable.txt", import.meta.url), "utf8");
+  assert.ok(claude.args.some((a: string) => a.endsWith(expected)), "Claude receives the reviewed writable fixture in its system append");
+  assert.ok(codex.prompt.includes(expected), "Codex receives the same reviewed writable fixture");
+
+  // Next turns must reload the current metadata, not reuse the first snapshot.
+  const old = (await listMemory(scope)).entries[0];
+  await saveMemory(scope, {
+    operation_id: "refresh-index", id: old.id, expected_revision: old.revision,
+    name: old.name, description: "INDEX_REFRESH_SENTINEL", type: "project",
+    body: "BODY_SENTINEL_DO_NOT_AUTO_INJECT"
+  }, { provider: "codex", sessionId: "" });
+  await send("claude", "plan");
+  await send("codex", "plan");
+  const plans = (await fs.readFile(capture, "utf8")).trim().split("\n").map(s => JSON.parse(s)).slice(-2);
+  const readonly = await fs.readFile(new URL("./project-memory/fixtures/prompt-v2-readonly.txt", import.meta.url), "utf8");
+  for (const r of plans) {
+    assert.match(r.prompt, /INDEX_REFRESH_SENTINEL/);
+    assert.doesNotMatch(r.prompt, /BODY_SENTINEL_DO_NOT_AUTO_INJECT/);
+    assert.ok(r.codex ? r.prompt.includes(readonly) : r.args.some((a: string) => a.endsWith(readonly)), "both providers receive the same read-only fixture");
+  }
   process.env.CC_WEBUI_PROJECT_MEMORY_ENABLED = "false";
   await send("claude");
   const last = JSON.parse((await fs.readFile(capture, "utf8")).trim().split("\n").at(-1)!);
   assert.equal(last.prompt, "hello");
   assert.equal(last.nativeDisabled, undefined);
   assert.doesNotMatch(last.args[last.args.indexOf("--mcp-config") + 1], /"memory"/);
+  await send("codex");
+  const offCodex = JSON.parse((await fs.readFile(capture, "utf8")).trim().split("\n").at(-1)!);
+  assert.doesNotMatch(offCodex.prompt, /project-memory-v2|project-memory-snapshot/);
+  assert.ok(!offCodex.args.includes("features.memories=false"));
+  assert.ok(!offCodex.args.some((a: string) => a.startsWith("mcp_servers.memory.")), "feature-off restores native Codex behavior too");
 } finally {
   closeDb();
   await fs.rm(tmp, {

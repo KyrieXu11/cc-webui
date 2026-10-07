@@ -108,7 +108,7 @@ export default function ShareSessionDialog({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[520px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[520px] soft-dialog overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between px-5 py-4 border-b border-line gap-3">

@@ -1,0 +1,50 @@
+{
+  "version": "2.1.283",
+  "capture_date": "2026-10-03",
+  "binary_sha256": "d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e",
+  "network": "macOS sandbox allows localhost outbound only; fake API and dummy key",
+  "scope": "isolated HOME/config/workspace; normal print-mode file-memory branch",
+  "normalization": "Only the synthetic memory directory is replaced with <MEMORY_DIR>; other prompt wording is unchanged",
+  "cases": [
+    {
+      "case": "claude-sonnet-4-6-new",
+      "file": "claude-sonnet-4-6-new.txt",
+      "index_file": "claude-sonnet-4-6-new-index.txt",
+      "raw_prompt_js_units": 12876,
+      "normalized_sha256": "4957f275927321d9e8222c0e11956195b9c6c6d409a8e614d9a577a994e3440c",
+      "only_index_auto_injected": true
+    },
+    {
+      "case": "claude-sonnet-4-6-resume",
+      "file": "claude-sonnet-4-6-resume.txt",
+      "index_file": "claude-sonnet-4-6-resume-index.txt",
+      "raw_prompt_js_units": 12876,
+      "normalized_sha256": "4957f275927321d9e8222c0e11956195b9c6c6d409a8e614d9a577a994e3440c",
+      "only_index_auto_injected": true
+    },
+    {
+      "case": "claude-sonnet-4-6-disabled",
+      "native_memory_disabled": true
+    },
+    {
+      "case": "claude-opus-5-5-new",
+      "file": "claude-opus-5-5-new.txt",
+      "index_file": "claude-opus-5-5-new-index.txt",
+      "raw_prompt_js_units": 2130,
+      "normalized_sha256": "da16cd4e33fa37d424f0410cdababa8fd95177b1f6bd2ae5decd20be367df0a4",
+      "only_index_auto_injected": true
+    },
+    {
+      "case": "claude-opus-5-5-resume",
+      "file": "claude-opus-5-5-resume.txt",
+      "index_file": "claude-opus-5-5-resume-index.txt",
+      "raw_prompt_js_units": 2130,
+      "normalized_sha256": "da16cd4e33fa37d424f0410cdababa8fd95177b1f6bd2ae5decd20be367df0a4",
+      "only_index_auto_injected": true
+    },
+    {
+      "case": "claude-opus-5-5-disabled",
+      "native_memory_disabled": true
+    }
+  ]
+}

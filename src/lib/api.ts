@@ -150,6 +150,7 @@ export function connectAttach(
     // 这一轮实际用的 effort（server/chat.ts 在 buffer 第一条发）。看别人正在跑的
     // 一轮时，状态行只能靠它，不能读自己的设置。
     "turn_meta",
+    "turn_user",
   ]) {
     es.addEventListener(t, forward);
   }

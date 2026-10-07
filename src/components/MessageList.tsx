@@ -7,7 +7,7 @@ import SummaryCard from "./SummaryCard";
 import ThinkingBlock from "./ThinkingBlock";
 import PendingHint from "./PendingHint";
 import RetryHint from "./RetryHint";
-import { liveToolIds, showCodexActivity } from "../lib/turn-activity";
+import { liveThinkingIds, liveToolIds, showCodexActivity } from "../lib/turn-activity";
 
 export type RetryInfo = {
   attempt: number;
@@ -28,9 +28,9 @@ type Block =
 // would split the surrounding timeline in two, leaving a blank gap and a broken
 // connector line. Empty thinking is the common case — the Claude 5 family sends
 // thinking with no plaintext at all (see ThinkingRow).
-function rendersNothing(ev: ChatEvent): boolean {
+function rendersNothing(ev: ChatEvent, activeThinking?: Set<string>): boolean {
   if (ev.type === "assistant") return !ev.text.trim();
-  if (ev.type === "thinking") return !ev.text.trim() && !(ev.tokens ?? 0);
+  if (ev.type === "thinking") return !ev.text.trim() && !(ev.tokens ?? 0) && !activeThinking?.has(ev.id);
   return false;
 }
 
@@ -81,12 +81,14 @@ export default function MessageList({
   isRunning,
   turnStartedAt,
 }: Props) {
+  const codex = provider === "codex";
+  const activeThinking = codex ? liveThinkingIds(events, !!isRunning && !retryInfo) : undefined;
   const blocks: Block[] = [];
   // Step ids that still have an unresolved permission card: those steps are
   // "awaiting approval", not actually executing yet.
   const awaitingPermission = new Set<string>();
   for (const ev of events) {
-    if (rendersNothing(ev)) continue;
+    if (rendersNothing(ev, activeThinking)) continue;
     if (ev.type === "step" || isThinkingStatus(ev)) {
       const last = blocks[blocks.length - 1];
       if (last && last.kind === "timeline") last.rows.push(ev);
@@ -103,7 +105,6 @@ export default function MessageList({
     }
   }
 
-  const codex = provider === "codex";
   const activeTools = codex ? liveToolIds(events, !!isRunning) : undefined;
   if (codex && !retryInfo && showCodexActivity(events, !!isRunning)) {
     const row: TimelineRow = { id: "live-codex-activity", type: "activity", turnStartedAt };
@@ -126,6 +127,7 @@ export default function MessageList({
               awaitingPermission={awaitingPermission}
               effort={effort}
               liveToolIds={activeTools}
+              liveThinkingIds={activeThinking}
             />
           );
         }
@@ -149,7 +151,7 @@ export default function MessageList({
                 key={ev.id}
                 text={ev.text}
                 expanded={expandedSteps.has(ev.id)}
-                live={codex ? !!isRunning && ev.status === "pending" : undefined}
+                live={activeThinking === undefined ? undefined : activeThinking.has(ev.id)}
                 onToggle={() => onToggleStep(ev.id)}
               />
             );

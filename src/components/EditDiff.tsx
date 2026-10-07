@@ -215,7 +215,7 @@ export default function EditDiff({ tool, input }: Props) {
                 ? "text-green"
                 : l.kind === "del"
                   ? "text-red"
-                  : "text-subtle/60";
+                  : "text-subtle";
             const textColor =
               l.kind === "add"
                 ? "text-fg"
@@ -226,7 +226,7 @@ export default function EditDiff({ tool, input }: Props) {
             return (
               <div key={i} className={`flex ${bg}`}>
                 <span
-                  className="select-none text-subtle/60 text-right pr-2 pl-2 shrink-0 tabular-nums"
+                  className="select-none text-subtle text-right pr-2 pl-2 shrink-0 tabular-nums"
                   style={{ minWidth: `${gutterWidth + 2}ch` }}
                 >
                   {lineNo}

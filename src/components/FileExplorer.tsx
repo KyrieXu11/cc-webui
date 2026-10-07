@@ -314,8 +314,8 @@ export default function FileExplorer({
     <aside
       className={
         embedded
-          ? "h-full min-h-0 flex flex-col bg-canvas"
-          : "w-[280px] shrink-0 border-l border-line flex flex-col bg-canvas"
+          ? "h-full min-h-0 flex flex-col bg-surface"
+          : "w-[280px] shrink-0 border-l border-line flex flex-col bg-surface"
       }
     >
       {/* ⚠️ h-14 是**和主栏顶栏同一个高度**：不等高的话两条下边框错开一截，
@@ -487,7 +487,7 @@ export default function FileExplorer({
 
       {confirming && (
         <div className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-6">
-          <div className="bg-canvas border border-line rounded-lg shadow-2xl max-w-[440px] w-full p-4 space-y-3">
+          <div className="soft-dialog max-w-[440px] w-full p-4 space-y-3">
             <div className="text-[14px] text-fg font-semibold">
               删除 {picked.size} {pickedHasDir ? "项" : "个文件"}？
             </div>
@@ -705,12 +705,10 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
           clearDwell();
           dropInto(entry.path, readDraggedFiles(e.dataTransfer));
         }}
-        className={`group w-full flex items-center gap-1.5 py-1 pr-1.5 transition-colors rounded-sm ${
-          over
-            ? "text-fg bg-blue/25 ring-1 ring-blue/60"
-            : checked || isTarget
-              ? "text-fg bg-blue/10"
-              : "text-muted hover:text-fg hover:bg-fg/[0.025]"
+        data-active={checked || isTarget}
+        data-drop-over={over}
+        className={`navigation-row group w-full flex items-center gap-1.5 py-1 pr-1.5 transition-colors ${
+          over ? "ring-1 ring-blue/60" : ""
         }`}
         style={{ paddingLeft: 8 + depth * 12 }}
         // 右键＝进多选并选中这个文件夹，和文件同一个手势。原来这里只吞掉右键，
@@ -794,9 +792,8 @@ function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
       onDragEnd={() => {
         dragging = [];
       }}
-      className={`group w-full flex items-center gap-1.5 py-1 pr-1.5 rounded-sm transition-colors ${
-        checked ? "bg-blue/10" : "hover:bg-fg/[0.025]"
-      }`}
+      data-active={checked}
+      className="navigation-row group w-full flex items-center gap-1.5 py-1 pr-1.5 transition-colors"
       style={{ paddingLeft: 8 + depth * 12 }}
       // 右键＝进多选并选中这一行；已在多选态里再右键就是加选/取消。
       onContextMenu={(e) => {
@@ -834,7 +831,7 @@ function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
                 ? preview(entry.path)
                 : openInDock({ path: entry.path, name: entry.name })
             }
-            className="flex-1 min-w-0 flex items-center gap-1.5 text-left text-muted hover:text-fg transition-colors"
+            className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
             title={`${entry.path}\n（单击：在右侧打开 · ⌘/Ctrl+单击：浮窗速览 · 右键：多选 · 可拖到文件夹或对话框）`}
           >
             <FileIcon />

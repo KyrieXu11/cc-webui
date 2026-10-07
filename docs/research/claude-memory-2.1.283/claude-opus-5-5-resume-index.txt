@@ -1,0 +1,9 @@
+<system-reminder>
+Instruction files were re-read when this session started; these differ from their earlier copies — each replaces its earlier copy, and the instructions preamble above still applies:
+
+Contents of <MEMORY_DIR>/MEMORY.md (user's auto-memory, persists across conversations):
+
+# Probe memory index
+- [Synthetic probe preference](user-probe.md) — PROBE_INDEX_v2
+</system-reminder>
+

@@ -29,7 +29,7 @@ export default function ModelSelector({
       align={align}
       direction={direction}
       width={240}
-      triggerClassName="inline-flex items-center focus:outline-none rounded px-1.5 py-0.5 hover:bg-fg/5 transition-colors group"
+      triggerClassName="inline-flex items-center rounded-control px-1.5 py-0.5 hover:bg-raised transition-colors group"
       trigger={
         <span className="font-mono text-[11px] text-subtle group-hover:text-fg transition-colors flex items-center gap-1">
           {modelLabel(value)}
@@ -43,7 +43,7 @@ export default function ModelSelector({
             <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-subtle">
               {providerLabel(provider)}
             </span>
-            <span className="text-[10.5px] text-subtle/70">
+            <span className="text-[10.5px] text-subtle">
               当前会话仅支持本 provider 的模型
             </span>
           </div>
@@ -59,7 +59,7 @@ export default function ModelSelector({
             return (
               <Fragment key={m.id}>
                 {firstPinned && (
-                  <div className="mx-2.5 mt-1 mb-0.5 pt-2 border-t border-line text-[10.5px] text-subtle/70">
+                  <div className="mx-2.5 mt-1 mb-0.5 pt-2 border-t border-line text-[10.5px] text-subtle">
                     固定版本
                   </div>
                 )}

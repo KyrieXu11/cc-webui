@@ -16,8 +16,8 @@ import { tildify, getHome } from "../../lib/fs";
 import type { GroupConfig, GroupParticipant } from "../../lib/types";
 
 const AGENT_ACCENT: Record<"claude" | "codex", string> = {
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 const defaultParticipant = (id: "claude" | "codex"): GroupParticipant => {
@@ -133,7 +133,7 @@ export default function GroupConfigDialog({ mode, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[640px] bg-surface border border-line-strong rounded-xl overflow-hidden shadow-[0_28px_80px_-20px_rgba(0,0,0,0.85)]"
+        className="w-full max-w-[640px] soft-dialog overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
@@ -206,7 +206,7 @@ export default function GroupConfigDialog({ mode, onClose }: Props) {
                       height="12"
                       viewBox="0 0 14 14"
                       fill="none"
-                      className="text-subtle/60 shrink-0"
+                      className="text-subtle shrink-0"
                     >
                       <rect
                         x="3"
@@ -286,12 +286,12 @@ export default function GroupConfigDialog({ mode, onClose }: Props) {
                   key={i}
                   className="inline-flex items-center gap-1.5 font-mono text-[12px]"
                 >
-                  {i > 0 && <span className="text-subtle/60 mx-1">→</span>}
+                  {i > 0 && <span className="text-subtle mx-1">→</span>}
                   <span
                     className="w-1.5 h-1.5 rounded-full"
                     style={{
                       background: AGENT_ACCENT[id],
-                      outline: `3px solid ${AGENT_ACCENT[id]}22`,
+                      outline: `3px solid color-mix(in srgb, ${AGENT_ACCENT[id]} 12%, transparent)`,
                     }}
                   />
                   <span className="text-fg">{id}</span>
@@ -351,7 +351,7 @@ export default function GroupConfigDialog({ mode, onClose }: Props) {
             onClick={submit}
             disabled={busy}
             type="button"
-            className="h-8 px-4 rounded-md bg-blue hover:bg-blue-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12.5px] font-medium tracking-tight transition-colors flex items-center gap-1.5"
+            className="h-8 px-4 rounded-md bg-blue hover:bg-blue-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-brand text-[12.5px] font-medium tracking-tight transition-colors flex items-center gap-1.5"
           >
             {busy ? (
               <>
@@ -426,7 +426,7 @@ function ParticipantCard({
           className="w-1.5 h-1.5 rounded-full"
           style={{
             background: accent,
-            outline: `3px solid ${accent}22`,
+            outline: `3px solid color-mix(in srgb, ${accent} 12%, transparent)`,
           }}
         />
         <span
@@ -435,7 +435,7 @@ function ParticipantCard({
         >
           {agent}
         </span>
-        <span className="font-mono text-[10.5px] text-subtle/80 truncate">
+        <span className="font-mono text-[10.5px] text-subtle truncate">
           {value.model}
         </span>
       </div>

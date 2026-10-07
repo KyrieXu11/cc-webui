@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { pickThinkingWord } from "../lib/thinking-words";
+import { activityLabel, formatActivityElapsed } from "../lib/turn-activity";
 
 // Encrypted-thinking status row — the equivalent of Claude Code's
 //   ✻ Tinkering… (49s · ↓ 2.0k tokens · thinking with max effort)
@@ -19,24 +20,20 @@ function formatTokens(n: number): string {
   return `${(n / 1000).toFixed(1)}k`;
 }
 
-function formatElapsed(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}m${s.toString().padStart(2, "0")}s`;
-}
-
 interface Props {
   tokens: number;
-  // Explicit turn liveness for Codex: no made-up tokens or thought content.
+  // Explicit liveness is separate from the meaning of the row. Codex can
+  // report a pending reasoning item without public text or token deltas.
   live?: boolean;
+  kind?: "thinking" | "turn";
   turnStartedAt?: number;
   // Shown as the trailing "· max effort", mirroring the CLI's
   // "thinking with max effort". Omitted when the caller has no effort context.
   effort?: string;
 }
 
-export default function ThinkingRow({ tokens, effort, live, turnStartedAt }: Props) {
+export default function ThinkingRow({ tokens, effort, live, kind = "thinking", turnStartedAt }: Props) {
+  const totalTurn = kind === "turn";
   const [label, setLabel] = useState(() => pickThinkingWord());
   // Deliberately starts inactive: a row replayed from history has a fixed token
   // count and must not spin. Only an actual token bump means "thinking now".
@@ -44,7 +41,7 @@ export default function ThinkingRow({ tokens, effort, live, turnStartedAt }: Pro
   const [tokenActive, setActive] = useState(false);
   const active = live ?? tokenActive;
   const [elapsed, setElapsed] = useState<number | null>(null);
-  const startedAt = useRef<number | null>(live ? turnStartedAt ?? Date.now() : null);
+  const startedAt = useRef<number | null>(totalTurn && live ? turnStartedAt ?? Date.now() : null);
 
   useEffect(() => {
     if (live !== undefined || tokens === initialTokens.current) return;
@@ -58,12 +55,12 @@ export default function ThinkingRow({ tokens, effort, live, turnStartedAt }: Pro
 
   useEffect(() => {
     if (!active) return;
-    if (live && turnStartedAt !== undefined) startedAt.current = turnStartedAt;
+    if (totalTurn && live && turnStartedAt !== undefined) startedAt.current = turnStartedAt;
     const tick = () => {
       if (startedAt.current !== null) setElapsed(Math.max(0, Math.floor((Date.now() - startedAt.current) / 1000)));
     };
     tick();
-    const verbTimer = setInterval(() => {
+    const verbTimer = totalTurn ? undefined : setInterval(() => {
       setLabel((cur) => pickThinkingWord(cur));
     }, 1800);
     const tickTimer = setInterval(tick, 1000);
@@ -71,26 +68,26 @@ export default function ThinkingRow({ tokens, effort, live, turnStartedAt }: Pro
       clearInterval(verbTimer);
       clearInterval(tickTimer);
     };
-  }, [active, live, turnStartedAt]);
+  }, [active, live, totalTurn, turnStartedAt]);
 
   const meta = [
-    // Elapsed is measured from the first token bump, so it only exists for a
-    // row we watched live — a history row shows just the token count.
-    elapsed !== null ? formatElapsed(elapsed) : null,
+    // Turn activity includes tools. Explicit Codex reasoning has no reliable
+    // start/end timestamps, so it keeps the animation but invents no duration.
+    elapsed !== null ? formatActivityElapsed(elapsed, totalTurn) : null,
     tokens > 0 ? `↓ ${formatTokens(tokens)} tokens` : null,
     active && effort ? `${effort} effort` : null,
   ].filter(Boolean);
 
   return (
     <div className="relative flex items-center py-[6px] gap-3 w-full text-left"
-      aria-label={live ? "思考中" : undefined}
-      title={live ? "当前回合仍在处理；耗时为回合等待时长，不代表已获得思考原文或 token 数" : undefined}>
-      <div className="relative z-10 shrink-0 bg-canvas">
+      aria-label={totalTurn ? "Codex 处理中" : live ? "Codex 思考中" : undefined}
+      title={totalTurn ? "当前回合仍在处理；耗时包含模型等待和工具执行，不代表连续思考时长" : live ? "收到 Codex reasoning 进行中事件；未提供可靠的独立思考时长" : undefined}>
+      <div className="relative z-10 shrink-0 bg-surface">
         <Sparkle active={active} />
       </div>
       <div className="flex items-baseline gap-2 text-[13px] min-w-0 flex-1">
         <span className="font-mono text-orange">
-          {active ? `${label}…` : "thought"}
+          {activityLabel(active, label, totalTurn)}
         </span>
         {meta.length > 0 && (
           <span className="font-mono text-[11.5px] text-subtle truncate tabular-nums">

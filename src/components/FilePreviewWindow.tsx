@@ -188,7 +188,7 @@ export default function FilePreviewWindow({
 
   return (
     <div
-      className="fixed z-40 bg-canvas border border-line rounded-lg shadow-2xl flex flex-col overflow-hidden"
+      className="fixed z-40 soft-dialog flex flex-col overflow-hidden"
       style={{
         left: position.x,
         top: position.y,
@@ -255,7 +255,7 @@ export default function FilePreviewWindow({
           两个在 iframe 里由浏览器管），外层再套一层 overflow-auto 会变成两条滚动条
           互相打架。 */}
       <div
-        className={`flex-1 min-h-0 bg-canvas ${
+        className={`flex-1 min-h-0 bg-surface ${
           kind === "text" && !(isHtml && rendered)
             ? "overflow-auto"
             : "overflow-hidden"
@@ -334,7 +334,7 @@ export default function FilePreviewWindow({
           width="14"
           height="14"
           viewBox="0 0 14 14"
-          className="text-subtle/70"
+          className="text-subtle"
         >
           <path
             d="M12 5L5 12 M12 9L9 12"

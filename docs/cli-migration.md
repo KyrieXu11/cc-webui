@@ -126,6 +126,16 @@ deny 用 `{"behavior":"deny","message":"…"}`。这正是 cc-webui 权限卡需
 `permission_request`、`permission_resolved`（`:106`、`:129`）、`wakeup_turn_started`（`:93`）。
 Codex 分支（`:63-88` 的 `thread.started` / `turn.failed` / `item.*`）本来就是原始 JSONL 直传。
 
+**2026-09-29，Codex 0.157.1 的两条漂移（本机 rollout + 已落盘 exec 帧实测）**：
+
+- `--experimental-json` 的 `item.id` 是 `item_N`，**每次 exec（包括 resume）重新编号**。
+  它不是 session 内唯一 id，前端必须按 turn/user boundary 加 scope，不能直接跨轮 upsert。
+- native rollout 不再使用 `event_msg/user_message` / `agent_message` / `exec_command_end`，
+  而是 `event_msg/item_completed`，里面的 `item.type` 为 PascalCase（`UserMessage` / `AgentMessage` /
+  `CommandExecution` / `McpToolCall` 等）。`response_item` 是另一路的重复记录且包含 CLI 注入的 user-role
+  环境上下文，不能把所有 role=user 都当用户提问。`session-store.ts` 兼容新旧格式，只取公开消息/工具，
+  不暴露 native 的 `Reasoning.raw_content`。
+
 **结论：事件映射层基本不用改。** 唯一改动是 `permission_request` / `permission_resolved` 的来源
 从 `canUseTool` 回调换成 `control_request` 帧。
 
@@ -607,6 +617,7 @@ finally 里自己管。
 ### 2026-09-29：Codex 反馈与动态模型目录已实施
 
 - 保留 `codex exec --experimental-json`，不伪造 delta 或 reasoning token。工具前后无输出的阶段用运行态 activity 行显示旋转 sparkle、回合耗时与请求的真实 effort；工具 started → spinner / 可展开参数，completed → 输出 / 绿勾（isError 则红色）。历史 reasoning 摘要不自动冒充 live 思考。
+- 2026-10-02 UI 语义修正：用户要求保留原思考动态文案。显式 pending reasoning item 用原 `Decoding` 等效果（空正文也不能丢掉这个阶段信号），工具/回答 started 则结束该阶段；只有阶段未知时用「处理中」。「回合已用」是累计耗时，不作为 reasoning 时长；不推断无工具执行就一定在思考。
 - 单聊第一帧新增控制 `turn_meta { effort, startedAt, provider: "codex" }`，POST / attach 共享 buffer；不进原生历史内容。群聊共用 MessageList 的同款临时状态，未收到首个事件时也能显示。
 - 决策 #9 的模型目录路径已完成：`server/codex-models.ts` 读受大小约束的 CLI 缓存，/api/meta 每次单独刷新模型（不受 slashCommands 60s 缓存影响）；浏览器初始化后再应用账号默认值。管理员 API 从同一目录校验 model + effort。
 - 本机缓存（client_version 0.158.0）已列 GPT-6 Astra / Sol / Luna；CLI 实际二进制为 0.157.1，支持 ultra 配置解析。模型展示及 tiers 以缓存为准，未宣称逐模型/逐档位均已做真实请求验收；用户要求先发布自测。59 项测试及 typecheck/build 通过。

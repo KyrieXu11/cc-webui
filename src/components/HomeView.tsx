@@ -251,9 +251,9 @@ export default function HomeView({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[820px] mx-auto px-10 py-20 max-md:px-5 max-md:pt-10 max-md:pb-8">
+      <div className="max-w-[960px] mx-auto px-10 py-12 max-md:px-5 max-md:pt-8 max-md:pb-8">
         <Wordmark />
-        <div className="flex items-center gap-2 text-[13px] text-muted mb-14 max-md:mb-8 mt-1">
+        <div className="flex items-center gap-2 text-[13px] text-muted mb-10 max-md:mb-8 mt-2">
           <div className="w-1.5 h-1.5 rounded-full bg-green" />
           <span className="font-mono">{address}</span>
         </div>
@@ -271,13 +271,13 @@ export default function HomeView({
               </div>
               <button
                 onClick={onCreateGroup}
-                className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+                className="h-9 px-3.5 soft-button text-[12.5px] flex items-center gap-2"
               >
                 <PlusIcon />
                 新建群聊
               </button>
             </div>
-            <div className="border-t border-line">
+            <div className="soft-panel px-4 py-1">
               {visibleChatGroups.map((g) => (
                   <div
                     key={g.id}
@@ -291,16 +291,16 @@ export default function HomeView({
                         <span
                           className="w-1.5 h-1.5 rounded-full"
                           style={{
-                            background: "#ef9d5a",
-                            outline: "3px solid #ef9d5a22",
+                            background: "var(--color-provider-claude)",
+                            outline: "3px solid color-mix(in srgb, var(--color-provider-claude) 12%, transparent)",
                           }}
                         />
                         <span className="text-subtle/40 text-[10px]">×</span>
                         <span
                           className="w-1.5 h-1.5 rounded-full"
                           style={{
-                            background: "#3ecf8e",
-                            outline: "3px solid #3ecf8e22",
+                            background: "var(--color-provider-codex)",
+                            outline: "3px solid color-mix(in srgb, var(--color-provider-codex) 12%, transparent)",
                           }}
                         />
                         {g.inFlight && (
@@ -315,7 +315,7 @@ export default function HomeView({
                           <span className="text-[13.5px] text-fg font-medium tracking-tight truncate">
                             {g.title}
                           </span>
-                          <span className="font-mono text-[10.5px] text-subtle/70 shrink-0">
+                          <span className="font-mono text-[10.5px] text-subtle shrink-0">
                             {tildify(g.cwd, home)}
                           </span>
                         </div>
@@ -368,7 +368,7 @@ export default function HomeView({
             {groupsEnabled && chatGroups.length === 0 && (
               <button
                 onClick={onCreateGroup}
-                className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+                className="h-9 px-3.5 soft-button text-[12.5px] flex items-center gap-2"
               >
                 <PlusIcon />
                 新建群聊
@@ -376,7 +376,7 @@ export default function HomeView({
             )}
             <button
               onClick={onClickOpen}
-              className="h-9 px-3.5 rounded-lg bg-surface border border-line-strong text-[12.5px] text-fg hover:bg-raised hover:border-fg/25 transition-colors flex items-center gap-2"
+              className="h-9 px-3.5 soft-button text-[12.5px] flex items-center gap-2"
             >
               <FolderIcon />
               打开项目
@@ -391,7 +391,7 @@ export default function HomeView({
             <span className="text-muted">
               匹配 {groups.length} 个项目 · {matchedSessions} 个对话
             </span>
-            <span className="text-subtle/70">
+            <span className="text-subtle">
               {wideLoading
                 ? `正在装入全部对话…（现在只搜了最近 ${sessions.length} 个）`
                 : allSessions
@@ -402,17 +402,17 @@ export default function HomeView({
         )}
 
         {loading ? (
-          <div className="text-subtle text-[13px] py-6 border-t border-line">
+          <div className="soft-empty text-subtle text-[13px]">
             加载中…
           </div>
         ) : groups.length === 0 ? (
-          <div className="text-muted text-[13px] py-6 border-t border-line">
+          <div className="soft-empty text-muted text-[13px]">
             {searching
               ? `没有匹配「${query.trim()}」的项目或对话。`
               : `还没有 ${providerLabel(provider)} 对话。点 "打开项目" 选一个文件夹开始。`}
           </div>
         ) : (
-          <div className="border-t border-line">
+          <div className="flex flex-col gap-4">
             {groups.map((g) => (
               <ProjectBlock
                 key={g.cwd}
@@ -437,8 +437,8 @@ export default function HomeView({
 }
 
 const PROVIDER_ACCENT: Record<AgentProvider, string> = {
-  claude: "#ef9d5a",
-  codex: "#3ecf8e",
+  claude: "var(--color-provider-claude)",
+  codex: "var(--color-provider-codex)",
 };
 
 function ProviderPicker({
@@ -456,7 +456,7 @@ function ProviderPicker({
     <div
       role="tablist"
       aria-label="Agent provider"
-      className="relative inline-flex items-stretch h-9 p-0.5 rounded-lg bg-canvas border border-line-strong shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
+      className="soft-segmented relative inline-flex items-stretch h-9"
     >
       {options.map((p) => {
         const active = p.id === value;
@@ -470,11 +470,7 @@ function ProviderPicker({
               if (!active) onChange(p.id);
             }}
             title={p.hint}
-            className={`group relative flex items-center gap-2 px-3 rounded-md transition-all duration-200 ${
-              active
-                ? "bg-surface text-fg shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_18px_-12px_rgba(0,0,0,0.6)]"
-                : "text-muted hover:text-fg"
-            }`}
+            className="soft-segment group relative flex items-center gap-2 px-3"
           >
             <span
               aria-hidden
@@ -482,7 +478,7 @@ function ProviderPicker({
               style={{
                 background: active ? accent : "transparent",
                 outline: active
-                  ? `3px solid ${accent}22`
+                  ? `3px solid color-mix(in srgb, ${accent} 12%, transparent)`
                   : `1px solid var(--color-line-strong)`,
                 outlineOffset: 0,
               }}
@@ -553,7 +549,7 @@ function SearchField({
         }}
         placeholder="搜索项目或对话"
         aria-label="搜索项目或对话"
-        className="w-full min-w-0 h-9 pl-8 pr-12 rounded-lg bg-canvas border border-line-strong text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
+        className="soft-input w-full min-w-0 h-9 pl-8 pr-12 text-[12.5px] placeholder:text-subtle"
       />
       {/* ⚠️ **预加载不许有可见的加载指示。** 曾经在这儿放过一个转圈：全量窗口是聚焦时
           就开始拉的（788 个会话 677ms+），于是「鼠标点进框里、一个字没输」就开始转 ——
@@ -577,7 +573,7 @@ function SearchField({
             </svg>
           </button>
         ) : (
-          <span className="font-mono text-[10px] text-subtle/70 border border-line rounded px-1 py-px select-none">
+          <span className="font-mono text-[10px] text-subtle border border-line rounded px-1 py-px select-none">
             {HOTKEY}
           </span>
         )}
@@ -607,11 +603,11 @@ function ProjectBlock({
   const { isAdmin } = useAuth();
   const searching = query.trim() !== "";
   return (
-    <div className="group/proj border-b border-line last:border-b-0 py-4">
+    <div className="soft-panel group/proj px-5 py-4 max-md:px-4">
       <div className="flex items-center justify-between mb-2">
         <button
           onClick={() => onOpenProject(group.cwd)}
-          className="font-mono text-[13px] text-fg hover:text-fg transition-colors truncate text-left"
+          className="font-mono font-medium text-[13px] text-fg hover:text-blue transition-colors truncate text-left"
           title={group.cwd}
         >
           <Highlighted text={tildify(group.cwd, home)} query={query} />
@@ -750,4 +746,3 @@ const PlusIcon = () => (
     />
   </svg>
 );
-

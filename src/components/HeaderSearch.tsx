@@ -155,11 +155,11 @@ export default function HeaderSearch({
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           placeholder="搜索项目或对话"
-          className="w-full min-w-0 h-8 pl-8 pr-3 rounded-md bg-surface border border-line text-[12.5px] text-fg placeholder:text-subtle focus:outline-none focus:border-fg/25 transition-colors"
+          className="soft-input w-full min-w-0 h-8 pl-8 pr-3 text-[12.5px] placeholder:text-subtle"
         />
       </div>
       {open && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 bg-surface border border-line-strong rounded-lg shadow-[0_16px_48px_-12px_rgba(0,0,0,0.5)] overflow-hidden z-50">
+        <div className="absolute left-0 right-0 top-full mt-1.5 soft-popover overflow-hidden z-50">
           <div className="max-h-[420px] overflow-y-auto py-1">
             {projectHits.length > 0 && (
               <div>
@@ -265,7 +265,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
     <div className="px-3 py-1 text-[10px] font-mono text-subtle uppercase tracking-[0.08em] flex items-center gap-2">
       <span>{label}</span>
-      <span className="text-subtle/60">· {count}</span>
+      <span className="text-subtle">· {count}</span>
     </div>
   );
 }

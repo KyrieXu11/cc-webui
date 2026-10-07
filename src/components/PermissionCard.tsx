@@ -98,7 +98,7 @@ export default function PermissionCard({
 
   return (
     <div
-      className="msg-enter amber-card rounded-lg p-5"
+      className="msg-enter amber-card rounded-panel p-5"
       style={{ animationDelay: `${delay}ms` }}
     >
       <div className="flex items-center gap-2 mb-3">
@@ -137,7 +137,7 @@ export default function PermissionCard({
           onClick={() => onAnswer("allow")}
           className={`${btnBase} ${
             resolved === "allow"
-              ? "bg-blue border-blue text-white"
+              ? "bg-blue border-blue text-on-brand"
               : locked
                 ? btnLocked
                 : btnIdle
@@ -150,7 +150,7 @@ export default function PermissionCard({
           onClick={() => onAnswer("allow_session")}
           className={`${btnBase} ${
             resolved === "allow_session"
-              ? "bg-blue border-blue text-white"
+              ? "bg-blue border-blue text-on-brand"
               : locked
                 ? btnLocked
                 : btnIdle
@@ -168,7 +168,7 @@ export default function PermissionCard({
           onClick={() => onAnswer("allow_tool_session")}
           className={`${btnBase} ${
             resolved === "allow_tool_session"
-              ? "bg-blue border-blue text-white"
+              ? "bg-blue border-blue text-on-brand"
               : locked
                 ? btnLocked
                 : btnIdle

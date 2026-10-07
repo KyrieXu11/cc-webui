@@ -5,6 +5,7 @@ interface Props {
   /** 窄屏＝关抽屉，桌面＝收起会话栏。文案/图标跟着变，见下面的注释。 */
   onToggleSidebar?: () => void;
   narrow?: boolean;
+  expanded?: boolean;
   onOpenProject?: () => void;
   onOpenHelp?: () => void;
   onOpenAdmin?: () => void;
@@ -17,6 +18,7 @@ interface Props {
 export default function Sidebar({
   onToggleSidebar,
   narrow = false,
+  expanded = false,
   onOpenProject,
   onOpenHelp,
   onOpenAdmin,
@@ -34,7 +36,9 @@ export default function Sidebar({
           onClick={onToggleSidebar}
           aria-label={narrow ? "关闭侧栏" : "切换侧栏"}
           title={narrow ? "关闭侧栏" : "切换侧栏"}
-          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          aria-expanded={narrow ? undefined : expanded}
+          data-expanded={expanded}
+          className="panel-toggle p-2"
         >
           {narrow ? <CloseIcon /> : <SidebarIcon />}
         </button>
@@ -42,7 +46,7 @@ export default function Sidebar({
           onClick={onOpenProject}
           aria-label="打开项目"
           title="打开项目"
-          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          className="p-2 rounded-control text-muted hover:text-fg hover:bg-raised transition-colors"
         >
           <PlusIcon />
         </button>
@@ -51,7 +55,7 @@ export default function Sidebar({
             onClick={onOpenMemory}
             aria-label="项目记忆"
             title="项目记忆（只读）：Claude / Codex 共用"
-            className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+            className="p-2 rounded-control text-muted hover:text-fg hover:bg-raised transition-colors"
           >
             <MemoryIcon />
           </button>
@@ -64,7 +68,7 @@ export default function Sidebar({
             onClick={onOpenAdmin}
             aria-label="管理"
             title="管理（用户 / 权限 / 飞书映射）"
-            className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+            className="p-2 rounded-control text-muted hover:text-fg hover:bg-raised transition-colors"
           >
             <AdminIcon />
           </button>
@@ -73,7 +77,7 @@ export default function Sidebar({
           onClick={onOpenHelp}
           aria-label="操作手册"
           title="操作手册（快捷键说明）"
-          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          className="p-2 rounded-control text-muted hover:text-fg hover:bg-raised transition-colors"
         >
           <HelpIcon />
         </button>
@@ -81,7 +85,7 @@ export default function Sidebar({
           onClick={onToggleTheme}
           aria-label={theme === "dark" ? "切换到日间" : "切换到夜间"}
           title={theme === "dark" ? "切换到日间" : "切换到夜间"}
-          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          className="p-2 rounded-control text-muted hover:text-fg hover:bg-raised transition-colors"
         >
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
         </button>
@@ -89,7 +93,7 @@ export default function Sidebar({
           onClick={signOut}
           aria-label="退出登录"
           title={`${user.username}${isAdmin ? "（管理员）" : ""} — 退出登录`}
-          className="p-2 rounded-md text-muted hover:text-fg hover:bg-fg/5 transition-colors"
+          className="p-2 rounded-control text-muted hover:text-fg hover:bg-raised transition-colors"
         >
           <SignOutIcon />
         </button>

@@ -53,7 +53,7 @@ export default function ThinkingBlock({
         <span className="font-mono text-[11.5px] text-orange tracking-[0.02em]">
           {active ? `${label}…` : "thought"}
         </span>
-        <span className="text-subtle/70 text-[11px]">· {text.length} 字</span>
+        <span className="text-subtle text-[11px]">· {text.length} 字</span>
         {!expanded && preview && (
           <span className="text-subtle text-[12px] truncate flex-1 ml-1 italic">
             {preview}
