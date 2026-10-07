@@ -3,7 +3,7 @@ import type { ChatEvent } from "./types";
 // The same visual row serves reasoning activity and Codex turn liveness.
 // Never label the latter as a measured thought.
 export function activityLabel(active: boolean, word: string, totalTurn?: boolean): string {
-  return totalTurn ? "处理中…" : active ? `${word}…` : "thought";
+  return active ? `${word}…` : totalTurn ? "已结束" : "thought";
 }
 
 export function formatActivityElapsed(seconds: number, totalTurn?: boolean): string {

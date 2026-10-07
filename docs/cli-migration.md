@@ -621,3 +621,17 @@ finally 里自己管。
 - 单聊第一帧新增控制 `turn_meta { effort, startedAt, provider: "codex" }`，POST / attach 共享 buffer；不进原生历史内容。群聊共用 MessageList 的同款临时状态，未收到首个事件时也能显示。
 - 决策 #9 的模型目录路径已完成：`server/codex-models.ts` 读受大小约束的 CLI 缓存，/api/meta 每次单独刷新模型（不受 slashCommands 60s 缓存影响）；浏览器初始化后再应用账号默认值。管理员 API 从同一目录校验 model + effort。
 - 本机缓存（client_version 0.158.0）已列 GPT-6 Astra / Sol / Luna；CLI 实际二进制为 0.157.1，支持 ultra 配置解析。模型展示及 tiers 以缓存为准，未宣称逐模型/逐档位均已做真实请求验收；用户要求先发布自测。59 项测试及 typecheck/build 通过。
+
+### 2026-10-07：旧 CLI 覆盖模型缓存，改为运行时 CLI 枚举
+
+- 实测同一 `~/.codex/models_cache.json` 在本轮检查中先出现 GPT-6.1-Sol，随后被 client_version
+  `0.158.0` 覆盖而消失；服务实际运行的 CLI 是 `0.160.1`。因此 9 月方案不是可靠的实时目录。
+- 用同一 `resolveCodexBin()` 短暂运行 `codex app-server --listen stdio://`，只发 initialize / initialized /
+  model/list，**不起 thread/turn，不改聊天 executor，不接审批或工具通道**。实测约 3 秒返回 GPT-6.1-Sol
+  和 low/medium/high/xhigh/max/ultra；这只是模型目录与配置档位，不是逐模型推理成功验收。
+- 协议依据：[官方 model/list 文档](https://learn.chatgpt.com/docs/app-server#list-models-modellist)。支持分页，
+  过滤 hidden，8 秒总超时、2MiB 输出上限、200 模型上限；结束/失败终止进程，不回传 CLI 原始错误或账号字段。
+- 服务缓存 60 秒并合流请求，强制刷新可绕过 TTL；新目录成功后，失败只标 stale，不能让旧共享文件把它降级。
+  `CC_WEBUI_CODEX_MODELS_CACHE` 显式覆盖仍是离线/测试入口。独立 `/api/meta/models` 无需等 skills 扫描。
+- 浏览器保留账号默认值与用户选择；模型菜单可以刷新。修正 max→xhigh / ultra→medium 的旧翻译，按目录保留档位。
+- 回合状态恢复用户要求的动态词组（每 1.8 秒），但 elapsed 仍标「回合已用」；不伪造 reasoning 事件或独立思考耗时。

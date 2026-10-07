@@ -66,15 +66,18 @@ export const SEARCH_WINDOW = 1000;
 export async function listSessions(
   limit = 30,
   cwd?: string,
-  provider: AgentProvider | "all" = "all"
+  provider: AgentProvider | "all" = "all",
+  options: { compact?: boolean; signal?: AbortSignal } = {},
 ): Promise<SessionSummary[]> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (cwd) qs.set("cwd", cwd);
   qs.set("provider", provider);
-  const res = await fetch(`/api/sessions?${qs.toString()}`);
-  if (!res.ok) return [];
-  const { sessions } = await res.json();
+  if (options.compact) qs.set("compact", "1");
+  const res = await fetch(`/api/sessions?${qs.toString()}`, { signal: options.signal });
+  if (!res.ok) throw new Error(`获取对话失败：HTTP ${res.status}`);
+  const { sessions, error } = await res.json();
+  if (error) throw new Error("无法读取会话列表，请重试");
   return sessions ?? [];
 }
 

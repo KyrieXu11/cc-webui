@@ -3,10 +3,10 @@ import { applySDKMessage, sessionMessagesToEvents } from "./processor.ts";
 import { activityLabel, formatActivityElapsed, liveThinkingIds, liveToolIds, showCodexActivity } from "./turn-activity.ts";
 import type { ChatEvent } from "./types.ts";
 
-// Regression: the screenshot's Decoding (14m35s) was turn liveness with a
-// thinking label. Codex must explicitly identify it as total turn time.
+// Animated words are decorative status feedback, not measured reasoning.
+// Keep the designed effect while identifying elapsed time as TOTAL turn time.
 for (const word of ["Decoding", "Whirring", "Tinkering"]) {
-  assert.equal(activityLabel(true, word, true), "处理中…");
+  assert.equal(activityLabel(true, word, true), `${word}…`);
 }
 assert.equal(formatActivityElapsed(14 * 60 + 35, true), "回合已用 14m35s");
 assert.equal(formatActivityElapsed(0, true), "回合已用 0s");

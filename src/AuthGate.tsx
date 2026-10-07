@@ -15,7 +15,8 @@ import {
   type AuthUser,
   type Me,
 } from "./lib/auth";
-import { configureCodexModels, modelCatalogVersion, subscribeModelCatalog, type AgentProvider } from "./lib/settings";
+import { modelCatalogVersion, subscribeModelCatalog, type AgentProvider } from "./lib/settings";
+import { refreshCodexModels } from "./lib/model-catalog";
 import type { UserDefaults } from "./lib/user-defaults";
 
 type AuthValue = {
@@ -53,8 +54,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const r = await fetch("/api/meta", { signal: AbortSignal.timeout(5000) });
-        if (r.ok) { const data = await r.json(); if (!cancelled) configureCodexModels(data.models?.codex?.models, data.models?.codex?.source === "fallback" ? "fallback" : "cli-cache"); }
+        await refreshCodexModels();
       } catch { /* retain conservative fallback / last valid catalogue */ }
       finally { if (!cancelled) setCatalogReadyFor(accountId); }
     };

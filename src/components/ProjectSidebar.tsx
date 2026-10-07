@@ -11,6 +11,8 @@ import { useAuth } from "../AuthGate";
 import ShareSessionDialog from "./ShareSessionDialog";
 
 const INFLIGHT_POLL_MS = 3000;
+const PAGE_SIZE = 15;
+const MAX_SESSIONS = 200;
 
 interface Props {
   cwd: string;
@@ -70,9 +72,14 @@ export default function ProjectSidebar({
   onNewChat,
   onOpenSession,
 }: Props) {
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [limit, setLimit] = useState(15);
+  const scope = `${currentProvider}\0${cwd}`;
+  const [listing, setListing] = useState<{ scope: string; rows: SessionSummary[] }>({ scope: "", rows: [] });
+  const sessions = listing.scope === scope ? listing.rows : [];
+  const [page, setPage] = useState({ scope: "", size: PAGE_SIZE });
+  const limit = page.scope === scope ? page.size : PAGE_SIZE;
+  const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [inflight, setInflight] = useState<Set<string>>(() => new Set());
   const [sharing, setSharing] = useState<SessionSummary | null>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
@@ -99,37 +106,34 @@ export default function ProjectSidebar({
   }, [currentProvider]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
-    listSessions(200, cwd, currentProvider)
+    setError(false);
+    listSessions(limit, cwd, currentProvider, { compact: true, signal: controller.signal })
       .then((xs) => {
-        if (cancelled) return;
-        setSessions(xs);
+        if (controller.signal.aborted) return;
+        setListing({ scope, rows: xs });
       })
-      .catch(() => {})
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [cwd, currentProvider, currentSessionId, refreshKey]);
+      .catch(() => { if (!controller.signal.aborted) setError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [cwd, currentProvider, scope, limit, refreshKey, reload]);
 
   useEffect(() => {
-    if (sessions.length <= limit) return;
+    if (loading || error || sessions.length < limit || limit >= MAX_SESSIONS) return;
     const el = loaderRef.current;
     if (!el) return;
     const io = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          setLimit((l) => Math.min(l + 15, sessions.length));
+          setPage({ scope, size: Math.min(limit + PAGE_SIZE, MAX_SESSIONS) });
         }
       },
       { root: el.parentElement, threshold: 0.1 }
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [sessions.length, limit]);
-
-  const shown = sessions.slice(0, limit);
+  }, [sessions.length, scope, limit, loading, error]);
 
   // 删成功才从列表里拿掉。乐观地先抹掉再说，会让「其实没删掉」一直到下次刷新才暴露。
   const remove = async (s: SessionSummary, e: React.MouseEvent) => {
@@ -140,9 +144,9 @@ export default function ProjectSidebar({
       alert(err instanceof Error ? err.message : "删除失败");
       return;
     }
-    setSessions((xs) =>
-      xs.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider)
-    );
+    setListing((current) => ({ ...current,
+      rows: current.rows.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider),
+    }));
     onDeleted?.(s);
   };
 
@@ -181,15 +185,15 @@ export default function ProjectSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto py-2 px-2">
-        {loading ? (
+        {(loading || listing.scope !== scope && !error) && sessions.length === 0 ? (
           <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
-        ) : sessions.length === 0 ? (
+        ) : sessions.length === 0 && !error ? (
           <div className="px-4 py-3 text-[12px] text-subtle">
             还没有对话，点 "新建会话" 开始。
           </div>
         ) : (
           <>
-            {shown.map((s) => {
+            {sessions.map((s) => {
               const active =
                 s.sessionId === currentSessionId && s.provider === currentProvider;
               return (
@@ -287,17 +291,20 @@ export default function ProjectSidebar({
                 </div>
               );
             })}
-            {sessions.length > limit && (
+            {(sessions.length >= limit && limit < MAX_SESSIONS || loading) && (
               <div
                 ref={loaderRef}
                 className="flex items-center justify-center py-3 text-[11px] text-subtle font-mono gap-1.5"
               >
                 <span className="w-1 h-1 rounded-full bg-subtle animate-pulse" />
-                加载中…
+                {loading ? "加载中…" : "继续向下查看更早对话"}
               </div>
             )}
           </>
         )}
+        {error && <div role="status" className="px-4 py-3 text-[12px] text-muted">
+          对话列表加载失败。<button onClick={() => setReload((n) => n + 1)} className="ml-2 text-fg">重试</button>
+        </div>}
       </div>
 
       {sharing && (
@@ -310,9 +317,7 @@ export default function ProjectSidebar({
           onClose={() => setSharing(null)}
           onChanged={() => {
             // 名单或归属变了就重拉：转交出去之后这一行可能整条消失。
-            listSessions(200, cwd, currentProvider)
-              .then(setSessions)
-              .catch(() => {});
+            setReload((n) => n + 1);
           }}
         />
       )}

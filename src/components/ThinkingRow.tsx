@@ -60,7 +60,7 @@ export default function ThinkingRow({ tokens, effort, live, kind = "thinking", t
       if (startedAt.current !== null) setElapsed(Math.max(0, Math.floor((Date.now() - startedAt.current) / 1000)));
     };
     tick();
-    const verbTimer = totalTurn ? undefined : setInterval(() => {
+    const verbTimer = setInterval(() => {
       setLabel((cur) => pickThinkingWord(cur));
     }, 1800);
     const tickTimer = setInterval(tick, 1000);

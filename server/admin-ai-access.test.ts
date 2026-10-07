@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "cc-ai-access-"));
 Object.assign(process.env, {
   CC_WEBUI_DB: path.join(tmp, "db"),
+  CC_WEBUI_CODEX_MODELS_CACHE: path.join(tmp, "no-models"),
   CC_WEBUI_WORKSPACES_DIR: path.join(tmp, "workspaces"),
   CC_WEBUI_GROUPS_DIR: path.join(tmp, "groups"),
   CC_WEBUI_SESSION_INDEX: path.join(tmp, "index"),

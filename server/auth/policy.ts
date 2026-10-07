@@ -272,6 +272,7 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   // ── misc ──────────────────────────────────────────────────────────────────
   "POST /api/upload": { auth: "user", note: "writes only into the upload dir, name sanitised" },
   "GET /api/meta": { auth: "user", note: "leaks which skills/commands are installed" },
+  "GET /api/meta/models": { auth: "user", note: "public model metadata only; no account credentials" },
   "POST /api/permission/:id": {
     auth: "user",
     // Not declarative: permission ids are not in the ownership table. The

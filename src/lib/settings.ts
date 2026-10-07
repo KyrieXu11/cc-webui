@@ -198,7 +198,7 @@ export const CODEX_FALLBACK_MODELS: ModelOption[] = [
 ].map(m => ({ ...m, supportedEfforts: ["low", "medium", "high", "xhigh"] as EffortLevel[] }));
 let CODEX_MODEL_OPTIONS = CODEX_FALLBACK_MODELS;
 let catalogVersion = 0;
-let catalogSource: "cli-cache" | "fallback" = "fallback";
+let catalogSource: "cli" | "cli-cache" | "fallback" = "fallback";
 export const codexCatalogSource = () => catalogSource;
 const catalogListeners = new Set<() => void>();
 export const modelCatalogVersion = () => catalogVersion;
@@ -231,7 +231,7 @@ export function parseCodexModelsCache(raw: unknown): ModelOption[] | null {
   }).sort((a, b) => a.order - b.order).map(m => m.model);
   return models.length ? models : null;
 }
-export function configureCodexModels(raw: unknown, source: "cli-cache" | "fallback" = "cli-cache"): boolean {
+export function configureCodexModels(raw: unknown, source: "cli" | "cli-cache" | "fallback" = "cli-cache"): boolean {
   if (!Array.isArray(raw)) return false;
   const models = parseCodexModelsCache({ models: raw.map(m => ({
     slug: m?.id, display_name: m?.label, description: m?.hint, visibility: "list",
