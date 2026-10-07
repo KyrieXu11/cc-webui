@@ -258,7 +258,10 @@ export default function App() {
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   // 右侧格总开关（项目树 / 取件台 / 打开的文档都在那一格里）。
   const [dockOpen, setDockOpen] = useState(false);
-  const openDock = useCallback(() => setDockOpen(true), []);
+  const openDock = useCallback(() => {
+    setNavOpen(false);
+    setDockOpen(true);
+  }, []);
   const [composerValue, setComposerValue] = useState("");
   // 排队：上一轮还在跑时按下的消息，等它结束后**逐条**自动发出去。
   //
@@ -1385,17 +1388,23 @@ export default function App() {
     // **位置不动、图标不变**，不能一会儿长在顶栏里、一会儿变成右侧格里的 ✗。
     <div className="app-workbench relative flex h-full bg-canvas overflow-hidden">
       {/* 桌面：rail(56) + 会话栏(260) 两根常驻列。
-          窄屏：同样两个组件原封不动，只是整体变成一个 316px 的左抽屉滑出来
+          窄屏：同样两个组件原封不动，只是整体变成一个 316px 的左抽屉显示/隐藏
           —— 这是选方案 B 的理由，侧栏组件本身一行都不用改。 */}
       <div
         // ⚠️ 这个属性是右侧格那条分隔条的**量尺**：它按实测宽度给主栏留活路
         //    （rail 56 / 展开会话列表 316），别删，也别挪到内层去。见 lib/pane-width.ts。
         data-railcol
-        className={`workbench-nav flex shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[316px] max-md:bg-canvas max-md:transition-transform max-md:duration-200 ${
-          narrow && !navOpen
-            ? "max-md:-translate-x-full"
-            : "max-md:shadow-[0_0_60px_rgba(0,0,0,0.55)]"
-        }`}
+        data-mobile-drawer={narrow ? navOpen ? "open" : "closed" : undefined}
+        // A closed drawer must stop intercepting taps even on WebViews that
+        // ignore individual CSS translate / responsive utilities. Keep it
+        // mounted (list state survives), but hide it via ordinary display.
+        style={narrow ? {
+          display: navOpen ? "flex" : "none",
+          position: "fixed", top: 0, bottom: 0, left: 0,
+          width: 316, padding: 0, zIndex: 60,
+          background: "var(--color-canvas)",
+        } : undefined}
+        className="workbench-nav flex shrink-0"
       >
       <div className="nav-panel">
       {/* ⚠️ **窄屏下这颗按钮是「关抽屉」，不是「切会话栏」。** 窄屏时会话栏的渲染条件
@@ -1405,9 +1414,12 @@ export default function App() {
           （实测 is_visible=true 但 click 超时），于是唯一的退路只剩右边那条 74px 的
           遮罩 —— 等于没有关闭按钮。桌面那边的偏好不动，narrow 分支只管抽屉。 */}
       <Sidebar
-        onToggleSidebar={() =>
-          narrow ? setNavOpen(false) : setSidebarOpen((o) => !o)
-        }
+        onToggleSidebar={() => {
+          if (narrow) {
+            setNavOpen(false);
+            setDockOpen(false);
+          } else setSidebarOpen((o) => !o);
+        }}
         narrow={narrow}
         expanded={narrow ? navOpen : sidebarOpen}
         onOpenProject={() => setDialogOpen(true)}
@@ -1471,7 +1483,10 @@ export default function App() {
         ) : inProject ? (
           <>
             <Header
-              onOpenNav={() => setNavOpen((o) => !o)}
+              onOpenNav={() => {
+                setDockOpen(false);
+                setNavOpen((o) => !o);
+              }}
               sessionId={sessionId}
               projectPath={projectCwd}
               home={home}
@@ -1608,7 +1623,10 @@ export default function App() {
         <button
           aria-label="切换文件面板"
           title="文件面板（项目文件）"
-          onClick={() => setDockOpen((o) => !o)}
+          onClick={() => {
+            if (narrow) setNavOpen(false);
+            setDockOpen((o) => !o);
+          }}
           aria-expanded={dockOpen}
           data-expanded={dockOpen}
           className="panel-toggle absolute top-[11px] right-3 z-50 p-2"
