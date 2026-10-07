@@ -107,6 +107,11 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   并发扫描合流；**不能缓存跨账号的授权结果**，每次响应仍按当前白名单过滤（最近项目也一样）。
   「刷新目录」走 `?refresh=1`，新建目录不用等 TTL。TCC 超时黑名单和不递归软链的护栏仍在
   `server/fs.ts`；不要为了提速无限并发 readdir/stat，那些挂起的系统调用取消不了。
+- **项目最近对话先取 15 条，向下滚动再增量拉到最多 200 条**：`ProjectSidebar` 用 `compact=1`
+  只收 256 字首问摘录；点选对话不重拉/闪空整个列表，换 cwd/provider 会取消旧请求。
+  搜索仍取完整窗口/首问，不能复用截断后的结果。`session-summary-cache.ts` 只缓存原始 metadata，
+  按 inode/size/mtime/ctime 失效，最多 1024 条 / 32MiB；授权/共享每次重查。**可见性先于 limit**，
+  不然全机新对话会把成员的旧对话挤出她自己的页面。Codex 逐行读取、每次扫描并发最多 4 个文件，不整库 readFile。
 - **文件树的拖拽**（`FileExplorer.tsx` + `lib/file-drag.ts`）：拖文件 → 文件夹＝移动，
   拖文件 → 对话框＝插入相对路径（Composer 的 drop 要先认我们的 MIME，再落到上传那条）。
   **「@ 插入」那颗按钮已经删掉**（每行一颗 + 多选里的「@ N」），拖拽就是同一件事；
@@ -304,7 +309,12 @@ claude CLI（你 Mac 上的子进程）
 - **测试是纯脚本风格**（top-level `await` + `node:assert`，不是 `describe/it`），但 `tsx --test` 能发现并跑。
   绝大多数在 `server/`；`src/` 下只跑**纯逻辑**（`processor.test.ts`），要 DOM / React 的别往这里塞。
   加测试就照 `server/groups/*.test.ts` 的样子写。
-- **Claude 模型/权限及 effort 标签集中在 `src/lib/settings.ts`**；Codex 模型与可用 effort 由 `server/codex-models.ts` 读 CLI 的 `models_cache.json`，随 `/api/meta` 下发，登录/切回标签/每分钟刷新，读不到则用显式回退列表。管理员默认值校验同一目录，不能只补硬编码。
+- **Claude 模型/权限及 effort 标签集中在 `src/lib/settings.ts`**；Codex 模型与 effort 由 `server/codex-models.ts`
+  调实际 `CC_WEBUI_CODEX_BIN` / PATH CLI 的短命 app-server `model/list`（**只查 metadata，不起 thread/turn**）。
+  `/api/meta/models` 是独立鉴权、no-store 接口，登录/切回标签/每分钟刷新，模型菜单可强制刷新；服务端
+  60 秒缓存并发合流，失败留最后有效目录，再退 CLI 缓存/显式回退。**共享的 models_cache.json 会被旧 CLI
+  覆盖，不能作为唯一真相**。显式 `CC_WEBUI_CODEX_MODELS_CACHE` 仍是离线/测试覆盖，不启真实 CLI。
+  管理员默认值校验同一目录，不能只补硬编码；不得把请求过的 max/ultra 悄悄降成 xhigh/medium。
   除了四个家族别名，还有三个**固定版本**（Opus 5 / Opus 4.8 / Sonnet 4.6，2026-09-23 加的：
   opus 那天变成 5.5，同档 effort 下想得更多）。⚠️ 固定版本是精确 slug，**迟早会下线报错**，
   加新的之前先真跑一轮（那段注释里有命令）；effort 规则按**家族**算（`claudeFamily`），
@@ -567,7 +577,7 @@ claude CLI（你 Mac 上的子进程）
 
 ### Codex 运行反馈与模型目录（2026-09-29）
 
-- `codex exec` 无 reasoning/text delta，工具有 `item.started/updated/completed`。**思考动效是用户设计，不能一刀切删掉**：有显式 pending reasoning item（即使无正文）时保留 `Decoding` 等动态文案；工具执行时只转工具 spinner；没有明确 reasoning 信号时才显示临时「处理中」activity。activity 时间明确写「回合已用」，包括模型等待和工具执行，**不得放进 reasoning 行当作思考时长**；没有可靠的独立思考时间就不显示。后续工具/回答 started 要结束旧 reasoning 动画，不能等工具结束又把它复活；done/cancel/no-inflight/历史不转圈。
+- `codex exec` 无 reasoning/text delta，工具有 `item.started/updated/completed`。**思考动效是用户设计，不能一刀切删掉**：有显式 pending reasoning item（即使无正文）时保留 `Decoding` 等动态文案；工具执行时只转工具 spinner；没有明确 reasoning 信号时显示回合 activity，**也保留动态换字，不改成固定「处理中」**（2026-10-07 用户确认）。activity 时间明确写「回合已用」，包括模型等待和工具执行，**不得放进 reasoning 行当作思考时长**；没有可靠的独立思考时间就不显示。后续工具/回答 started 要结束旧 reasoning 动画，不能等工具结束又把它复活；done/cancel/no-inflight/历史不转圈。
 - CodeX 单聊 buffer 第一帧 `turn_meta {effort,startedAt,provider}`；attach 重放同一帧。未确认 attach 真在运行前不显示历史活动动画。
 - 第二帧 `turn_user` 回放本轮原始提问和图片（不含 memory envelope）。**不能靠浏览器的 ActiveTurn 补用户气泡**：管理员看别人的活跃会话时根本没有它。attach 先替换当前轮历史后缀，再回放 buffer；`item_N` 每次 exec 从头编号，UI id 必须按 user/turn 分 scope，否则后轮覆盖前轮。`codex-attach.test.ts` / `codex-turn.test.ts` 钉住这两条。
 - Codex 0.157.1 的 native rollout 已换成 `event_msg/item_completed`，item 是 `UserMessage` / `AgentMessage` / `CommandExecution` 等 PascalCase；旧 `user_message` / `agent_message` 解析器会丢掉提问。`session-store.ts` 同时支持新旧格式，只读公开消息/工具字段，**不读 Reasoning.raw_content**；memory envelope 必须在压缩换行**之前**剥离。

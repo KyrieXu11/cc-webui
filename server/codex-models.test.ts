@@ -14,6 +14,10 @@ try {
   const root=createUser({username:"root",password:"pw",role:"admin",allowedPaths:[tmp]});const member=createUser({username:"member",password:"pw",role:"user",allowedPaths:[tmp]});setAllowedProviders(member.id,["codex"]);
   const app=createApp(),cookie=`${SESSION_COOKIE}=${issueSession(root.id)}`;
   const meta=await app.request("/api/meta",{headers:{cookie}});const data=await meta.json();assert.equal(data.models.codex.models[0].id,"gpt-6-sol");assert.ok(!JSON.stringify(data).includes("PRIVATE_ACCOUNT"));
+  const modelOnly=await app.request("/api/meta/models?refresh=1",{headers:{cookie}});
+  assert.equal(modelOnly.headers.get("cache-control"),"no-store");
+  assert.equal((await modelOnly.json()).codex.models[0].id,"gpt-6-sol");
+  assert.equal((await app.request("/api/meta/models")).status,401);
   const patch=(model:string,effort:string)=>app.request(`/api/admin/users/${member.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({defaults:{provider:"codex",model,effort}})});
   assert.equal((await patch("gpt-6-sol","ultra")).status,200);
   assert.equal(getUserDefaults(member.id)!.effort,"ultra");

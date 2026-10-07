@@ -52,9 +52,8 @@ try {
 
   assert.equal(mapEffort("low"), "low");
   assert.equal(mapEffort("xhigh"), "xhigh");
-  // `max` is Claude-only; it must fold onto a tier Codex actually defines,
-  // because neither CLI validates this value.
-  assert.equal(mapEffort("max"), "xhigh");
+  assert.equal(mapEffort("max"), "max");
+  assert.equal(mapEffort("ultra"), "ultra");
   assert.equal(mapEffort(undefined), "medium");
   assert.equal(mapEffort("bogus"), "medium");
 

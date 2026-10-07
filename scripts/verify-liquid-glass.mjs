@@ -23,24 +23,45 @@ const history = [
   { type: "user", uuid: "result-1", session_id: sessionId, message: { content: [{ type: "tool_result", tool_use_id: "read-style", content: ":root { --color-surface: #fbfdfe; }" }] } },
   { type: "assistant", uuid: "a-2", session_id: sessionId, message: { id: "assistant-2", content: [{ type: "text", text: "## 已统一界面的层级\n\n保留原有的字体、快捷键与文件操作，把**导航与悬浮控件**整理成同一套材质。\n\n- 导航使用轻薄的玻璃光边。\n- 对话正文保持稳定底色，不随背景变化。\n- 编辑器与文件预览继续使用独立的内部滚动。\n\n```css\n.navigation {\n  border-radius: 24px;\n  color: var(--color-fg);\n}\n```\n\n类型检查与回归测试均已通过。下一步可以检查深浅主题和手机上的抽屉。" }] } },
 ];
-async function setup({ theme = "light", logged = true, project = false, race = false, groups = false, mobile = false, scanMode = "", noFolders = false, noRecents = false } = {}) {
+async function setup({ theme = "light", logged = true, project = false, race = false, groups = false, mobile = false, scanMode = "", noFolders = false, noRecents = false, codexLive = false, catalogFlip = false } = {}) {
   const context = await browser.newContext({ viewport: mobile ? { width: 393, height: 851 } : { width: 1440, height: 1000 }, deviceScaleFactor: 1, colorScheme: theme, isMobile: mobile, hasTouch: mobile,
     ...(mobile ? { userAgent: "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36" } : {}),
   });
   const page = await context.newPage();
   page.on("pageerror", e => errors.push(e.message));
-  const held = [], scans = [], scanRequests = [];
-  await page.addInitScript(({ theme, project, cwd, sessionId }) => {
+  const held = [], scans = [], scanRequests = [], sessionRequests = [], modelRequests = [];
+  await page.addInitScript(({ theme, project, cwd, sessionId, codexLive }) => {
     localStorage.clear();
-    localStorage.setItem("cc-webui:settings", JSON.stringify({ cwd: "", agentProvider: "claude", model: "opus", permissionMode: "auto", effort: "high", theme, themeChosen: true }));
-    if (project) localStorage.setItem("cc-webui:lastProject", JSON.stringify({ cwd, sessionId, agentProvider: "claude" }));
-  }, { theme, project, cwd, sessionId });
+    localStorage.setItem("cc-webui:settings", JSON.stringify({ cwd: "", agentProvider: codexLive ? "codex" : "claude", model: codexLive ? "gpt-6-sol" : "opus", permissionMode: "auto", effort: "high", theme, themeChosen: true }));
+    if (project) localStorage.setItem("cc-webui:lastProject", JSON.stringify({ cwd, sessionId, agentProvider: codexLive ? "codex" : "claude" }));
+    if (codexLive) {
+      const realFetch = window.fetch.bind(window);
+      window.fetch = (input, options) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (!url?.includes("/api/codex/chat") || options?.method !== "POST") return realFetch(input, options);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({ start(controller) {
+          const emit = (event, data) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          window.__fixtureCodex = (frame) => emit("codex_event", frame);
+          window.__finishCodex = () => { emit("done", {}); controller.close(); };
+          options.signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true });
+          emit("turn_meta", { type: "turn_meta", startedAt: Date.now(), effort: "high", provider: "codex" });
+        } });
+        return Promise.resolve(new Response(stream, { headers: { "Content-Type": "text/event-stream" } }));
+      };
+    }
+  }, { theme, project, cwd, sessionId, codexLive });
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url()), path = url.pathname;
     const json = body => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     const sse = (event, body) => route.fulfill({ status: 200, contentType: "text/event-stream", body: `event: ${event}\ndata: ${JSON.stringify(body)}\n\n` });
     if (path === "/api/auth/me") return json(logged ? { user: { id: "preview-admin", username: "preview", role: "admin", createdAt: now }, allowedPaths: noFolders ? [] : ["/preview/**"], allowedProviders: ["claude", "codex"], defaults: null } : { user: null });
     if (path === "/api/meta") return json({ features: { groups, office: false }, skills: ["review", "design"], slashCommands: ["review", "design"], models: { codex: { source: "fallback", models: [] } } });
+    if (path === "/api/meta/models") {
+      modelRequests.push(url.search);
+      const ids = catalogFlip && url.searchParams.has("refresh") ? ["gpt-6.1-sol", "gpt-6-sol"] : ["gpt-6-sol"];
+      return json({ codex: { source: "cli", models: ids.map(id => ({ id, label: id === "gpt-6.1-sol" ? "GPT-6.1-Sol" : "GPT-6-Sol", hint: "fixture model", supportedEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"] })) } });
+    }
     if (path === "/api/fs/home") return json({ home: "/preview" });
     if (path === "/api/fs/scan") {
       scanRequests.push(url.search);
@@ -51,6 +72,7 @@ async function setup({ theme = "light", logged = true, project = false, race = f
     if (path === "/api/fs/recents") return json({ recents: noRecents ? [] : [{ path: cwd, lastUsed: now }] });
     if (path === "/api/sessions") {
       const provider = url.searchParams.get("provider") || "claude";
+      sessionRequests.push({ provider, cwd: url.searchParams.get("cwd"), limit: Number(url.searchParams.get("limit")), compact: url.searchParams.get("compact") });
       if (race && provider === "claude") { held.push(route); return; }
       return json({ sessions: samples(provider) });
     }
@@ -81,7 +103,7 @@ async function setup({ theme = "light", logged = true, project = false, race = f
     return route.fulfill({ status: 404, contentType: "application/json", body: '{"error":"unhandled preview fixture"}' });
   });
   await page.goto(base);
-  return { page, context, held, scans, scanRequests };
+  return { page, context, held, scans, scanRequests, sessionRequests, modelRequests };
 }
 async function ready(page, selector = ".app-workbench") { await page.locator(selector).waitFor(); await page.waitForTimeout(450); }
 async function screenshot(page, name) {
@@ -175,6 +197,48 @@ async function verifyProjectPicker() {
   } finally { await denied.context.close(); }
   checks.push("Project picker: recent-first, background merge/dedup, keyboard, immediate absolute/~ paths, retry and current grants (desktop + Android touch)");
 }
+async function verifySessionAndModelUpdates() {
+  const fixture = await setup({ project: true, codexLive: true, catalogFlip: true });
+  const { page, context } = fixture;
+  try {
+    await ready(page, ".chat-panel");
+    await page.locator(".session-sidebar .conversation-row").first().waitFor();
+    const scoped = () => fixture.sessionRequests.filter(r => r.cwd === cwd);
+    assert.equal(scoped()[0].limit, 15, "initial project page is not a 200-transcript request");
+    assert.equal(scoped()[0].compact, "1");
+    const before = scoped().length;
+    await page.locator(".session-sidebar .conversation-row").last().locator(":scope > button").first().click();
+    await page.waitForTimeout(150);
+    assert.equal(scoped().length, before, "selecting a conversation does not refetch/hide the list");
+    const model = page.locator(".chat-panel").getByRole("button").filter({ hasText: /^GPT-6-Sol/ }).first();
+    await model.click();
+    await page.getByRole("button", { name: "刷新 Codex 模型", exact: true }).click();
+    await page.getByText("GPT-6.1-Sol", { exact: true }).waitFor();
+    assert(fixture.modelRequests.includes("?refresh=1"), "manual model refresh is not a hard-coded option");
+    await page.keyboard.press("Escape");
+    await page.locator("textarea").fill("synthetic progress test only");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    const activity = page.getByLabel("Codex 处理中", { exact: true });
+    await activity.waitFor();
+    const word = await activity.locator("span").first().textContent();
+    assert.notEqual(word, "处理中…");
+    await page.waitForFunction((previous) => document.querySelector('[aria-label="Codex 处理中"] span')?.textContent !== previous, word);
+    assert.match(await activity.textContent(), /回合已用/);
+    await page.evaluate(() => window.__fixtureCodex({ type: "item.started", item: { id: "reason", type: "reasoning", text: "" } }));
+    await page.getByLabel("Codex 思考中", { exact: true }).waitFor();
+    assert.equal(await activity.count(), 0, "explicit reasoning replaces generic turn status");
+    await page.evaluate(() => window.__fixtureCodex({ type: "item.started", item: { id: "tool", type: "command_execution", command: "echo fixture" } }));
+    await page.waitForTimeout(150);
+    assert.equal(await activity.count(), 0, "tool execution uses its spinner, not a synthetic thinking row");
+    assert.equal(await page.getByLabel("Codex 思考中", { exact: true }).count(), 0);
+    await page.evaluate(() => window.__fixtureCodex({ type: "item.completed", item: { id: "tool", type: "command_execution", command: "echo fixture", exit_code: 0 } }));
+    await activity.waitFor();
+    await page.evaluate(() => window.__finishCodex());
+    await page.waitForFunction(() => !document.querySelector('[aria-label="Codex 处理中"]'));
+    assert.equal(await page.locator(".sparkle-spin").count(), 0, "done stops every status animation");
+    checks.push("Project sessions: compact initial 15 rows, no refetch on selection; CLI model refresh adds GPT-6.1-Sol; animated turn words preserve honest timing/tool/done semantics");
+  } finally { await context.close(); }
+}
 async function verifyMobileNavigation() {
   for (const theme of ["light", "dark"]) for (const project of [false, true]) {
     const { page, context } = await setup({ theme, project, mobile: true });
@@ -229,6 +293,7 @@ async function verifyMobileNavigation() {
 }
 try {
   await verifyProjectPicker();
+  await verifySessionAndModelUpdates();
   if (process.env.PICKER_ONLY === "1") {
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
     console.log(JSON.stringify({ checks, errors, unexpected }, null, 2));

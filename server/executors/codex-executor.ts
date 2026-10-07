@@ -75,13 +75,11 @@ export function mapSandbox(mode: string | undefined): CodexSandbox {
   return "workspace-write";
 }
 
-// cc-webui tiers → Codex's. `max` is a Claude-only label (settings.ts hides it
-// for Codex); fold it onto xhigh rather than passing a value Codex never
-// defined — like Claude's CLI, Codex does not validate this, so a typo would
-// be accepted silently.
+// The runtime model catalog now advertises max/ultra too. Preserve those
+// explicit tiers rather than silently demoting max→xhigh or ultra→medium.
 export function mapEffort(effort: string | undefined): string {
   if (effort === "low" || effort === "medium" || effort === "high") return effort;
-  if (effort === "xhigh" || effort === "max") return "xhigh";
+  if (effort === "xhigh" || effort === "max" || effort === "ultra") return effort;
   return "medium";
 }
 

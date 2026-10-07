@@ -33,22 +33,29 @@ function providerFilter(raw: string | undefined): ProviderFilter {
 async function listClaude(opts: {
   limit: number;
   dir?: string;
+  visible?: (id: string) => boolean;
 }): Promise<SessionSummary[]> {
   const sessions = await listClaudeSessions({
     limit: opts.limit,
     dir: opts.dir,
+    visible: opts.visible,
   });
   return sessions.map((s) => ({ ...s, provider: "claude" as const }));
 }
 
 sessionsRoute.get("/", async (c) => {
-  const limit = Number(c.req.query("limit") ?? 30);
+  const rawLimit = Number(c.req.query("limit") ?? 30);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(1000, Math.floor(rawLimit))) : 30;
   const dir = c.req.query("cwd") || undefined;
   const provider = providerFilter(c.req.query("provider"));
+  const compact = c.req.query("compact") === "1";
   try {
+    // Limit belongs to the caller, not the machine. Filtering after taking
+    // the newest N global rows made older member conversations disappear.
+    const initialVisibility = visibilityFor(currentUser(c)!);
     const groups = await Promise.all([
-      provider === "codex" ? [] : listClaude({ limit, dir }),
-      provider === "claude" ? [] : listCodexSessions({ limit, cwd: dir }),
+      provider === "codex" ? [] : listClaude({ limit, dir, visible: initialVisibility }),
+      provider === "claude" ? [] : listCodexSessions({ limit, cwd: dir, visible: initialVisibility }),
     ]);
     // Scoped: sessions live in shared trees (~/.claude/projects is even shared
     // with the user's own terminal), so this filter is the only thing keeping
@@ -70,6 +77,8 @@ sessionsRoute.get("/", async (c) => {
         const ownerId = owners.get(s.sessionId) ?? null;
         return {
           ...s,
+          // Opt-in sidebar excerpt; full-window search keeps full prompts.
+          ...(compact ? { firstPrompt: s.firstPrompt?.slice(0, 256) } : {}),
           // `mine` is strictly "I am the owner" — an admin looking at someone
           // else's session gets false here and combines it with their own role
           // on the client. Conflating the two server-side would make the UI say

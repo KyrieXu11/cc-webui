@@ -14,6 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import type { SessionSummary } from "./session-store.ts";
 import { splitAttachments } from "../src/lib/attachments.ts";
+import { SessionSummaryCache } from "./session-summary-cache.ts";
 
 // Overridable for tests, mirroring CODEX_SESSIONS_DIR / CC_WEBUI_GROUPS_DIR.
 export function projectsDir(): string {
@@ -365,9 +366,12 @@ async function lastAiTitle(file: string): Promise<string> {
   return title.trim();
 }
 
+const summaries = new SessionSummaryCache<SessionSummary>();
+
 export async function listClaudeSessions(opts: {
   limit: number;
   dir?: string;
+  visible?: (id: string) => boolean;
 }): Promise<SessionSummary[]> {
   const root = projectsDir();
   // With a cwd filter, go straight to that project's directory — that is how
@@ -383,13 +387,13 @@ export async function listClaudeSessions(opts: {
         }
       })();
 
-  const files: Array<{ file: string; mtimeMs: number }> = [];
+  const files: Array<{ file: string; stat: import("node:fs").Stats }> = [];
   for (const d of dirs) {
     for (const file of await listJsonl(d)) {
       try {
         const st = await fs.stat(file);
         if (st.isFile() && st.size > 0) {
-          files.push({ file, mtimeMs: st.mtimeMs });
+          files.push({ file, stat: st });
         }
       } catch {
         /* vanished between readdir and stat */
@@ -397,12 +401,13 @@ export async function listClaudeSessions(opts: {
     }
   }
   // Newest first, then read only as many heads as the caller asked for.
-  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  files.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
 
   const out: SessionSummary[] = [];
-  for (const { file, mtimeMs } of files) {
+  for (const { file, stat } of files) {
     if (out.length >= opts.limit) break;
-    const s = await summaryFor(file, mtimeMs);
+    if (opts.visible && !opts.visible(path.basename(file, ".jsonl"))) continue;
+    const s = await summaries.get(file, stat, () => summaryFor(file, stat.mtimeMs));
     if (s) out.push(s);
   }
   return out;

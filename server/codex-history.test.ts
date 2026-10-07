@@ -51,6 +51,19 @@ try {
   const legacy = await getCodexSessionTurns(id);
   assert.equal(legacy[0].prompt, original);
   assert.match(JSON.stringify(legacy[0].events), /# 旧回复\\n\\n正文/);
+  assert.equal((await listCodexSessions({ limit: 10 }))[0].firstPrompt, original, "rewrite invalidates the native summary cache");
+  const renamedCwd = path.join(tmp, "renamed-project"), future = Date.now() + 60_000;
+  await fs.appendFile(file, "\n" + [
+    record(20, "event_msg", { type: "thread_name_updated", thread_name: "retained middle title" }),
+    record(future, "response_item", { type: "reasoning", raw_content: "PRIVATE_PAYLOAD".repeat(100_000) }),
+    record(30, "turn_context", { cwd: renamedCwd }),
+  ].map(r => JSON.stringify(r)).join("\n"));
+  const changed = (await listCodexSessions({ limit: 10, cwd: renamedCwd }))[0];
+  assert.equal(changed.customTitle, "retained middle title", "titles outside a small tail window are not lost for speed");
+  assert.equal(changed.lastModified, future, "ignored payloads still contribute timestamps");
+  assert.doesNotMatch(JSON.stringify(changed), /PRIVATE_PAYLOAD/);
+  await fs.unlink(file);
+  assert.deepEqual(await listCodexSessions({ limit: 10 }), [], "deleted native files disappear despite warm metadata");
 } finally {
   closeDb();
   await fs.rm(tmp, { recursive: true, force: true });

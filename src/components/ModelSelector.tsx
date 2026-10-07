@@ -1,4 +1,5 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import { refreshCodexModels } from "../lib/model-catalog";
 import Popover from "./Popover";
 import {
   modelLabel,
@@ -24,6 +25,8 @@ export default function ModelSelector({
   align = "left",
 }: Props) {
   const models = modelOptionsForProvider(provider);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
   return (
     <Popover
       align={align}
@@ -48,7 +51,15 @@ export default function ModelSelector({
             </span>
           </div>
           {provider === "codex" && <div className="px-2.5 pb-1 text-[10px] text-subtle">
-            {codexCatalogSource() === "cli-cache" ? "来自服务端 Codex CLI 模型目录" : "CLI 目录暂不可用 · 使用内置回退列表"}
+            {codexCatalogSource() === "cli" ? "来自运行时 Codex CLI" : codexCatalogSource() === "cli-cache" ? "来自 Codex CLI 缓存" : "CLI 目录暂不可用 · 使用内置回退列表"}
+            <button disabled={refreshing} onClick={async () => {
+              setRefreshing(true);
+              setRefreshFailed(!(await refreshCodexModels(true)));
+              setRefreshing(false);
+            }} className="ml-2 text-muted hover:text-fg disabled:opacity-50" aria-label="刷新 Codex 模型">
+              {refreshing ? "刷新中…" : "刷新"}
+            </button>
+            {refreshFailed && <span role="status" className="block mt-1">刷新失败，保留上次模型目录</span>}
           </div>}
           <div className="max-h-[min(60vh,460px)] overflow-y-auto">
           {models.map((m, i) => {

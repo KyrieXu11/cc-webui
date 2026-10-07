@@ -3,6 +3,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import { getDb, transact } from "./db.ts";
 import path from "node:path";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
+import { SessionSummaryCache } from "./session-summary-cache.ts";
 
 export type AgentProvider = "claude" | "codex";
 
@@ -149,19 +152,9 @@ async function listJsonlFiles(dir: string): Promise<string[]> {
 }
 
 async function parseNativeCodexSummary(
-  filePath: string
+  filePath: string,
+  stat: import("node:fs").Stats,
 ): Promise<NativeCodexSession | null> {
-  let raw: string;
-  let stat;
-  try {
-    [raw, stat] = await Promise.all([
-      fs.readFile(filePath, "utf-8"),
-      fs.stat(filePath),
-    ]);
-  } catch {
-    return null;
-  }
-
   let sessionId = sessionIdFromPath(filePath);
   let cwd: string | undefined;
   let firstPrompt = "";
@@ -169,13 +162,25 @@ async function parseNativeCodexSummary(
   let customTitle: string | undefined;
   let lastModified = stat.mtimeMs;
 
-  for (const line of raw.split(/\n/)) {
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+  for await (const line of lines) {
     if (!line.trim()) continue;
+    // Native records put the timestamp before their payload. Do not parse
+    // huge tool/private reasoning payloads after finding the initial prompt.
+    const ts = timestampMs(line.slice(0, 512).match(/"timestamp"\s*:\s*"([^"]+)"/)?.[1]);
+    if (ts && ts > lastModified) lastModified = ts;
+    const needed = line.includes('"session_meta"') || line.includes('"turn_context"') ||
+      line.includes('"thread_name_updated"') || (!firstPrompt &&
+        (line.includes('"user_message"') || line.includes('"UserMessage"'))) ||
+      (!fallbackPrompt && line.includes('"response_item"') && /"role"\s*:\s*"user"/.test(line));
+    if (!needed && ts !== null) continue;
     const record = parseJsonLine(line);
     if (!record) continue;
 
-    const ts = timestampMs(record.timestamp);
-    if (ts && ts > lastModified) lastModified = ts;
+    const recordTs = timestampMs(record.timestamp);
+    if (recordTs && recordTs > lastModified) lastModified = recordTs;
 
     const payload = record.payload ?? {};
     if (record.type === "session_meta") {
@@ -206,6 +211,8 @@ async function parseNativeCodexSummary(
       }
     }
   }
+  } catch { return null; }
+  finally { lines.close(); stream.destroy(); }
 
   if (!sessionId) return null;
   if (!firstPrompt) firstPrompt = fallbackPrompt;
@@ -222,10 +229,28 @@ async function parseNativeCodexSummary(
   };
 }
 
-async function listNativeCodexSessions(): Promise<NativeCodexSession[]> {
+const nativeSummaries = new SessionSummaryCache<NativeCodexSession>();
+
+async function listNativeCodexSessions(visible?: (id: string) => boolean): Promise<NativeCodexSession[]> {
   const files = await listJsonlFiles(CODEX_SESSIONS_DIR);
-  const sessions = await Promise.all(files.map(parseNativeCodexSummary));
-  return sessions.filter((s): s is NativeCodexSession => Boolean(s));
+  nativeSummaries.prune(new Set(files));
+  const sessions: NativeCodexSession[] = [];
+  let next = 0;
+  // Previously Promise.all read the entire store (~1GB here) into RAM on each
+  // sidebar request. Limit reads and only reparse files that actually changed.
+  await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+    while (next < files.length) {
+      const file = files[next++];
+      const id = sessionIdFromPath(file);
+      if (id && visible && !visible(id)) continue;
+      try {
+        const stat = await fs.stat(file);
+        const value = await nativeSummaries.get(file, stat, () => parseNativeCodexSummary(file, stat));
+        if (value) sessions.push(value);
+      } catch { /* vanished while enumerating */ }
+    }
+  }));
+  return sessions;
 }
 
 async function findNativeCodexSessionFile(
@@ -236,8 +261,10 @@ async function findNativeCodexSessionFile(
   if (direct) return direct;
 
   for (const file of files) {
-    const summary = await parseNativeCodexSummary(file);
-    if (summary?.sessionId === sessionId) return file;
+    try {
+      const summary = await parseNativeCodexSummary(file, await fs.stat(file));
+      if (summary?.sessionId === sessionId) return file;
+    } catch { /* vanished between enumeration and stat */ }
   }
   return null;
 }
@@ -474,8 +501,9 @@ function listStoredCodexSummaries(): SessionSummary[] {
 export async function listCodexSessions(opts: {
   limit: number;
   cwd?: string;
+  visible?: (id: string) => boolean;
 }): Promise<SessionSummary[]> {
-  const nativeSessions = await listNativeCodexSessions();
+  const nativeSessions = await listNativeCodexSessions(opts.visible);
   const stored = listStoredCodexSummaries();
   const byId = new Map<string, SessionSummary>();
 
@@ -501,6 +529,7 @@ export async function listCodexSessions(opts: {
   }
 
   return Array.from(byId.values())
+    .filter((s) => !opts.visible || opts.visible(s.sessionId))
     .filter((s) => !opts.cwd || s.cwd === opts.cwd)
     .sort((a, b) => b.lastModified - a.lastModified)
     .slice(0, opts.limit);

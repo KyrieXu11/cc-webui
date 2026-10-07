@@ -124,6 +124,12 @@ type CacheEntry = {
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60 * 1000;
 
+// Model discovery must not wait for scanning project/plugin skills.
+metaRoute.get("/models", async (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json({ codex: await getCodexModelCatalog({ refresh: c.req.query("refresh") === "1" }) });
+});
+
 metaRoute.get("/", async (c) => {
   const cwd = expandHome(c.req.query("cwd") || process.env.CC_WEBUI_CWD);
   const key = cwd ?? "__global__";
