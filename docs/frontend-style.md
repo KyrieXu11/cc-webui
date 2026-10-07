@@ -60,6 +60,9 @@ Provider 标识使用 `provider-claude` / `provider-codex`；主题色变量不�
 - 搜索仍然只有首页就地过滤与项目顶栏浮层两面。
 - 手机侧栏还是抽屉；发送 / 排队 / 停止的位置、文件拖拽、图片缩放、编辑器的
   内部滚动、Office / HTML 的安全策略均不变。
+- 手机抽屉的关闭是 React 状态控制的普通 `display:none`，不是只靠 Tailwind 的
+  `translate` 把它移走。部分 Android/WebView 忽略位移时，后者会留在屏幕上挡住整个
+  应用。关闭按钮至少 44×44px；侧栏与文件抽屉互斥，关闭后遮罩也必须消失。
 - `data-railcol` 仍是 Splitter 的量尺。侧栏新增留白在该元素内部，计入测量宽度。
   对话卡右侧 12px 间隔由外层 Splitter 一并预留，不能把主面板挤到 400px 以下。
 - 文件预览只改外层框架，不尝试给 Office、PDF 或用户 HTML 内部注入样式。
@@ -95,4 +98,7 @@ PLAYWRIGHT_CHANNEL=chrome node scripts/verify-liquid-glass.mjs http://127.0.0.1:
 
 截图与报告进 `.playwright-mcp/`。验证范围包括 1440px / 390px、明暗、搜索请求竞态、
 固定共享弹窗的窗口范围、记忆弹窗、向上模型菜单、文件栏/CodeMirror 与分隔条下限。
+安卓触摸模拟另外检查深/浅主题的首页与项目页：重复点叉叉、重新打开、禁用 individual
+translate 的兼容路径、点外部遮罩、文件抽屉切换，以及关闭后真实可操作的搜索/输入框。
+不能用 `force:true` 的点击绕过 hit-testing，也不能把“点了关闭按钮”当作“已经关掉”。
 Safari / Firefox / iOS 真机未验证；没有宣称复刻 Apple 原生材质或任意背景的 WCAG 保证。

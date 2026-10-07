@@ -23,8 +23,10 @@ const history = [
   { type: "user", uuid: "result-1", session_id: sessionId, message: { content: [{ type: "tool_result", tool_use_id: "read-style", content: ":root { --color-surface: #fbfdfe; }" }] } },
   { type: "assistant", uuid: "a-2", session_id: sessionId, message: { id: "assistant-2", content: [{ type: "text", text: "## 已统一界面的层级\n\n保留原有的字体、快捷键与文件操作，把**导航与悬浮控件**整理成同一套材质。\n\n- 导航使用轻薄的玻璃光边。\n- 对话正文保持稳定底色，不随背景变化。\n- 编辑器与文件预览继续使用独立的内部滚动。\n\n```css\n.navigation {\n  border-radius: 24px;\n  color: var(--color-fg);\n}\n```\n\n类型检查与回归测试均已通过。下一步可以检查深浅主题和手机上的抽屉。" }] } },
 ];
-async function setup({ theme = "light", logged = true, project = false, race = false, groups = false } = {}) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1, colorScheme: theme });
+async function setup({ theme = "light", logged = true, project = false, race = false, groups = false, mobile = false } = {}) {
+  const context = await browser.newContext({ viewport: mobile ? { width: 393, height: 851 } : { width: 1440, height: 1000 }, deviceScaleFactor: 1, colorScheme: theme, isMobile: mobile, hasTouch: mobile,
+    ...(mobile ? { userAgent: "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36" } : {}),
+  });
   const page = await context.newPage();
   page.on("pageerror", e => errors.push(e.message));
   const held = [];
@@ -85,7 +87,66 @@ async function layout(page, label) {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${label}: document overflow`);
   assert.equal(await page.locator("button button").count(), 0, `${label}: nested interactive buttons`);
 }
+async function verifyMobileNavigation() {
+  for (const theme of ["light", "dark"]) for (const project of [false, true]) {
+    const { page, context } = await setup({ theme, project, mobile: true });
+    try {
+      await ready(page);
+      const nav = page.locator("[data-railcol]");
+      const open = page.getByRole("button", { name: "打开侧栏", exact: true });
+      const close = page.getByRole("button", { name: "关闭侧栏", exact: true });
+      const closed = async () => {
+        await page.waitForFunction(() => {
+          const el = document.querySelector("[data-railcol]");
+          return el && getComputedStyle(el).display === "none" && !document.querySelector("[data-drawer-scrim]");
+        });
+        assert.equal(await nav.getAttribute("data-mobile-drawer"), "closed");
+        assert.equal(await nav.evaluate(e => e.getBoundingClientRect().width), 0);
+        assert.equal(await close.count(), 0, "Hidden drawer controls must not remain focusable/discoverable");
+        const hit = await open.evaluate(el => { const r=el.getBoundingClientRect(), hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return hit===el || el.contains(hit); });
+        assert(hit, "Closed navigation must not intercept the main view's touch target");
+      };
+      await closed();
+      // Use touch taps, not desktop mouse clicks or force:true. Repeated open /
+      // close catches a visually hidden but still hit-testing drawer.
+      for (let repeat = 0; repeat < 3; repeat++) {
+        await open.tap();
+        assert.equal(await nav.getAttribute("data-mobile-drawer"), "open");
+        const bounds = await close.boundingBox();
+        assert(bounds.width >= 44 && bounds.height >= 44);
+        await close.tap(); await closed();
+      }
+      await page.addStyleTag({ content: "[data-railcol] { translate: none !important; }" });
+      await open.tap(); await close.tap(); await closed();
+      await open.tap();
+      await page.touchscreen.tap(383, 200); // outside the 316px drawer
+      await closed();
+      await layout(page, `Android touch ${theme}/${project ? "project" : "home"}`);
+      if (project) {
+        await open.tap();
+        const files = page.getByRole("button", { name: "切换文件面板", exact: true });
+        await files.tap();
+        assert.equal(await nav.evaluate(e => getComputedStyle(e).display), "none");
+        await page.getByText("index.ts", { exact: true }).waitFor();
+        await files.tap(); await closed();
+        await page.locator("textarea").fill("关闭侧栏后可以继续输入");
+        assert.equal(await page.locator("textarea").inputValue(), "关闭侧栏后可以继续输入");
+      } else {
+        await page.getByLabel("搜索项目或对话", { exact: true }).fill("设置");
+        await page.getByText("统一设置页与导航交互", { exact: true }).waitFor();
+      }
+      checks.push(`Android touch ${theme}/${project ? "project" : "home"}: close/reopen, no-translate fallback, outside tap and usable main controls`);
+    } finally { await context.close(); }
+  }
+}
 try {
+  if (process.env.DRAWER_ONLY === "1") {
+    await verifyMobileNavigation();
+    assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
+    console.log(JSON.stringify({ checks, errors, unexpected, simulatedAndroidTouch: true }, null, 2));
+    await browser.close();
+    process.exit(0);
+  }
   const { page, context } = await setup();
   await ready(page);
   await page.getByText("统一设置页与导航交互", { exact: true }).waitFor();
@@ -232,6 +293,8 @@ try {
   assert.equal(configOverlay.width, 1440); assert.equal(configOverlay.height, 1000);
   await group.context.close();
   checks.push("Group chrome, full-window config and active-agent glow resolve CSS variables correctly");
+
+  await verifyMobileNavigation();
 
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
   const report = { browser: await browser.version(), checks, errors, unexpected, note: "All API fixtures are synthetic; no production data or backend was used." };

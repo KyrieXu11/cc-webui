@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const materials = readFileSync(new URL("../liquid-glass.css", import.meta.url), "utf8");
 const participants = readFileSync(new URL("../components/group/ParticipantsBar.tsx", import.meta.url), "utf8");
+const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 const props = (block: string) => Object.fromEntries(
   [...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1]!, m[2]!.trim()]),
 );
@@ -49,4 +50,6 @@ assert(!/\.composer-surface\s*\{[^}]*overflow:\s*hidden/.test(materials));
 assert(!/\.chat-panel\s*\{[^}]*overflow:\s*hidden/.test(materials));
 assert(participants.includes("color-mix(in srgb, ${a.color} 40%, transparent)"));
 assert(!participants.includes("${a.color}66"), "CSS var() cannot take a hexadecimal alpha suffix");
+assert(app.includes('display: navOpen ? "flex" : "none"'), "Closed mobile navigation must not rely on transform support");
+assert(!app.includes("max-md:-translate-x-full"), "An offscreen-only drawer can still block taps on older WebViews");
 console.log("Liquid glass: composited chrome contrast, quiet content and accessible fallbacks are guarded");

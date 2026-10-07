@@ -33,12 +33,14 @@ export default function Sidebar({
         {/* 窄屏下这颗按钮做的是「关掉抽屉」，所以画成 ✕ 并改文案 —— 同一个图标同一个
             位置却做两件事，用户没法知道点下去会发生什么。 */}
         <button
+          type="button"
           onClick={onToggleSidebar}
           aria-label={narrow ? "关闭侧栏" : "切换侧栏"}
           title={narrow ? "关闭侧栏" : "切换侧栏"}
           aria-expanded={narrow ? undefined : expanded}
           data-expanded={expanded}
-          className="panel-toggle p-2"
+          style={narrow ? { width: 44, height: 44 } : undefined}
+          className={narrow ? "panel-toggle flex items-center justify-center shrink-0" : "panel-toggle p-2"}
         >
           {narrow ? <CloseIcon /> : <SidebarIcon />}
         </button>
