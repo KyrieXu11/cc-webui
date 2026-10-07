@@ -10,6 +10,7 @@ import {
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { DirectoryScanCache } from "./directory-scan-cache.ts";
 
 import {
   listOpenedProjects,
@@ -355,6 +356,8 @@ function scanRootsFor(patterns: readonly string[], home: string): string[] {
     .filter((r, i, all) => all.indexOf(r) === i);
 }
 
+const directoryScans = new DirectoryScanCache(walkDirs);
+
 fsRoute.get("/scan", async (c) => {
   const home = os.homedir();
   // Only offer what this account may actually open. Cosmetic — the binding
@@ -378,17 +381,28 @@ fsRoute.get("/scan", async (c) => {
     // a workspace-only account the root IS the whole grant. ($HOME is excluded:
     // it is the fallback for `**`, not a project.)
     if (root !== home && matchesAnyPattern(root, patterns)) seen.add(root);
-    for (const d of await walkDirs(root)) {
+    for (const d of await directoryScans.get(root, c.req.query("refresh") === "1")) {
       if (matchesAnyPattern(d, patterns)) seen.add(d);
       if (seen.size >= 2000) break;
     }
     if (seen.size >= 2000) break;
   }
-  return c.json({ dirs: [...seen], home });
+  // A cold walk can take seconds. A grant revoked while it was running must
+  // also disappear, not survive until the next request/cache expiry.
+  const currentPatterns = await Promise.all(getAllowedPaths(user.id).map(canonicalizePattern));
+  return c.json({ dirs: [...seen].filter((d) => matchesAnyPattern(d, currentPatterns)), home });
 });
 
 fsRoute.get("/recents", async (c) => {
-  return c.json({ recents: listOpenedProjects(currentUser(c)!.id) });
+  const userId = currentUser(c)!.id;
+  if (getAllowedPaths(userId).length === 0) return c.json({ recents: [] });
+  const candidates = await Promise.all(listOpenedProjects(userId).map(async (recent) => ({
+    recent, normalized: await normalizePath(recent.path),
+  })));
+  const patterns = await Promise.all(getAllowedPaths(userId).map(canonicalizePattern));
+  return c.json({ recents: candidates
+    .filter(({ normalized }) => matchesAnyPattern(normalized, patterns))
+    .map(({ recent }) => recent) });
 });
 
 fsRoute.post("/recents", async (c) => {

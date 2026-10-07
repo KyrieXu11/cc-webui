@@ -25,11 +25,11 @@ export async function listTree(absPath: string): Promise<TreeEntry[]> {
   return entries ?? [];
 }
 
-export async function scanProjects(): Promise<{
+export async function scanProjects(options: { refresh?: boolean; signal?: AbortSignal } = {}): Promise<{
   dirs: string[];
   home: string;
 }> {
-  const res = await fetch("/api/fs/scan");
+  const res = await fetch(`/api/fs/scan${options.refresh ? "?refresh=1" : ""}`, { signal: options.signal });
   if (!res.ok) throw new Error("scan failed");
   return res.json();
 }

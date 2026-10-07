@@ -318,6 +318,9 @@ try {
   assert.ok((await groupsFor(admin.id)).includes(realGid));
 
   // Recents are per-user, not one shared list.
+  // Recent-first folder discovery also checks the CURRENT directory grants.
+  setAllowedPaths(plain.id, ["/alice/**"]);
+  setAllowedPaths(bob.id, ["/bob/**"]);
   recordOpenedProject("/alice/only", plain.id, 5);
   recordOpenedProject("/bob/only", bob.id, 6);
   const recentsFor = async (id: string) =>
@@ -326,6 +329,9 @@ try {
     ).recents.map((r: { path: string }) => r.path);
   assert.deepEqual(await recentsFor(plain.id), ["/alice/only"]);
   assert.deepEqual(await recentsFor(bob.id), ["/bob/only"]);
+  setAllowedPaths(plain.id, []);
+  setAllowedPaths(bob.id, []);
+  assert.deepEqual(await recentsFor(plain.id), [], "revoked recents are not offered");
 
   // ── a permission prompt may only be answered by its owner ────────────────
 
