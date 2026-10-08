@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const css = readFileSync(new URL("../liquid-glass.css", import.meta.url), "utf8");
+const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const header = readFileSync(new URL("../components/Header.tsx", import.meta.url), "utf8");
+const explorer = readFileSync(new URL("../components/FileExplorer.tsx", import.meta.url), "utf8");
+const dock = readFileSync(new URL("../components/RightDock.tsx", import.meta.url), "utf8");
+const pixels = (body: string, name: string) => {
+  const value = body.match(new RegExp(`\\b${name}:\\s*(\\d+)px;`));
+  assert.ok(value, `missing ${name} dimension`);
+  return Number(value[1]);
+};
+const base = css.match(/\.dock-toggle\s*\{([^}]+)\}/)![1]!;
+const mobileRules = css.split("@media (max-width: 767px)")[1]!;
+assert.ok(mobileRules, "missing mobile toolbar rules");
+const mobile = mobileRules.match(/\.dock-toggle\s*\{([^}]+)\}/)![1]!;
+const height = pixels(base, "height"), width = pixels(base, "width"), right = pixels(base, "right");
+const toolbar = css.match(/\.workbench-header\s*\{([^}]+)\}/)![1]!;
+const topInset = pixels(toolbar, "margin-top");
+assert.equal(topInset, 12, "main toolbar shares the file panel's top inset");
+assert.equal(pixels(base, "top") + height / 2, topInset + 56 / 2, "disclosure and main/file actions share the same desktop horizontal axis");
+assert.doesNotMatch(css, /\.dock-toggle\[data-expanded="true"\]\s*\{[^}]*\b(?:top|right|left|bottom|transform|translate)\s*:/, "expanded state must not move the disclosure");
+assert.equal(right - 12, 12, "button has interior space, not a circle tangent to the rounded outer edge");
+assert(72 - right - width >= 12, "desktop main actions cannot overlap the inset disclosure");
+assert.equal(pixels(mobile, "top") + pixels(mobile, "height") / 2, 28);
+assert.match(mobileRules, /\.workbench-header\s*\{\s*margin-top:\s*0;/, "mobile toolbar stays at its original viewport origin");
+assert(pixels(mobile, "width") >= 44 && pixels(mobile, "height") >= 44, "mobile disclosure remains touchable");
+assert(68 - pixels(mobile, "right") - pixels(mobile, "width") >= 12, "mobile actions have their own space too");
+assert.equal((app.match(/aria-label="切换文件面板"/g) ?? []).length, 1, "one disclosure with one consistent icon");
+assert.ok(app.includes('className="panel-toggle dock-toggle"'));
+assert.ok(!app.includes("top-[11px] right-3"), "do not reintroduce the old window-edge coordinates");
+assert.ok(header.includes('"pr-[72px] max-md:pr-[68px]"'));
+for (const source of [explorer, dock]) assert.ok(source.includes("pr-[64px] max-md:pr-[68px]"));
+assert.match(dock, /dock-document-toolbar flex items-center/, "document actions align too, rather than sticking to the bottom edge");
+assert.match(dock, /maxed && !narrow \? "h-\[68px\] pt-3" : "h-14"/, "maximized desktop editor preserves the shared action axis without shrinking slide presentation");
+console.log("Dock disclosure is inset, toolbar-aligned, and reserved in desktop/mobile layouts");

@@ -559,11 +559,12 @@ export function sessionMessagesToEvents(
     }
     if ((m as CodexSessionTurn).provider === "codex") {
       const turn = m as CodexSessionTurn;
-      if (turn.prompt.trim()) {
+      if (turn.prompt.trim() || turn.images?.length) {
         events.push({
           id: `u-codex-${turn.startedAt}`,
           type: "user",
           text: turn.prompt,
+          images: turn.images?.length ? turn.images : undefined,
         });
       }
       for (const ev of turn.events) {

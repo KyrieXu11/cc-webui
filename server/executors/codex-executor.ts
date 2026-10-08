@@ -34,6 +34,7 @@ import type {
   McpServerSpec,
 } from "./types.ts";
 import type { ImageAttachment } from "../../src/lib/types.ts";
+import { CODEX_ARTIFACT_PLUGIN_OVERRIDES } from "../codex-plugin-policy.ts";
 
 // ─── Binary resolution ──────────────────────────────────────────────────────
 
@@ -128,6 +129,7 @@ export function mcpConfigOverrides(servers: McpServerSpec[]): string[] {
 export function buildConfigOverrides(opts: ExecOptions): string[] {
   return [
     ...mcpConfigOverrides(opts.mcpServers ?? []),
+    ...CODEX_ARTIFACT_PLUGIN_OVERRIDES,
     ...(opts.disableNativeMemory ? ["features.memories=false", "memories.use_memories=false", "memories.generate_memories=false"] : []),
     // See mapSandbox: the only survivable value on `codex exec`.
     `approval_policy="never"`,

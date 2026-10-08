@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { clampPaneWidth } from "../lib/pane-width";
+import { clampPaneWidth, paneWidthAt } from "../lib/pane-width";
 
 // 可拖拽的竖分隔条。**照搬律枢 `app/src/components/Splitter.tsx` 的机制**（配色是我们
 // 自己的）。四条都是它踩出来的，别按"看起来更简单"的写法改回去：
@@ -69,6 +69,10 @@ interface Props {
   reserveSelector?: string;
   /** 这条线另一侧（主栏）的可用宽度下限，和 reserveSelector 一起构成 reserve。 */
   reserveMin?: number;
+  /** Hide only the painted line, not the drag hitbox/handlers. */
+  quiet?: boolean;
+  /** Fixed chrome before the resized pane (left rail + its outer inset). */
+  originOffset?: number;
   title?: string;
 }
 
@@ -83,6 +87,8 @@ export default function Splitter({
   defaultPx,
   reserveSelector,
   reserveMin = 0,
+  quiet = false,
+  originOffset = 0,
   title = "拖动调整宽度",
 }: Props) {
   const self = useRef<HTMLDivElement>(null);
@@ -94,8 +100,7 @@ export default function Splitter({
       : { left: 0, width: window.innerWidth };
   };
   const widthAt = (clientX: number) => {
-    const { left, width } = span();
-    return edge === "right" ? left + width - clientX : clientX - left;
+    return paneWidthAt(clientX, edge, span(), originOffset);
   };
   // 拖动那两个回调也要用同一个 reserve，否则拖的时候能越界、松手才被夹回去。
   const reserveNow = () => {
@@ -217,7 +222,7 @@ export default function Splitter({
   return (
     <div
       ref={self}
-      className="dragbar"
+      className={quiet ? "dragbar dragbar-quiet" : "dragbar"}
       onMouseDown={onDown}
       onDoubleClick={onDoubleClick}
       title={`${title}（双击复位）`}

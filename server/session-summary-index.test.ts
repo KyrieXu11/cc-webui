@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import type { Stats } from "node:fs";
+import type { SessionSummary } from "./session-store.ts";
+const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "cc-summary-index-"));
+process.env.CC_WEBUI_DB = path.join(tmp, "test.db");
+const { getDb, closeDb } = await import("./db.ts");
+const { SessionSummaryCache } = await import("./session-summary-cache.ts");
+const { SessionSummaryIndex } = await import("./session-summary-index.ts");
+const stat = (size = 1, ino = 1, mtimeMs = 1, ctimeMs = 1, dev = 1) => ({ dev, ino, size, mtimeMs, ctimeMs }) as Stats;
+const value: SessionSummary = { sessionId: "test", provider: "codex", summary: "title", firstPrompt: "完整首问", lastModified: 1 };
+let reads = 0;
+const read = async () => { reads++; return value; };
+try {
+  const cache = new SessionSummaryCache(4, 2048, "test-v1");
+  assert.deepEqual(await cache.get("a", stat(), read), value);
+  closeDb();
+  const restart = new SessionSummaryCache(4, 2048, "test-v1");
+  assert.deepEqual(await restart.get("a", stat(), read), value);
+  assert.equal(reads, 1, "new cache and DB connection reuse an unchanged native summary");
+  for (const s of [stat(2), stat(2,2), stat(2,2,2), stat(2,2,2,2), stat(2,2,2,2,2)]) await restart.get("a", s, read);
+  assert.equal(reads, 6, "size/inode/mtime/ctime/device changes invalidate durable metadata");
+  const nextParser = new SessionSummaryCache(4, 2048, "test-v2");
+  await nextParser.get("a", stat(), read);
+  assert.equal(reads, 7, "parser namespace is an explicit semantics/version boundary");
+  restart.prune(new Set());
+  assert.equal(getDb().prepare("SELECT COUNT(*) AS n FROM native_session_summaries WHERE namespace='test-v1'").get()!.n, 0);
+  await new SessionSummaryCache(4,2048,"test-v1").get("a",stat(),read);
+  assert.equal(reads, 8, "deleted files cannot resurrect through the persistent index");
+  getDb().prepare("UPDATE native_session_summaries SET value='broken' WHERE namespace='test-v1'").run();
+  await new SessionSummaryCache(4,2048,"test-v1").get("a",stat(),read);
+  assert.equal(reads, 9, "corrupt derived metadata falls back to the native file");
+
+  const bounded = new SessionSummaryIndex<SessionSummary>("bounded",2,1024);
+  bounded.put("a", "1", value); bounded.put("b", "1", value); bounded.put("c", "1", value);
+  assert.equal(bounded.get("a","1"),null, "disk index evicts by count");
+  bounded.put("big", "1", {...value, firstPrompt: "x".repeat(2048)});
+  assert.equal(bounded.get("big","1"),null, "oversized entries bypass disk admission");
+  const rawOnly = new SessionSummaryIndex<SessionSummary>("raw-only",4,1024);
+  rawOnly.put("a", "1", {...value, mine: true, ownerName: "NOT_METADATA", images: ["DO_NOT_STORE"]} as SessionSummary);
+  const raw = String(getDb().prepare("SELECT value FROM native_session_summaries WHERE namespace='raw-only'").get()!.value);
+  assert.doesNotMatch(raw, /mine|ownerName|NOT_METADATA|images|DO_NOT_STORE/);
+  rawOnly.put("b", "1", {...value, firstPrompt: "x".repeat(600)});
+  rawOnly.put("c", "1", {...value, firstPrompt: "x".repeat(600)});
+  assert.ok(Number(getDb().prepare("SELECT SUM(bytes) AS n FROM native_session_summaries WHERE namespace='raw-only'").get()!.n)<=1024, "disk index also obeys a total byte budget");
+  // No index table (or a failed write) must not block authoritative readers.
+  getDb().exec("DROP TABLE native_session_summaries");
+  const unavailable = new SessionSummaryCache(4,2048,"unavailable");
+  assert.deepEqual(await unavailable.get("a",stat(),read),value);
+} finally { closeDb(); await fs.rm(tmp,{recursive:true,force:true}); }
+console.log("persistent native summary index: restart reuse, invalidation, bounded storage and raw-only metadata verified");

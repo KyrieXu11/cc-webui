@@ -221,23 +221,86 @@ async function verifySessionAndModelUpdates() {
     const activity = page.getByLabel("Codex 处理中", { exact: true });
     await activity.waitFor();
     const word = await activity.locator("span").first().textContent();
-    assert.notEqual(word, "处理中…");
+    assert.match(word, /^[A-Za-z]+…$/, "Codex visibly keeps only the rotating verb");
     await page.waitForFunction((previous) => document.querySelector('[aria-label="Codex 处理中"] span')?.textContent !== previous, word);
-    assert.match(await activity.textContent(), /回合已用/);
+    const total = page.locator("[data-turn-status]");
+    assert.doesNotMatch(await activity.textContent(), /总耗时|回合已用|effort/);
+    assert.match(await total.textContent(), /本轮总耗时.*含工具与等待.*推理档位/);
     await page.evaluate(() => window.__fixtureCodex({ type: "item.started", item: { id: "reason", type: "reasoning", text: "" } }));
-    await page.getByLabel("Codex 思考中", { exact: true }).waitFor();
+    const reasoning = page.getByLabel("Codex 思考中", { exact: true });
+    await reasoning.waitFor();
+    assert.match(await reasoning.locator("span").first().textContent(), /^[A-Za-z]+…$/);
+    assert.doesNotMatch(await reasoning.textContent(), /处理中 · |思考中 · /);
+    assert.doesNotMatch(await reasoning.textContent(), /总耗时|回合已用/);
     assert.equal(await activity.count(), 0, "explicit reasoning replaces generic turn status");
+    assert.equal(await total.count(), 1, "total statistic is independent of reasoning");
     await page.evaluate(() => window.__fixtureCodex({ type: "item.started", item: { id: "tool", type: "command_execution", command: "echo fixture" } }));
     await page.waitForTimeout(150);
     assert.equal(await activity.count(), 0, "tool execution uses its spinner, not a synthetic thinking row");
     assert.equal(await page.getByLabel("Codex 思考中", { exact: true }).count(), 0);
+    assert.equal(await total.count(), 1, "total statistic includes tool execution too");
     await page.evaluate(() => window.__fixtureCodex({ type: "item.completed", item: { id: "tool", type: "command_execution", command: "echo fixture", exit_code: 0 } }));
     await activity.waitFor();
     await page.evaluate(() => window.__finishCodex());
     await page.waitForFunction(() => !document.querySelector('[aria-label="Codex 处理中"]'));
     assert.equal(await page.locator(".sparkle-spin").count(), 0, "done stops every status animation");
+    assert.equal(await total.count(), 0, "done stops the total timer");
     checks.push("Project sessions: compact initial 15 rows, no refetch on selection; CLI model refresh adds GPT-6.1-Sol; animated turn words preserve honest timing/tool/done semantics");
   } finally { await context.close(); }
+}
+async function verifyDockTogglePlacement() {
+  for (const mobile of [false, true]) {
+    const { page, context } = await setup({ project: true, mobile });
+    try {
+      await ready(page, ".chat-panel");
+      const toggle = page.getByRole("button", { name: "切换文件面板", exact: true });
+      const viewport = page.viewportSize();
+      const closed = await toggle.boundingBox();
+      assert.equal(closed.y + closed.height / 2, mobile ? 28 : 40);
+      assert.equal(viewport.width - closed.x - closed.width, mobile ? 12 : 24);
+      if (mobile) assert(closed.width >= 44 && closed.height >= 44);
+      const fresh = await page.getByRole("button", { name: "新对话", exact: true }).boundingBox();
+      assert(fresh.x + fresh.width < closed.x, "new chat never sits under the disclosure");
+      assert(Math.abs(fresh.y + fresh.height / 2 - closed.y - closed.height / 2) <= 1, "the full toolbar is aligned, not just the toggle");
+      assert.equal(await page.locator(".app-workbench").evaluate(e => getComputedStyle(e).backgroundImage), "none");
+      assert.equal(await page.locator(".app-workbench").evaluate(e => getComputedStyle(e).backgroundColor), "rgb(238, 242, 248)");
+      await toggle.click();
+      const opened = await toggle.boundingBox();
+      assert.deepEqual(opened, closed, "opening the dock must not move or resize its disclosure");
+      const upload = await page.getByRole("button", { name: "上传", exact: true }).boundingBox();
+      assert(Math.abs(upload.y + upload.height / 2 - opened.y - opened.height / 2) <= 1, "file toolbar actions share the toggle axis");
+      await layout(page, "inset dock toggle");
+      await screenshot(page, mobile ? "dock-toggle-mobile" : "dock-toggle-desktop");
+    } finally { await context.close(); }
+  }
+  checks.push("File disclosure stays fixed across open/closed states with reserved action space; light canvas uses flat softcard #EEF2F8");
+}
+async function verifySidebarResize() {
+  const { page, context } = await setup({ project: true });
+  try {
+    await ready(page, ".chat-panel");
+    const toggle = page.getByRole("button", { name: "切换侧栏", exact: true });
+    if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+    const sidebar = page.locator(".session-sidebar");
+    const drag = page.locator('.dragbar[title^="拖动调整左侧会话栏的宽度"]');
+    const before = await sidebar.boundingBox(), box = await drag.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down(); await page.mouse.move(box.x + 100, box.y + box.height / 2); await page.mouse.up();
+    const wide = await sidebar.boundingBox();
+    assert(wide.width > before.width + 80);
+    assert(Math.abs(Number(await page.evaluate(() => localStorage.getItem("ccwebui.sidebar_w"))) - wide.width) < 1);
+    await toggle.click(); await toggle.click();
+    assert(Math.abs((await sidebar.boundingBox()).width - wide.width) < 1, "reopening restores the sidebar width");
+    await page.getByRole("button", { name: "切换文件面板", exact: true }).click();
+    const grown = await drag.boundingBox();
+    await page.mouse.move(grown.x + grown.width / 2, grown.y + grown.height / 2);
+    await page.mouse.down(); await page.mouse.move(1300, grown.y + grown.height / 2); await page.mouse.up();
+    assert((await page.locator(".chat-panel").boundingBox()).width >= 398, "left resizing accounts for the open right dock");
+    await drag.dblclick();
+    assert.equal(Math.round((await sidebar.boundingBox()).width), 260);
+    await screenshot(page, "resizable-sidebar");
+  } finally { await context.close(); }
+  checks.push("Left sidebar resizes/persists/resets, and reciprocal pane limits protect conversation width");
 }
 async function verifyMobileNavigation() {
   for (const theme of ["light", "dark"]) for (const project of [false, true]) {
@@ -278,6 +341,9 @@ async function verifyMobileNavigation() {
         await open.tap();
         const files = page.getByRole("button", { name: "切换文件面板", exact: true });
         await files.tap();
+        assert.equal(await nav.getAttribute("aria-hidden"), "true");
+        assert.equal(await nav.evaluate(e => getComputedStyle(e).pointerEvents), "none");
+        await page.waitForFunction(() => getComputedStyle(document.querySelector("[data-railcol]")).display === "none");
         assert.equal(await nav.evaluate(e => getComputedStyle(e).display), "none");
         await page.getByText("index.ts", { exact: true }).waitFor();
         await files.tap(); await closed();
@@ -345,6 +411,7 @@ try {
 
   await page.getByRole("button", { name: "项目记忆", exact: true }).click();
   await page.getByRole("dialog", { name: "项目记忆" }).waitFor();
+  assert.match(await page.getByRole("dialog", { name: "项目记忆" }).evaluate(e => getComputedStyle(e, "::before").backdropFilter), /24px/);
   await screenshot(page, "memory-light");
   await page.keyboard.press("Escape");
 
@@ -362,14 +429,29 @@ try {
   await page.getByText("index.ts", { exact: true }).first().click();
   await page.locator(".cm-editor").first().waitFor();
   await layout(page, "editor");
+  const dockSurface = page.locator(".dock-surface");
+  const dockStyle = await dockSurface.evaluate(e => {
+    const s = getComputedStyle(e);
+    return { corners: [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomLeftRadius, s.borderBottomRightRadius], overflow: s.overflow, filter: s.backdropFilter };
+  });
+  assert.deepEqual(dockStyle.corners, ["24px", "24px", "24px", "24px"]);
+  assert.equal(dockStyle.overflow, "hidden", "opaque file children respect the content frame's corners");
+  assert.equal(dockStyle.filter, "none");
+  const dockBox = await dockSurface.boundingBox();
+  assert.equal(dockBox.y, 12);
+  assert.equal(1440 - dockBox.x - dockBox.width, 12);
+  assert.equal(1000 - dockBox.y - dockBox.height, 12);
   assert.equal(await page.locator(".cm-scroller").first().evaluate(e => getComputedStyle(e).overflowY), "auto");
   const drag = page.locator('.dragbar[title^="拖动调整右侧那格的宽度"]');
   const dragBox = await drag.boundingBox();
+  assert.equal(await drag.evaluate(e => getComputedStyle(e).backgroundImage), "none");
+  await drag.hover();
+  assert.equal(await drag.evaluate(e => getComputedStyle(e).backgroundImage), "none", "hidden seam stays quiet on hover");
   await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
   await page.mouse.down(); await page.mouse.move(100, dragBox.y + dragBox.height / 2); await page.mouse.up();
   assert((await page.locator(".chat-panel").boundingBox()).width >= 398);
   await screenshot(page, "files-light");
-  checks.push("Editor keeps internal scrolling and splitter preserves the conversation's minimum width");
+  checks.push("File panel has four clipped corners and inset desktop gutters; editor keeps internal scrolling and splitter preserves conversation width");
 
   await page.getByRole("button", { name: "切换到夜间", exact: true }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
@@ -455,6 +537,8 @@ try {
   checks.push("Group chrome, full-window config and active-agent glow resolve CSS variables correctly");
 
   await verifyMobileNavigation();
+  await verifyDockTogglePlacement();
+  await verifySidebarResize();
 
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
   const report = { browser: await browser.version(), checks, errors, unexpected, note: "All API fixtures are synthetic; no production data or backend was used." };

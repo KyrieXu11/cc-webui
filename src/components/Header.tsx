@@ -8,9 +8,8 @@ import { providerLabel, type AgentProvider } from "../lib/settings";
 
 interface Props {
   /**
-   * 右端留出 52px。**右上角那颗「文件面板」开关是绝对定位在窗口右上角的**（照律枢
-   * 的 `.docktoggle`，位置不动、图标不变），面板收起时主栏顶到窗口右沿 ⇒ 不留位就
-   * 会盖住「新对话」。面板展开时那颗按钮浮在右侧格上面，主栏不需要让位。
+   * 面板收起时给窗口锚定的文件开关让位：桌面 72px、手机 68px，包含按钮、
+   * 圆角内边距与操作间隔。面板展开时按钮在右栏上方，主栏不用让位。
    */
   reserveRight?: boolean;
   // 窄屏专用：打开左抽屉（rail + 会话栏）。桌面那两根是常驻列，不需要。
@@ -83,7 +82,7 @@ export default function Header({
     <header
       ref={bar}
       className={`workbench-header flex items-center gap-4 max-md:gap-2 h-14 pl-5 max-md:pl-1 shrink-0 ${
-        reserveRight ? "pr-[52px]" : "pr-5 max-md:pr-2"
+        reserveRight ? "pr-[72px] max-md:pr-[68px]" : "pr-5 max-md:pr-2"
       }`}
     >
       {onOpenNav && (

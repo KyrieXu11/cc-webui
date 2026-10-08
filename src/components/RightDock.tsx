@@ -4,6 +4,7 @@ import FileExplorer from "./FileExplorer";
 import Splitter, { paneNarrow } from "./Splitter";
 import { MIN_MAIN_WIDTH } from "../lib/pane-width";
 import { onDockOpen, type DockFile } from "../lib/dock-bridge";
+import { usePaneMotion } from "../lib/usePaneMotion";
 
 // 右侧那一格：**左边项目树、右边预览/编辑**，中间一条可拖的线。
 //
@@ -74,6 +75,7 @@ export default function RightDock({
   //   iframe。所以别把它改成给 iframe 加 `allow="fullscreen"`——那等于把 server/app.ts
   //   里那条决策推翻，放映的 Esc 会退回到「两下而且第二下常常落空」。
   const [presenting, setPresenting] = useState(false);
+  const motion = usePaneMotion(open, !maxed && !presenting);
   // 放映时那行提示只亮几秒。⚠️ 退出按钮**不能**做成「动一下鼠标才浮现」：指针一落到
   // ONLYOFFICE 的 iframe 上，父文档就再也收不到 mousemove（Splitter 为同一件事要盖
   // 一层全屏遮罩），控件会永远躲着不出来。所以它常驻，只是很淡。
@@ -149,7 +151,7 @@ export default function RightDock({
 
   // 收起且没有打开过文档 → 真的不渲染。收起但有文档 → hidden（见顶部注释：
   // 卸载会销毁编辑器）。
-  if (!open && docs.length === 0) return null;
+  if (!motion.present && docs.length === 0) return null;
 
   // **按内容分两档宽度，两档各记各的**（照律枢，它为此栽过一次）：只有树时窄，
   // 树+编辑器并排时宽。曾经的做法是一个「只放不收」的棘轮——打开过一次文档就把
@@ -161,6 +163,7 @@ export default function RightDock({
     <>
       {open && !narrow && !maxed && (
         <Splitter
+          quiet
           cssVar="--dockw"
           edge="right"
           min={paneNarrow.min}
@@ -180,14 +183,27 @@ export default function RightDock({
       )}
       <div
         ref={shell}
+        data-dockcol={motion.present && !narrow && !maxed ? true : undefined}
+        data-pane-expanded={motion.expanded}
+        aria-hidden={!open ? true : undefined}
+        {...(!open ? { inert: "" } : {})}
+        style={{
+          width: !narrow && !maxed && !motion.expanded ? 0 : undefined,
+          paddingRight: !narrow && !maxed && !motion.expanded ? 0 : undefined,
+          opacity: motion.expanded ? 1 : 0,
+          pointerEvents: open ? "auto" : "none",
+        }}
         className={
-          !open
+          !motion.present
             ? "hidden"
             : narrow || maxed
-              ? "fixed inset-0 z-40 bg-surface flex"
-              : "dockcol dock-surface"
+              ? "fixed inset-0 z-40 bg-surface flex dock-overlay"
+              : "dockcol dock-frame"
         }
       >
+        {/* 留白属于外层量尺，圆角裁切只包内容；手机抽屉/最大化/放映仍然满屏。
+            切换档位只换 class，不卸载里面的编辑器或 Office iframe。 */}
+        <div className={`flex ${!narrow && !maxed ? "flex-none" : "flex-1"} min-w-0 min-h-0 ${!narrow && !maxed ? "dock-surface" : ""}`}>
         {/* ── 左栏：项目树（常驻导航，点文件不会把它换掉）───────────────── */}
         <div
           className={
@@ -230,12 +246,12 @@ export default function RightDock({
         {/* ── 右栏：打开的文档（标签叠在上面）──────────────────────────── */}
         {hasDoc && (
           <div className="relative flex-1 min-w-0 flex flex-col">
-            {/* ⚠️ h-14＝主栏顶栏的高度（对齐），pr-[52px] 给窗口右上角那颗浮动开关让位。
+            {/* ⚠️ h-14 和目录树工具栏同高；右端留白与文件开关内缩位置一致。
                 标签底对齐，下划线正好落在这条下边框上。
                 ⚠️ 横向滚动只包住标签那一条：把「最大化」也放进 overflow-x-auto 里的话，
                 标签一多它就被滚走了。 */}
             <div
-              className={`flex items-end h-14 pr-[52px] border-b border-line shrink-0 ${
+              className={`dock-document-toolbar flex items-center pr-[64px] max-md:pr-[68px] border-b border-line shrink-0 ${maxed && !narrow ? "h-[68px] pt-3" : "h-14"} ${
                 presenting ? "hidden" : ""
               }`}
             >
@@ -278,7 +294,7 @@ export default function RightDock({
               {officeEnabled && active && SLIDE_RE.test(active) && (
                 <button
                   onClick={startPresent}
-                  className="shrink-0 mb-1.5 ml-1 px-2 py-1 rounded-md text-[11.5px] text-subtle hover:text-fg hover:bg-fg/5 transition-colors"
+                  className="shrink-0 ml-1 px-2 py-1 rounded-md text-[11.5px] text-subtle hover:text-fg hover:bg-fg/5 transition-colors"
                   // ⚠️ 「开始放映」那一下只能由用户点 ONLYOFFICE 自己的按钮：它的
                   //    api.js 公开方法表里没有任何启动放映的命令（showMessage /
                   //    grabFocus / serviceCommand … 全表都查过），跨源也没法替它按键。
@@ -290,7 +306,7 @@ export default function RightDock({
               )}
               <button
                 onClick={() => setMaxed((v) => !v)}
-                className="shrink-0 mb-1.5 ml-1 p-1.5 rounded-md text-subtle hover:text-fg hover:bg-fg/5 transition-colors"
+                className="shrink-0 ml-1 p-1.5 rounded-md text-subtle hover:text-fg hover:bg-fg/5 transition-colors"
                 title={maxed ? "还原" : "最大化（只铺满窗口，不进全屏）"}
                 aria-label={maxed ? "还原文档栏" : "最大化文档栏"}
               >
@@ -348,6 +364,7 @@ export default function RightDock({
             ))}
           </div>
         )}
+        </div>
       </div>
     </>
   );

@@ -67,6 +67,8 @@ export default function HomeView({
   const [home, setHome] = useState("");
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState("");
   // 搜索用的全量窗口。**首屏不拉**：默认视图叫「最近项目」，只要 60 条，而全量是
   // ~677ms 的磁盘活儿（见 SEARCH_WINDOW）。聚焦搜索框才拉，这样它和用户打字并行。
@@ -74,14 +76,18 @@ export default function HomeView({
   const [wideLoading, setWideLoading] = useState(false);
   const wideFor = useRef<AgentProvider | null>(null);
   const wideRequest = useRef(0);
+  const wideController = useRef<AbortController | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadWide = useCallback(() => {
     if (wideFor.current === provider) return;
     wideFor.current = provider;
     const request = ++wideRequest.current;
+    const controller = new AbortController();
+    wideController.current?.abort();
+    wideController.current = controller;
     setWideLoading(true);
-    listSessions(SEARCH_WINDOW, undefined, provider)
+    listSessions(SEARCH_WINDOW, undefined, provider, { signal: controller.signal })
       .then((rows) => {
         if (request === wideRequest.current) setAllSessions(rows);
       })
@@ -101,8 +107,12 @@ export default function HomeView({
     wideFor.current = null;
     setAllSessions(null);
     setWideLoading(false);
-    return () => { wideRequest.current++; };
+    return () => { wideRequest.current++; wideController.current?.abort(); };
   }, [provider]);
+
+  useEffect(() => {
+    if (query.trim()) loadWide();
+  }, [query, loadWide]);
 
   // ⌘K / ^K 聚焦搜索框，照律枢侧栏那颗「搜索 ⌘K」。只在首页挂着，所以不会和
   // App 里的 Ctrl-O / Ctrl-B 抢。
@@ -124,19 +134,25 @@ export default function HomeView({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
-    listSessions(60, undefined, provider)
+    setLoadError("");
+    setSessions([]);
+    // Only titles/path are used here. Full pasted first prompts can make a
+    // 60-row page several MB; keep those exclusively in the search window.
+    listSessions(60, undefined, provider, { compact: true, signal: controller.signal })
       .then((rows) => {
         if (!cancelled) setSessions(rows);
       })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setLoadError("最近项目加载失败，请重试。"); })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [provider]);
+  }, [provider, retry]);
 
   useEffect(() => {
     if (typeof location !== "undefined") {
@@ -421,6 +437,10 @@ export default function HomeView({
         {loading ? (
           <div className="soft-empty text-subtle text-[13px]">
             加载中…
+          </div>
+        ) : loadError ? (
+          <div className="soft-empty text-muted text-[13px]">
+            {loadError} <button className="text-blue ml-2" onClick={() => setRetry(n => n + 1)}>重试</button>
           </div>
         ) : groups.length === 0 ? (
           <div className="soft-empty text-muted text-[13px]">

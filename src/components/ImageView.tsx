@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import LiquidSelection from "./LiquidSelection";
 
 /* 图片查看器：缩放 + 拖动 + 旋转 + 适应/原图。
    替换的是一个裸 `<img className="max-w-full max-h-full object-contain">` ——
@@ -33,6 +34,7 @@ interface Props {
 export default function ImageView({ url, alt, checkerboard = true }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const img = useRef<HTMLImageElement>(null);
+  const modeRail = useRef<HTMLDivElement>(null);
   const [nat, setNat] = useState({ w: 0, h: 0 });
   const [box, setBox] = useState({ w: 0, h: 0 });
   /* ⚠️ 倍率与偏移是**一个**状态：缩放要连带修正偏移（锚点）、拖动要受当前倍率约束。
@@ -91,6 +93,7 @@ export default function ImageView({ url, alt, checkerboard = true }: Props) {
   const cur = v.z || fitScale;
   const atFit = Math.abs(cur - fitScale) < 0.005;
   const pannable = cur > fitScale + 0.005;
+  const modeKey = v.z === 0 ? "fit" : Math.abs(cur - 1) < .005 ? "original" : atFit ? "fit" : null;
 
   /* 平移边界：图比容器小的那个方向锁死居中，大的方向不许把边缘拖进容器内。
      不收边的话图能被整个拖出视野，界面上就只剩一片空白——看着像坏了。 */
@@ -155,56 +158,64 @@ export default function ImageView({ url, alt, checkerboard = true }: Props) {
   };
 
   const btn =
-    "shrink-0 h-6 min-w-6 px-1.5 inline-flex items-center justify-center rounded " +
-    "font-mono text-[11px] text-muted hover:text-fg border border-line " +
-    "hover:border-fg/30 transition-colors select-none";
-  const on = "text-fg border-fg/40";
+    "image-view-button shrink-0 inline-flex items-center justify-center font-mono select-none";
+  const on = "image-view-button--active";
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1 border-b border-line bg-fg/[0.02]">
+    <div className="image-view h-full min-h-0 flex flex-col">
+      <div className="image-view-toolbar shrink-0" role="toolbar" aria-label="图片操作">
+        <div className="image-view-controls">
+        <div className="image-control-group">
         <button className={btn} title="缩小" aria-label="缩小" onClick={() => zoomAt(1 / 1.25)}>
-          −
+          <ZoomIcon />
         </button>
         <span
-          className="w-11 text-center font-mono text-[11px] text-subtle tabular-nums select-none"
+          className="image-view-zoom text-center font-mono text-muted tabular-nums select-none"
           title="当前显示倍率（相对原图）"
         >
           {Math.round(cur * 100)}%
         </span>
         <button className={btn} title="放大" aria-label="放大" onClick={() => zoomAt(1.25)}>
-          ＋
+          <ZoomIcon plus />
         </button>
-        <span className="w-px h-3.5 bg-line mx-1" />
+        </div>
+        <div className="image-control-group image-view-modes" ref={modeRail}>
+        <LiquidSelection container={modeRail} activeKey={modeKey} axis="horizontal" />
         <button
-          className={`${btn} ${atFit ? on : ""}`}
+          className={`${btn} ${modeKey === "fit" ? on : ""}`}
+          data-liquid-key="fit"
           title="缩到看得见整张"
+          aria-pressed={modeKey === "fit"}
           onClick={toFit}
         >
           适应
         </button>
         <button
-          className={`${btn} ${Math.abs(cur - 1) < 0.005 ? on : ""}`}
+          className={`${btn} ${modeKey === "original" ? on : ""}`}
+          data-liquid-key="original"
           title="按原图尺寸显示"
+          aria-pressed={modeKey === "original"}
           onClick={() => setV(clampXY(1, 0, 0))}
         >
           原图
         </button>
-        <span className="w-px h-3.5 bg-line mx-1" />
+        </div>
+        <div className="image-control-group">
         <button className={btn} title="向左转 90°" aria-label="向左旋转" onClick={() => rotate(-90)}>
           <RotateIcon dir="ccw" />
         </button>
         <button className={btn} title="向右转 90°" aria-label="向右旋转" onClick={() => rotate(90)}>
           <RotateIcon dir="cw" />
         </button>
+        </div>
         {deg !== 0 && (
           <span className="font-mono text-[10.5px] text-subtle tabular-nums select-none">
             {deg}°
           </span>
         )}
-        <span className="flex-1" />
+        </div>
         {nat.w > 0 && (
-          <span className="font-mono text-[10.5px] text-subtle tabular-nums select-none pr-1">
+          <span className="image-view-dimensions font-mono text-muted tabular-nums select-none">
             {nat.w}×{nat.h}
           </span>
         )}
@@ -213,10 +224,8 @@ export default function ImageView({ url, alt, checkerboard = true }: Props) {
       <div
         ref={stage}
         className={
-          "flex-1 min-h-0 overflow-hidden flex items-center justify-center " +
-          (checkerboard
-            ? "bg-[repeating-conic-gradient(rgba(127,127,127,0.08)_0%_25%,transparent_0%_50%)_50%_/_16px_16px] "
-            : "bg-canvas ") +
+          "image-view-stage flex-1 min-h-0 overflow-hidden flex items-center justify-center " +
+          (checkerboard ? "image-view-stage--checker " : "") +
           (grabbing ? "cursor-grabbing" : pannable ? "cursor-grab" : "cursor-default")
         }
         onDoubleClick={(e) => (atFit ? zoomAt(1 / cur, e.clientX, e.clientY) : toFit())}
@@ -246,6 +255,7 @@ export default function ImageView({ url, alt, checkerboard = true }: Props) {
           ref={img}
           src={url}
           alt={alt}
+          className="image-view-image"
           draggable={false}
           onLoad={(e) =>
             setNat({
@@ -273,6 +283,12 @@ export default function ImageView({ url, alt, checkerboard = true }: Props) {
     </div>
   );
 }
+
+const ZoomIcon = ({ plus = false }: { plus?: boolean }) => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+    <path d={plus ? "M3 8h10M8 3v10" : "M3 8h10"} stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
 
 const RotateIcon = ({ dir }: { dir: "cw" | "ccw" }) => (
   <svg

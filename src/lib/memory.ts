@@ -31,6 +31,7 @@ export async function getProjectMemory(cwd: string, cursor = 0): Promise<Project
 }
 
 export type IndexEntry = { title: string; file: string; hook: string };
+export type MemoryItem = { memory: Memory; title: string; hook: string; indexed: boolean };
 
 // MEMORY.md 一行一条：`- [标题](文件.md) — 一句话`。认不出的行（标题、空行、
 // 手写的说明）直接跳过 —— 索引原文另外整段可看，不会因此丢东西。
@@ -48,10 +49,10 @@ export function parseMemoryIndex(md: string): IndexEntry[] {
 export function orderMemories(
   index: IndexEntry[],
   memories: Memory[],
-): Array<{ memory: Memory; title: string; hook: string; indexed: boolean }> {
+): MemoryItem[] {
   const byFile = new Map(memories.map((m) => [m.file, m]));
   const seen = new Set<string>();
-  const out: Array<{ memory: Memory; title: string; hook: string; indexed: boolean }> = [];
+  const out: MemoryItem[] = [];
   for (const e of index) {
     const m = byFile.get(e.file);
     if (!m || seen.has(e.file)) continue;
@@ -63,6 +64,32 @@ export function orderMemories(
     out.push({ memory: m, title: m.name, hook: m.description, indexed: false });
   }
   return out;
+}
+
+export function filterMemories(items: MemoryItem[], query: string): MemoryItem[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return items;
+  return items.filter(({ memory: m, title, hook }) => {
+    const fields = [title, hook, m.name, m.file, m.description, m.body].map(s => s.toLowerCase());
+    return terms.every(term => fields.some(field => field.includes(term)));
+  });
+}
+
+export function memorySearchSnippet(item: MemoryItem, query: string): string {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const metadata = [item.title, item.hook, item.memory.name, item.memory.description].join(" ").toLowerCase();
+  if (!terms.length || terms.every(term => metadata.includes(term))) return item.hook;
+  const body = item.memory.body.replace(/\s+/g, " ");
+  const hits = terms.map(term => body.toLowerCase().indexOf(term)).filter(at => at >= 0);
+  if (!hits.length) return item.hook;
+  const start = Math.max(0, Math.min(...hits) - 28), end = Math.min(body.length, start + 120);
+  return `正文：${start ? "…" : ""}${body.slice(start, end)}${end < body.length ? "…" : ""}`;
+}
+
+export function mergeMemoryPage(current: ProjectMemory, next: ProjectMemory): ProjectMemory {
+  const memories = new Map(current.memories.map(m => [m.file, m]));
+  for (const memory of next.memories) memories.set(memory.file, memory);
+  return { ...next, index: [current.index, next.index].filter(Boolean).join("\n"), memories: [...memories.values()] };
 }
 
 // 正文里的 [[其它记忆]] 变成可点的站内链接（MemoryDialog 在捕获阶段接住点击）。

@@ -3,6 +3,8 @@ import Sidebar from "./components/Sidebar";
 import ProjectSidebar from "./components/ProjectSidebar";
 import EmptyProjectSidebar from "./components/EmptyProjectSidebar";
 import RightDock from "./components/RightDock";
+import Splitter from "./components/Splitter";
+import { MIN_MAIN_WIDTH, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_LEFT_OFFSET, SIDEBAR_FIXED_WIDTH } from "./lib/pane-width";
 import FilePreviewWindow from "./components/FilePreviewWindow";
 import Header from "./components/Header";
 import Composer from "./components/Composer";
@@ -54,6 +56,7 @@ import { getSessionMessages, type SessionSummary } from "./lib/sessions";
 import { sendPermission } from "./lib/permission";
 import { useAuth } from "./AuthGate";
 import { useIsNarrow } from "./lib/useIsNarrow";
+import { usePaneMotion } from "./lib/usePaneMotion";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -251,6 +254,7 @@ export default function App() {
   // 项目记忆（只读）弹窗。按钮只在项目里出现，弹窗也只在项目里渲染。
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navMotion = usePaneMotion(narrow ? navOpen : sidebarOpen);
   // 服务端配了 ONLYOFFICE 才给 Office 编辑器，否则降级成浏览器打开/下载。
   const [officeFeature, setOfficeFeature] = useState(false);
   const [home, setHome] = useState("");
@@ -1383,11 +1387,10 @@ export default function App() {
   };
 
   return (
-    // ⚠️ relative：右上角那颗「文件面板」开关是绝对定位的（照律枢
-    // `.paneltgl.docktoggle{position:absolute;top:11px;right:12px}`）——它必须
-    // **位置不动、图标不变**，不能一会儿长在顶栏里、一会儿变成右侧格里的 ✗。
+    // ⚠️ relative：文件面板只有一颗窗口锚定的开关，图标不变、不跟分隔条横移。
+    // .dock-toggle 在开/关两态保持同一坐标，不变成另一颗 ✗。
     <div className="app-workbench relative flex h-full bg-canvas overflow-hidden">
-      {/* 桌面：rail(56) + 会话栏(260) 两根常驻列。
+      {/* 桌面：rail(56) + 可拖动会话栏（默认 260）。
           窄屏：同样两个组件原封不动，只是整体变成一个 316px 的左抽屉显示/隐藏
           —— 这是选方案 B 的理由，侧栏组件本身一行都不用改。 */}
       <div
@@ -1395,11 +1398,17 @@ export default function App() {
         //    （rail 56 / 展开会话列表 316），别删，也别挪到内层去。见 lib/pane-width.ts。
         data-railcol
         data-mobile-drawer={narrow ? navOpen ? "open" : "closed" : undefined}
+        data-pane-expanded={narrow ? navMotion.expanded : undefined}
+        aria-hidden={narrow && !navOpen ? true : undefined}
+        {...(narrow && !navOpen ? { inert: "" } : {})}
         // A closed drawer must stop intercepting taps even on WebViews that
         // ignore individual CSS translate / responsive utilities. Keep it
-        // mounted (list state survives), but hide it via ordinary display.
+        // mounted (list state survives). During a short exit, disable hits and
+        // focus immediately; after it finishes use ordinary display:none.
         style={narrow ? {
-          display: navOpen ? "flex" : "none",
+          display: navMotion.present ? "flex" : "none",
+          opacity: navMotion.expanded ? 1 : 0,
+          pointerEvents: navOpen ? "auto" : "none",
           position: "fixed", top: 0, bottom: 0, left: 0,
           width: 316, padding: 0, zIndex: 60,
           background: "var(--color-canvas)",
@@ -1435,7 +1444,12 @@ export default function App() {
           }))
         }
       />
-      {(sidebarOpen || narrow) &&
+      <div className="sidebar-disclosure"
+        data-pane-expanded={narrow || navMotion.expanded}
+        aria-hidden={!narrow && !sidebarOpen ? true : undefined}
+        {...(!narrow && !sidebarOpen ? { inert: "" } : {})}
+        style={narrow ? { width: 260, opacity: 1 } : undefined}>
+      {(navMotion.present || narrow) &&
         (currentGroupId ? (
           <GroupSidebar
             home={home}
@@ -1461,6 +1475,23 @@ export default function App() {
           />
         ))}
       </div>
+      </div>
+      {sidebarOpen && !narrow && (
+        <Splitter
+          quiet
+          cssVar="--sidebarw"
+          edge="left"
+          originOffset={SIDEBAR_LEFT_OFFSET}
+          min={SIDEBAR_MIN_WIDTH}
+          maxRatio={0.4}
+          defaultRatio={0.22}
+          defaultPx={SIDEBAR_DEFAULT_WIDTH}
+          storageKey="ccwebui.sidebar_w"
+          reserveSelector={dockOpen && inProject ? "[data-dockcol]" : undefined}
+          reserveMin={MIN_MAIN_WIDTH + SIDEBAR_FIXED_WIDTH + 13}
+          title="拖动调整左侧会话栏的宽度"
+        />
+      )}
       </div>
 
       {/* 遮罩：抽屉开着时点空白处关掉。只在窄屏存在。 */}
@@ -1614,11 +1645,9 @@ export default function App() {
       </div>
       {/* 右侧格：App 层唯一一份。⚠️ 不要下沉到某个视图里去渲染——切走就卸载，
           而卸载会销毁编辑器（以后是 OnlyOffice iframe，律枢在那儿栽过）。 */}
-      {/* 「文件面板」开关。**绝对定位在窗口右上角、图标永不变**，照律枢
-          `.paneltgl.docktoggle{position:absolute;top:11px;right:12px}`。
-          ⚠️ 别再把它挪进顶栏、也别在右侧格里另开一个 ✗：那样它会随主栏宽度飘、
-          还变成两种不同的东西（用户 2026-08-27：「一下是个侧边栏按钮一下是一个 ❌，
-          而且每次还对不齐」）。开关状态只用背景色表示。 */}
+      {/* 「文件面板」开关：窗口右上角唯一一颗，同图标，不随主栏/分隔条横移。
+          .dock-toggle 留出圆角内边距，开/关状态不改变它的位置。
+          手机保持 44px 触摸面积。开关状态只用背景色表示。 */}
       {inProject && (
         <button
           aria-label="切换文件面板"
@@ -1629,7 +1658,7 @@ export default function App() {
           }}
           aria-expanded={dockOpen}
           data-expanded={dockOpen}
-          className="panel-toggle absolute top-[11px] right-3 z-50 p-2"
+          className="panel-toggle dock-toggle"
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <rect

@@ -9,6 +9,7 @@ import { tildify } from "../lib/fs";
 import { providerLabel, type AgentProvider } from "../lib/settings";
 import { useAuth } from "../AuthGate";
 import ShareSessionDialog from "./ShareSessionDialog";
+import LiquidSelection from "./LiquidSelection";
 
 const INFLIGHT_POLL_MS = 3000;
 const PAGE_SIZE = 15;
@@ -83,6 +84,7 @@ export default function ProjectSidebar({
   const [inflight, setInflight] = useState<Set<string>>(() => new Set());
   const [sharing, setSharing] = useState<SessionSummary | null>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
+  const selectionRail = useRef<HTMLDivElement>(null);
   const { isAdmin } = useAuth();
 
   // Poll for which sessions have an active SDK turn. Powers the pulsing dot
@@ -151,7 +153,7 @@ export default function ProjectSidebar({
   };
 
   return (
-    <aside className="session-sidebar w-[260px] shrink-0 flex flex-col">
+    <aside className="session-sidebar shrink-0 flex flex-col">
       <div className="px-4 pt-4 pb-3 border-b border-line">
         <div className="min-w-0 mb-3">
           <div className="text-fg text-[14px] font-semibold truncate">
@@ -184,7 +186,7 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2 px-2">
+      <div className="flex-1 overflow-x-hidden overflow-y-auto py-2 px-2">
         {(loading || listing.scope !== scope && !error) && sessions.length === 0 ? (
           <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
         ) : sessions.length === 0 && !error ? (
@@ -193,12 +195,19 @@ export default function ProjectSidebar({
           </div>
         ) : (
           <>
+            <div key={scope} ref={selectionRail} className="conversation-selection-rail">
+            <LiquidSelection
+              container={selectionRail}
+              activeKey={currentSessionId ? `${currentProvider}:${currentSessionId}` : null}
+              layoutKey={sessions.map(s => `${s.provider}:${s.sessionId}`).join("|")}
+            />
             {sessions.map((s) => {
               const active =
                 s.sessionId === currentSessionId && s.provider === currentProvider;
               return (
                 <div
                   key={`${s.provider}:${s.sessionId}`}
+                  data-liquid-key={`${s.provider}:${s.sessionId}`}
                   title={
                     s.sharedBy
                       ? `${s.sharedBy} 共享给你的会话 —— 可以接着聊，但删不掉`
@@ -291,6 +300,7 @@ export default function ProjectSidebar({
                 </div>
               );
             })}
+            </div>
             {(sessions.length >= limit && limit < MAX_SESSIONS || loading) && (
               <div
                 ref={loaderRef}

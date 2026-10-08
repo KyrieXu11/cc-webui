@@ -46,7 +46,7 @@ try {
     PRIMARY KEY(scope_id, operation_id)
   );
   `);
-  db.exec("PRAGMA user_version=9");
+  db.exec("DROP TABLE native_session_summaries; PRAGMA user_version=9");
   const scopeId = (user: string,p: string) => digest(JSON.stringify([user,p]));
   const insScope = db.prepare("INSERT INTO project_memory_scopes(id,user_id,cwd,project_key,revision) VALUES(?,?,?,?,?)");
   for (const [user,p] of [[alice.id,cwd],[bob.id,cwd],[alice.id,otherCwd]]) insScope.run(scopeId(user,p),user,p,digest(p),1);
@@ -67,7 +67,7 @@ try {
   const c=await add(bob.id,cwd,reserved,"reserved name record",3);
   const other=await add(alice.id,otherCwd,"rule","other project body",4);
   closeDb();
-  const migrated=getDb(); assert.equal(migrated.prepare("PRAGMA user_version").get()!.user_version,10);
+  const migrated=getDb(); assert.ok(Number(migrated.prepare("PRAGMA user_version").get()!.user_version)>=10);
   assert.deepEqual(migrated.prepare("PRAGMA foreign_key_check").all(),[]);
   assert.equal(migrated.prepare("SELECT COUNT(*) as n FROM project_memory_scopes").get()!.n,2);
   const sharedA=await resolveMemoryScope(alice.id,cwd),sharedB=await resolveMemoryScope(bob.id,cwd);

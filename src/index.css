@@ -56,6 +56,8 @@
   --glass-nav-alpha: 0.82;
   --glass-regular-rgb: 23 35 46;
   --glass-regular-alpha: 0.96;
+  --memory-glass-alpha: 0.88;
+  --preview-glass-alpha: 0.88;
   --glass-clear-rgb: 34 54 68;
   --glass-clear-alpha: 0.56;
   --glass-edge: rgb(199 229 246 / 0.18);
@@ -86,17 +88,19 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-canvas: #eaf0f4;
-  --color-surface: #fbfdfe;
-  --color-raised: #e5eff3;
-  --color-surface-2: #f0f5f7;
-  --color-sunken: #dee8ee;
+  /* soft-card-dashboard-kit/src/Snippet.dc.html: neutral canvas + white cards.
+     Keep the existing typography, brand and dark theme; change surfaces only. */
+  --color-canvas: #eef2f8;
+  --color-surface: #ffffff;
+  --color-raised: #f1f4fa;
+  --color-surface-2: #f7f9fc;
+  --color-sunken: #e3e9f3;
   --color-fg: #132837;
   --color-muted: #3e5767;
   /* Deeper than the kit's ink-3: tiny workbench labels also sit on the canvas
      and inset controls, not just white cards. Keep those readable too. */
   --color-subtle: #506575;
-  --color-line: #e1e9ee;
+  --color-line: #e2e8f2;
   --color-line-strong: #cbdbe4;
   --color-blue: #1663bf;
   --color-blue-hover: #0e4f9f;
@@ -113,11 +117,13 @@
   --shadow-float: 0 2px 4px rgba(16, 26, 46, 0.05), 0 18px 40px -16px rgba(16, 26, 46, 0.16);
   --shadow-chip: 0 1px 2px rgba(16, 26, 46, 0.10), inset 0 1px 0 #ffffff;
   --shadow-inset: inset 0 1px 2px rgba(16, 26, 46, 0.07);
-  --glass-nav-rgb: 246 251 254;
+  --glass-nav-rgb: 255 255 255;
   --glass-nav-alpha: 0.76;
-  --glass-regular-rgb: 248 252 254;
+  --glass-regular-rgb: 255 255 255;
   --glass-regular-alpha: 0.96;
-  --glass-clear-rgb: 248 253 255;
+  --memory-glass-alpha: 0.86;
+  --preview-glass-alpha: 0.86;
+  --glass-clear-rgb: 255 255 255;
   --glass-clear-alpha: 0.58;
   --glass-edge: rgb(255 255 255 / 0.72);
   --glass-edge-light: rgb(255 255 255 / 0.98);
@@ -125,9 +131,10 @@
   --glass-sheen: rgb(255 255 255 / 0.36);
   --glass-shadow: 0 8px 28px -16px rgb(38 76 100 / 0.28), 0 2px 5px rgb(38 76 100 / 0.05);
   --glass-shadow-float: 0 24px 64px -18px rgb(33 66 88 / 0.28), 0 4px 12px rgb(33 66 88 / 0.08);
-  --glass-ambient-a: #cee5e3;
-  --glass-ambient-b: #c6dce9;
-  --glass-ambient-c: #ece2d7;
+  --glass-ambient-a: #eef2f8;
+  --glass-ambient-b: #eef2f8;
+  --glass-ambient-c: #eef2f8;
+  --glass-workspace: var(--color-canvas);
 
   --syn-keyword: #8250df;
   --syn-string: #0a7c42;
@@ -307,6 +314,15 @@ textarea {
     transparent 6px
   );
 }
+/* Outer panel seams stay invisible, even on hover; retain the full 9px hitbox,
+   resize cursor and double-click reset. Inner editor splitters keep their line. */
+.dragbar-quiet, .dragbar-quiet:hover { background: transparent; }
+
+.session-sidebar { width: var(--sidebarw, 260px); }
+@media (max-width: 767px) {
+  /* A saved desktop width must not escape the fixed 316px mobile drawer. */
+  .session-sidebar { width: 260px; }
+}
 
 /* 拖动中：ONLYOFFICE 是 iframe，会吞掉落在它上面的鼠标事件，指针一进文档区就断连。
    盖一层全屏透明遮罩把事件抢回来，同时锁住光标形状与选区。 */
@@ -322,18 +338,19 @@ body.resizing::after {
 }
 
 /* 右侧那一格。宽度来自 --dockw（由 Splitter 直接改，见那里的注释①）。
-   140ms 过渡＝「换档」（列表窄档 ↔ 编辑器宽档）滑过去而不是跳过去。
+   280ms 过渡＝开合与「换档」（列表窄档 ↔ 编辑器宽档）滑过去而不是跳过去。
    ⚠️ 拖动时必须关掉它，否则面板慢一拍跟手，手感是「线不跟手」。 */
 .dockcol {
   width: var(--dockw, 22%);
   flex: none;
   min-width: 0;
+  overflow: hidden;
   /* ⚠️ **row**，不是 column：这一格里面是「左树 | 右预览」两栏并排。 */
   display: flex;
   flex-direction: row;
-  transition: width 0.14s ease;
+  transition: width 280ms cubic-bezier(.22, .8, .25, 1), padding-right 280ms ease, opacity 160ms ease;
 }
-body.resizing .dockcol {
+body.resizing .dockcol, body.resizing .sidebar-disclosure {
   transition: none;
 }
 

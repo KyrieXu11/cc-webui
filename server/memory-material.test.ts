@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import MemoryDialog from "../src/components/MemoryDialog.tsx";
+
+const html = renderToStaticMarkup(createElement(MemoryDialog, { cwd: "/preview/project", onClose: () => {} }));
+assert.match(html, /role="dialog" aria-label="项目记忆"/);
+assert.match(html, /class="memory-dialog-scrim fixed inset-0/);
+assert.match(html, /class="memory-dialog .*soft-dialog/);
+assert.match(html, /aria-label="搜索项目记忆"/);
+assert.match(html, /搜索名称、描述和正文/);
+assert.doesNotMatch(html, /backdrop-blur-\[2px\]/, "parent scrim must not flatten the dialog's own backdrop sampling");
+const source = readFileSync(new URL("../src/components/MemoryDialog.tsx", import.meta.url), "utf8");
+assert.match(source, /memory-reading-surface/, "reading remains opaque while shell/index are frosted");
+assert.match(source, /memoryCompat/, "old punctuation-adjacent CJK bold gets display-only compatibility");
+assert.match(source, /searching && data\?\.nextCursor != null && !loadingMore && !notice/, "search walks all pages and stops on errors");
+const css = readFileSync(new URL("../src/liquid-glass.css", import.meta.url), "utf8");
+assert.match(css, /\.memory-dialog::before\s*\{[^}]*backdrop-filter:\s*blur\(24px\)/);
+assert.doesNotMatch(css, /\.memory-dialog\s*\{[^}]*\b(?:backdrop-filter|filter|transform|contain)\s*:/, "blur lives on decoration, not the modal host");
+console.log("Project memory uses a visible frosted shell without weakening the reading surface");

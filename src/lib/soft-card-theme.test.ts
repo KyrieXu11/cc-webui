@@ -41,8 +41,11 @@ function readable(palette: Record<string, string>, fg: string, bg: string, theme
   assert.ok(ratio >= minimum, `${theme}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1 (needs ${minimum}:1)`);
 }
 
-assert.equal(light["--color-canvas"], "#eaf0f4");
-assert.equal(light["--color-surface"], "#fbfdfe");
+assert.equal(light["--color-canvas"], "#eef2f8");
+assert.equal(light["--color-surface"], "#ffffff");
+assert.equal(light["--color-surface-2"], "#f7f9fc");
+assert.equal(light["--color-sunken"], "#e3e9f3");
+assert.match(css.match(/:root\[data-theme="light"\] \{([\s\S]*?)\n\}/)![1]!, /--glass-workspace:\s*var\(--color-canvas\);/, "softcard canvas is flat, not a cyan ambient gradient");
 assert.equal(light["--color-blue"], "#1663bf");
 assert.notEqual(dark["--color-on-brand"], light["--color-on-brand"]);
 for (const [theme, palette] of [["light", light], ["dark", dark]] as const) {

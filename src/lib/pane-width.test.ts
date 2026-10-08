@@ -6,7 +6,7 @@
 // 还站着一根 `shrink-0` 的定宽侧栏，被挤掉的只能是 `flex-1` 的主栏。
 
 import assert from "node:assert/strict";
-import { clampPaneWidth, MIN_MAIN_WIDTH } from "./pane-width.ts";
+import { clampPaneWidth, MIN_MAIN_WIDTH, paneWidthAt, SIDEBAR_FIXED_WIDTH, SIDEBAR_LEFT_OFFSET, SIDEBAR_MIN_WIDTH } from "./pane-width.ts";
 
 // ── 不传 reserve 时就是老行为（内层那条树/预览的线仍然走这一支）────────────
 assert.equal(clampPaneWidth(500, 260, 0.85, 1000), 500);
@@ -41,5 +41,14 @@ assert.equal(clampPaneWidth(99_999, 260, 0.85, 6000, reserve), 5100, "0.85×6000
 
 // ── 窗口小到两头都塞不下时，min 压过 max（原有语义，别改）──────────────────
 assert.equal(clampPaneWidth(99_999, 260, 0.85, 700, reserve), 260);
+
+assert.equal(paneWidthAt(200, "right", { left: 0, width: 1000 }), 800, "existing right splitter geometry is unchanged");
+assert.equal(paneWidthAt(520, "left", { left: 280, width: 900 }), 240, "inner editor still measures from its parent");
+assert.equal(paneWidthAt(SIDEBAR_LEFT_OFFSET + 260, "left", { left: 0, width: win }, SIDEBAR_LEFT_OFFSET), 260, "left sidebar drag subtracts fixed rail/inset instead of jumping by 66px");
+const rightWidth = 568;
+const sidebar = clampPaneWidth(99_999, SIDEBAR_MIN_WIDTH, .4, win, MIN_MAIN_WIDTH + SIDEBAR_FIXED_WIDTH + 13 + rightWidth);
+assert.equal(win - sidebar - SIDEBAR_FIXED_WIDTH - 13 - rightWidth, MIN_MAIN_WIDTH, "growing left sidebar preserves chat width while right dock is open");
+const rightAfterLeft = clampPaneWidth(99_999, 260, .85, win, sidebar + SIDEBAR_FIXED_WIDTH + MIN_MAIN_WIDTH + 13);
+assert.equal(rightAfterLeft, rightWidth, "reciprocal resize limits settle without oscillating");
 
 console.log("pane-width.test.ts: all assertions passed");

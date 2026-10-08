@@ -7,6 +7,8 @@ import { randomUUID } from "node:crypto";
 import { appendCodexTurn } from "./session-store.ts";
 import { prepareProjectMemory } from "./project-memory/runtime.ts";
 import { codexExecutor } from "./executors/codex-executor.ts";
+import { WEB_OUTPUT_RULES } from "./web-output-rules.ts";
+import { CODEX_ARTIFACT_PLUGIN_PROMPT } from "./codex-plugin-policy.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl } from "./codex-mcp-config.ts";
 import {
@@ -31,7 +33,7 @@ const CODEX_RUNTIME_PROMPT =
   "WEBUI RUNTIME: For shell commands, prefer the MCP bash tools. " +
   "Use mcp__bash__run with run_in_background=true for long-running commands; " +
   "poll with mcp__bash__output, terminate with mcp__bash__kill, and discover existing tasks with mcp__bash__list. " +
-  "Foreground mcp__bash__run commands can be detached by the UI.";
+  "Foreground mcp__bash__run commands can be detached by the UI." + CODEX_ARTIFACT_PLUGIN_PROMPT + WEB_OUTPUT_RULES;
 
 type BufferedMsg = { event: string; data: string };
 
@@ -408,6 +410,7 @@ codexChat.post("/chat", async (c) => {
           cwd,
           prompt,
           startedAt,
+          images: validImages(rawImages),
           events: turnEvents,
         }).catch((err) => {
           console.error(`[codex ${reqId}] failed to persist session:`, err);

@@ -1,6 +1,8 @@
 import type { ChatEvent } from "../lib/types";
 import EditDiff from "./EditDiff";
+import ApplyPatchDiff, { PatchStats } from "./ApplyPatchDiff";
 import ThinkingRow from "./ThinkingRow";
+import CodexActivityRow from "./CodexActivityRow";
 import { useEffect, useState } from "react";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
@@ -11,7 +13,7 @@ type ThinkingEvent = Extract<ChatEvent, { type: "thinking" }>;
 // decided on). Keeping thinking INSIDE the group is what keeps the connector
 // line continuous; when these rows were separate blocks, every one of them cut
 // the line in two and left a blank gap.
-export type TimelineRow = StepEvent | ThinkingEvent | { id: string; type: "activity"; turnStartedAt?: number };
+export type TimelineRow = StepEvent | ThinkingEvent | { id: string; type: "activity" };
 
 function ToolElapsed({ reported = 0 }: { reported?: number }) {
   const [elapsed, setElapsed] = useState(reported);
@@ -124,11 +126,16 @@ function StepDetails({
   tool,
   input,
   output,
+  status,
 }: {
   tool: string;
   input?: any;
   output?: string;
+  status: StepEvent["status"];
 }) {
+  if (tool === "ApplyPatch" && Array.isArray(input?.changes)) {
+    return <ApplyPatchDiff changes={input.changes} failed={status === "error"} />;
+  }
   const isDiffTool =
     tool === "Edit" || tool === "Write" || tool === "NotebookEdit";
   if (isDiffTool && input) {
@@ -204,14 +211,16 @@ export default function StepTimeline({
       )}
       <div className="flex flex-col">
         {rows.map((row) => {
-          if (row.type === "activity") return <ThinkingRow key={row.id} tokens={0} kind="turn" live turnStartedAt={row.turnStartedAt} effort={effort} />;
+          if (row.type === "activity") return <CodexActivityRow key={row.id} />;
           if (row.type === "thinking") {
+            if (liveThinkingIds !== undefined) {
+              return <CodexActivityRow key={row.id} phase="reasoning" active={liveThinkingIds.has(row.id)} effort={effort} />;
+            }
             return (
               <ThinkingRow
                 key={row.id}
                 tokens={row.tokens ?? 0}
                 effort={effort}
-                live={liveThinkingIds === undefined ? undefined : liveThinkingIds.has(row.id)}
               />
             );
           }
@@ -236,6 +245,7 @@ export default function StepTimeline({
                       {s.arg}
                     </span>
                   )}
+                  {s.tool === "ApplyPatch" && <PatchStats changes={s.input?.changes} />}
                   {/* 慢工具的已等待时长。本地工具最长能等 5.5 分钟（扫码登录
                       要等人拿手机），没有这个数字的话 UI 停在「进行中」和
                       「卡死了」看起来一模一样。 */}
@@ -253,7 +263,7 @@ export default function StepTimeline({
                 </div>
               </button>
               {open && (
-                <StepDetails tool={s.tool} input={s.input} output={s.output} />
+                <StepDetails tool={s.tool} input={s.input} output={s.output} status={s.status} />
               )}
             </div>
           );

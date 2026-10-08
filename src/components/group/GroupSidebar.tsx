@@ -52,7 +52,7 @@ export default function GroupSidebar({
   };
 
   return (
-    <aside className="session-sidebar w-[260px] shrink-0 flex flex-col">
+    <aside className="session-sidebar shrink-0 flex flex-col">
       <div className="px-4 pt-4 pb-3 border-b border-line">
         <div className="flex items-center gap-2 mb-3">
           <div className="flex -space-x-1">
