@@ -46,4 +46,19 @@ assert.equal(events.length, 1);
 assert.equal(events[0].type, "user");
 assert.deepEqual(events[0].type === "user" ? events[0].images : [], [image]);
 
+// Native history includes the inline image, not its deleted CLI temp path.
+// Images survive reopen, image-only requests, repeated prose and attach replay.
+events = sessionMessagesToEvents([
+  { provider: "codex", startedAt: 500, prompt: "同一个问题", images: [image], events: [reply("带图回复")] },
+  { provider: "codex", startedAt: 600, prompt: "同一个问题", events: [reply("无图回复")] },
+  { provider: "codex", startedAt: 700, prompt: "", images: [image], events: [] },
+]);
+const users = events.filter(e => e.type === "user");
+assert.equal(users.length, 3, "image-only history is still a user bubble");
+assert.deepEqual(users.map(e => e.images), [[image], undefined, [image]], "images never leak to the next identical question");
+events = apply(events, { ...user(700, ""), images: [image] });
+assert.equal(events.filter(e => e.type === "user").length, 3, "attach does not duplicate a restored image bubble");
+const lastUser = events.at(-1);
+assert.deepEqual(lastUser?.type === "user" ? lastUser.images : undefined, [image]);
+
 console.log("Codex questions and per-turn item IDs survive history/attach replay");

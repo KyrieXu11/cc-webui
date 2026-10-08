@@ -42,7 +42,7 @@ const { issueSession, SESSION_COOKIE } = await import("./auth/session.ts");
 const { createApp } = await import("./app.ts");
 const { getCodexSessionTurns } = await import("./session-store.ts");
 const { closeDb } = await import("./db.ts");
-const { applySDKMessage } = await import("../src/lib/processor.ts");
+const { applySDKMessage, sessionMessagesToEvents } = await import("../src/lib/processor.ts");
 const { showCodexActivity, liveToolIds } = await import("../src/lib/turn-activity.ts");
 import type { ChatEvent } from "../src/lib/types.ts";
 
@@ -54,9 +54,10 @@ try {
   const headers = (id: string) => ({ cookie: `${SESSION_COOKIE}=${issueSession(id)}`, "content-type": "application/json" });
   const app = createApp();
   const prompt = "本轮的新问题\n不要显示上一轮的回复";
+  const image = { mediaType: "image/png", data: "aW1hZ2U=", name: "screenshot.png" };
   const res = await app.request("/api/codex/chat", {
     method: "POST", headers: headers(sender.id),
-    body: JSON.stringify({ cwd: tmp, prompt, clientTurnId, permissionMode: "auto", effort: "xhigh" }),
+    body: JSON.stringify({ cwd: tmp, prompt, clientTurnId, permissionMode: "auto", effort: "xhigh", images: [image] }),
   });
   assert.equal(res.status, 200);
   const reader = res.body!.getReader();
@@ -75,6 +76,7 @@ try {
   assert.equal(frames[1].event, "turn_user", "question is buffered before any CLI output");
   assert.equal(frames[1].data.prompt, prompt);
   assert.equal(frames[1].data.startedAt, frames[0].data.startedAt);
+  assert.deepEqual(frames[1].data.images, [image]);
 
   // An authorized viewer has no sender-local ActiveTurn. Only SSE replay can
   // recover the current question while the completed-turn store is empty.
@@ -93,6 +95,7 @@ try {
     if (data) events = applySDKMessage(events, JSON.parse(data), () => {});
   }
   assert.deepEqual(events.filter(e => e.type === "user").map(e => e.text), [prompt]);
+  assert.deepEqual(events.filter(e => e.type === "user").map(e => e.images), [[image]], "another authorized tab recovers the image from SSE replay");
   assert.deepEqual(events.filter(e => e.type === "assistant").map(e => e.text), ["finished"]);
   assert.equal(showCodexActivity(events, false), false, "done stops activity");
   assert.deepEqual([...liveToolIds(events, false)], []);
@@ -100,6 +103,14 @@ try {
   const stored = await getCodexSessionTurns(sessionId);
   assert.equal(stored[0].prompt, prompt);
   assert.equal(stored[0].startedAt, frames[1].data.startedAt);
+  const reopened = sessionMessagesToEvents(stored);
+  assert.deepEqual(reopened.filter(e => e.type === "user").map(e => e.images), [[image]], "completed history persists images even when no native rollout exists");
+  assert.deepEqual(reopened.filter(e => e.type === "assistant").map(e => e.text), ["finished"], "persisted control envelope does not duplicate replies");
+  const historyPath = `/api/sessions/${sessionId}/messages?provider=codex&cwd=${encodeURIComponent(tmp)}`;
+  const history = await app.request(historyPath, { headers: headers(viewer.id) });
+  assert.equal(history.status, 200);
+  assert.match(await history.text(), /aW1hZ2U=/);
+  assert.equal((await app.request(historyPath, { headers: headers(stranger.id) })).status, 404, "durable attachment bytes remain session-authorized");
 } finally {
   await fs.writeFile(release, "").catch(() => {});
   closeDb();

@@ -38,6 +38,7 @@ try {
     "feishu_bindings",
     "groups_index",
     "local_mcp_servers",
+    "native_session_summaries",
     "opened_projects",
   ]) {
     assert.ok(tables.includes(t), `missing table ${t}`);

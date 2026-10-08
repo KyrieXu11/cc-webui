@@ -3,6 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { wrapMemoryPrompt } from "../shared/project-memory-envelope.ts";
+import { sessionMessagesToEvents } from "../src/lib/processor.ts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import UserBubble from "../src/components/UserBubble.tsx";
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "cc-codex-history-"));
 process.env.CC_WEBUI_DB = path.join(tmp, "test.db");
@@ -41,15 +45,63 @@ try {
   const summary = (await listCodexSessions({ limit: 10 }))[0];
   assert.equal(summary.firstPrompt, original);
 
+  // CLI 0.161.0 embeds bytes in response_item, but its UserMessage contains
+  // only a temp path that the executor removes. Reopen must restore the bytes
+  // exactly once without opening arbitrary paths or leaking them to summaries.
+  const image = { mediaType: "image/png", data: "aW1hZ2U=" };
+  const image2 = { mediaType: "image/jpeg", data: "c2Vjb25k" };
+  const inputImage = (img = image) => ({ type: "input_image", image_url: `data:${img.mediaType};base64,${img.data}` });
+  const localImage = { type: "local_image", path: path.join(tmp, "DO_NOT_READ.txt") };
+  await fs.writeFile(localImage.path, "PRIVATE_LOCAL_FILE");
+  await fs.writeFile(file, [
+    record(1, "session_meta", { id, cwd: tmp }),
+    record(2, "event_msg", { type: "task_started" }),
+    record(3, "response_item", { type: "message", role: "user", content: [inputImage(), inputImage(image2), { type: "input_text", text: wrapped }] }),
+    item(4, { type: "UserMessage", id: "image-u1", content: [localImage, { type: "text", text: wrapped }] }),
+    item(5, { type: "AgentMessage", id: "image-a1", content: [{ type: "text", text: "reply" }] }),
+    record(6, "event_msg", { type: "task_complete" }),
+    record(7, "event_msg", { type: "task_started" }),
+    record(8, "response_item", { type: "message", role: "developer", content: [inputImage()] }),
+    record(9, "response_item", { type: "message", role: "user", content: [
+      { type: "input_image", image_url: "https://example.invalid/private.png" },
+      { type: "input_image", image_url: `file://${localImage.path}` },
+      { type: "input_image", image_url: "data:text/html;base64,PHNjcmlwdD4=" },
+      { type: "input_image", image_url: "data:image/png;base64,not-base64!" },
+    ] }),
+    item(10, { type: "UserMessage", id: "image-u2", content: [localImage, { type: "text", text: wrapped }] }),
+    record(11, "event_msg", { type: "task_complete" }),
+    record(12, "event_msg", { type: "task_started" }),
+    item(13, { type: "UserMessage", id: "image-only", content: [localImage] }),
+    record(14, "response_item", { type: "message", role: "user", content: [inputImage()] }),
+    record(15, "event_msg", { type: "task_complete" }),
+    record(16, "event_msg", { type: "task_started" }),
+    record(17, "response_item", { type: "message", role: "user", content: [inputImage()] }),
+    // An interrupted task without UserMessage must not lend images to the next.
+    record(18, "event_msg", { type: "turn_aborted" }),
+    record(19, "event_msg", { type: "task_started" }),
+    item(20, { type: "UserMessage", id: "no-image", content: [{ type: "text", text: "next question" }] }),
+  ].map(r => JSON.stringify(r)).join("\n"));
+  const imageTurns = await getCodexSessionTurns(id);
+  assert.deepEqual(imageTurns.map(t => t.images), [[image, image2], undefined, [image], undefined]);
+  const userEvents = sessionMessagesToEvents(imageTurns).filter(e => e.type === "user");
+  assert.deepEqual(userEvents.map(e => e.text), [original, original, "", "next question"]);
+  assert.deepEqual(userEvents.map(e => e.images), [[image, image2], undefined, [image], undefined]);
+  const bubble = renderToStaticMarkup(createElement(UserBubble, { text: userEvents[0].text, images: userEvents[0].images }));
+  assert.equal((bubble.match(/<img /g) ?? []).length, 2, "reopened history renders the images, not just their text");
+  assert.match(bubble, /src="data:image\/png;base64,aW1hZ2U="/);
+  assert.doesNotMatch(JSON.stringify(imageTurns), /DO_NOT_READ|PRIVATE_LOCAL_FILE|example.invalid|PRIVATE_REASONING|INDEX_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(await listCodexSessions({ limit: 10 })), /aW1hZ2U=|image_url|DO_NOT_READ/, "sidebar metadata never carries image bytes");
+
   // Retain support for older event_msg layouts, without compacting before
   // memory-envelope removal or flattening markdown in the displayed reply.
   await fs.writeFile(file, [
     record(1, "session_meta", { id, cwd: tmp }),
-    record(10, "event_msg", { type: "user_message", message: wrapped }),
+    record(10, "event_msg", { type: "user_message", message: wrapped, images: [`data:${image.mediaType};base64,${image.data}`] }),
     record(11, "event_msg", { type: "agent_message", message: "# 旧回复\n\n正文" }),
   ].map(r => JSON.stringify(r)).join("\n"));
   const legacy = await getCodexSessionTurns(id);
   assert.equal(legacy[0].prompt, original);
+  assert.deepEqual(legacy[0].images, [image], "older inline event_msg image layouts remain supported");
   assert.match(JSON.stringify(legacy[0].events), /# 旧回复\\n\\n正文/);
   assert.equal((await listCodexSessions({ limit: 10 }))[0].firstPrompt, original, "rewrite invalidates the native summary cache");
   const renamedCwd = path.join(tmp, "renamed-project"), future = Date.now() + 60_000;

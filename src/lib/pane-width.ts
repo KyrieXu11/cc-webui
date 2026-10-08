@@ -13,6 +13,16 @@
  *  下界来自 RightDock 里那条实测注释：0.62 档下主栏只剩 292px，「顶栏和输入框开始
  *  互相叠」。所以取一个明确高于它的数，而不是再试一次。 */
 export const MIN_MAIN_WIDTH = 400;
+// Desktop left rail + gutters + quiet splitter. The stored variable controls
+// only the conversation list, not this fixed chrome or the mobile drawer.
+export const SIDEBAR_DEFAULT_WIDTH = 260;
+export const SIDEBAR_MIN_WIDTH = 220;
+export const SIDEBAR_LEFT_OFFSET = 56 + 10;
+export const SIDEBAR_FIXED_WIDTH = 56 + 22 + 1;
+
+export function paneWidthAt(clientX: number, edge: "left" | "right", span: { left: number; width: number }, offset = 0): number {
+  return (edge === "right" ? span.left + span.width - clientX : clientX - span.left) - offset;
+}
 
 /**
  * 把 px 夹进 [min, max]。max 同时受两条约束，取更小的那个：

@@ -584,7 +584,10 @@ finally 里自己管。
 `XHIGH_CLAUDE_MODELS` 保持手维护（现在键是别名，不用再随版本编辑）。**CLI 完全不校验
 `--effort`**（`haiku --effort xhigh` 甚至 `--effort bogustier` 都静默通过），所以它当不了裁判。
 
-## 下一步
+## 下一步（2026-09-17 的历史计划）
+
+> **状态更新**：下面的模型目录计划已在 2026-09-29 落地，2026-10-07 又升级为真实 CLI
+> model/list 查询，见文末对应日期；不能把这一节的「仍未做」当成当前 TODO。
 
 全部完成。剩下的是**新工作**，不是迁移的尾巴：
 
@@ -635,3 +638,146 @@ finally 里自己管。
   `CC_WEBUI_CODEX_MODELS_CACHE` 显式覆盖仍是离线/测试入口。独立 `/api/meta/models` 无需等 skills 扫描。
 - 浏览器保留账号默认值与用户选择；模型菜单可以刷新。修正 max→xhigh / ultra→medium 的旧翻译，按目录保留档位。
 - 回合状态恢复用户要求的动态词组（每 1.8 秒），但 elapsed 仍标「回合已用」；不伪造 reasoning 事件或独立思考耗时。
+
+### 2026-10-08：整轮耗时与 reasoning 状态分离
+
+- 当前 exec 接入没有可验证的单轮累计 reasoning 时长。原生 rollout 的 Reasoning
+  完成记录可以证明发生过推理，但不能用相邻完成记录的间隔或「总耗时减工具时间」
+  当作模型推理用时。
+- 保留动态词与 sparkle；初版在阶段未知时写「处理中」，显式 pending reasoning 时写
+  「思考中」。同日用户要求精简后，可见文案只保留 `Considering…` 等动态词，阶段语义
+  留在 aria-label/title，不再加中文前缀。整轮计时移到独立灰色 `TurnStatus` 行，写「本轮总耗时」和「含工具与等待」，
+  在工具/推理/回答阶段都持续显示，不冒充思考计时；effort 标明为「推理档位」。
+- 总计时只使用 `turn_meta.startedAt`。未收到可靠起点（例如当前群聊路径）就不显示时间，
+  不以组件挂载时间替代；刷新/attach 也不会把累计时间重置成零。Claude 的 token 活动行不改。
+
+### 2026-10-08：仅在 cc-webui 禁用 PPT/PDF 插件
+
+- 用户要求只关 `presentations@openai-primary-runtime` 与 `pdf@openai-primary-runtime`。
+  executor 每次 spawn（含 resume）通过 `--config plugins.<id>.enabled=false` 覆盖，
+  **不改 `~/.codex/config.toml`、不关整个 plugins feature、不影响原生 Codex/Claude**。
+- 网页单聊与会话引擎的 Codex 每轮附带当前插件政策，防止 resume 时把此前读过的 skill
+  正文当成仍启用的工作流。项目脚本/普通已装库可继续制作和检查 PPT/PDF；禁用并非
+  删除缓存或文件访问沙箱。配置机制见 [官方插件开关](https://developers.openai.com/plugins/build/plugins#enable-or-disable-a-plugin-for-a-repo)。
+- **CLI key 不带 TOML 表头的引号**。本机 0.161.0 仅用临时 app-server 的 config/read +
+  skills/list 实测：带引号的形式仍列出启用的 PPT/PDF；无引号形式的有效配置为 false，
+  两个 skill 不再出现，spreadsheets 等其它 skill 保留；普通 Codex 不带覆盖仍列出 PPT/PDF。
+  全局 config 的 SHA-256 前后一致，验证未起 thread/turn。
+
+### 2026-10-08：Codex 问题排查汇总与防回归
+
+这轮用户反馈的现象均已对照原始 assistant 帧、工具读取记录或实际 CLI metadata
+核查。下表集中保存原因与处理边界，不把产品能力缺失、模型输出错误和网页 UI 混为一谈。
+
+| 现象 | 已确认的原因 | 已实施的处理 / 仍需遵守的边界 |
+|---|---|---|
+| 回复显示「下载」，点了却打不开 | 原始回复把 `成品/…docx` 等磁盘相对路径写成 Markdown href；浏览器将它解析为网站路径。创建/移动文件本身不提供下载 URL | 每轮注入 `server/web-output-rules.ts`：位置用行内 code 报告，不编站点/API URL、不冒充附件。**没有新增下载功能，也没有改写历史链接** |
+| 中文正文露出 `**` | 原文如 `**how to do：如何做某事。**这里用…`；结束标记前的标点和后续中文使其不满足当前 CommonMark 强调边界 | 输出规范要求首尾标点在强调标记外，如 `**how to do**：如何做某事。这里用…`。测试使用真实 `Markdown.tsx` 验证正例；**没有更换解析器或正则修补源文本** |
+| 项目记忆正文露出 `**落实：**逐题` 等星号 | 旧记忆内容包含同类中文粗体边界；不是没有挂 Markdown 渲染器，正常列表/链接等仍在渲染 | 仅记忆浏览启用 `memoryCompat`，在已解析的普通 text 节点上补 strong；跳过代码/链接/转义例子，不写回旧记忆、不改原生库，也不改变普通聊天解析。`server/memory-markdown.test.ts` 验证；新输出仍应遵守规范 |
+| 最终回复露出 `:codex-followup[...]{prompt="..."}` | 这轮实际读取的 presentations skill 明确要求该语法（26.909.12148 版本，第 234 行）；cc-webui 没有这个宿主控件的渲染器 | 网页回复只能用普通 Markdown，有用的后续建议改为普通文字/列表。只适配最终回复，不改全局 skill，也不新增这种按钮 |
+| 用户以为文档 skill 已全部禁用，PPT skill 却仍被使用 | 排查当时全局配置只关闭 `documents`；`presentations`、`pdf` 等是独立插件且仍开启，原始会话的技能目录确实列出了 presentations | 用户随后确认：**只在 cc-webui 的 Codex 子进程关闭 PPT/PDF**，不改全局开关，不影响原生 Codex/Claude；表格等未被要求关闭的插件保留 |
+| 局部禁用的参数看起来正确，实际上仍能发现 PPT/PDF skill | CLI 0.161.0 实测：在逐级 key 中照搬 TOML 表头的引号没有关掉目标插件。只测 argv 拼接会漏掉这个问题 | `plugins.presentations@openai-primary-runtime.enabled=false` / `plugins.pdf@openai-primary-runtime.enabled=false` 随每次 spawn 传入；用真实 config/read + skills/list 核对有效配置和可用技能，不能只看单元测试或缓存目录 |
+| 禁用后旧会话可能继续照过去读过的 skill 做事 | resume 保留历史内容；禁用发现不是清除历史或磁盘访问隔离 | `server/codex-plugin-policy.ts` 每轮说明旧 skill 指引不再适用，不手动加载被禁用 skill；已有项目脚本/普通库仍可用于制作和检查 PPT/PDF。不宣称缓存被删除或变成不可访问 |
+| 刚发送时有图片，重新打开对话后只剩文字 | 0.161.0 的 `response_item` 用户消息含内嵌 `input_image`；`UserMessage` 事件只记 executor 随后删除的临时 `local_image` 路径。历史读取器只读文字，DB 的 CLI 输出也没有图片字节 | native 历史从同一 task 的用户 `response_item` 恢复内嵌图片并透传到气泡；新带图 turn 在既有 DB events 中保存 `turn_user` 作为兜底。支持多图/纯图片/重复问题，不改原生记录、不读任意本地图片路径或请求远程 URL，仍走会话读取授权；`codex-history.test.ts` / `codex-attach.test.ts` / `codex-turn.test.ts` 防回归 |
+| `Whirring… (5m… · xhigh effort)` 让人以为连续推理了 5 分钟 | 动态词是运行反馈，原计时来自整轮 startedAt；包括模型等待、工具和生成。当前 **exec 接入**没有可靠的单轮累计 reasoning 用时，完成记录的间隔也不能当作推理时间 | Codex 可见活动文案按用户要求只保留动态词；阶段区别留在 aria-label/title，不能把未知阶段标成已确认思考；灰色 `TurnStatus` 独立显示「本轮总耗时 / 含工具与等待」，effort 标为配置档位。**Claude 的原思考行、token 活动计时和动画不改** |
+
+**排查顺序**：先从实际服务日志或 DB 的会话 metadata 确认 provider 和 cwd，再查对应
+原始存储。Codex 需要同时看 `~/.codex/sessions/` 的 rollout 与 DB 的
+`codex_sessions` / `codex_turns`；只查 `~/.claude/projects/` 不足以判断「本机没有记录」。
+取不到记录先核对来源，不能仅凭截图猜模型原文；不把整段真实对话、凭据或工具结果复制进仓库。
+
+**回归入口**：`server/web-output-rules.test.ts` 验证规范中的渲染正例；
+`server/project-memory-turn.test.ts` 用假 CLI 检查 memory 开/关、Plan 和 resume 都有规范与
+局部插件覆盖，且 Claude 调用不受影响；`server/executors/codex-executor.test.ts` 钉住 key
+和 resume 之前的参数位置；`src/lib/turn-activity.test.ts` / `server/turn-status.test.ts`
+检查阶段信号与独立总计时。真实插件有效性另以只读 metadata 查询确认，**不启动模型 turn**。
+
+图片历史回放另由 `server/codex-history.test.ts` 验证原生 inline 图片、临时路径不可依赖与
+task 隔离；`server/codex-attach.test.ts` 验证带图 POST → attach → 完成后 DB 回放及陌生人
+拒绝；`src/lib/codex-turn.test.ts` 验证多轮图片、纯图片和重放不重复。历史中已存在 inline
+字节的旧消息可以直接恢复，不需重发；只有旧临时路径且已被清理的记录不能凭空恢复。
+
+输出规范是对后续模型回复的约束，**不是确定性的渲染修复，也不是从此保证模型绝不写错**。
+遇到复现应继续检查原始帧和实际收到的本轮规范，而不是悄悄降档、补不存在的接口或改旧历史。
+相关圆角、固定开关、quiet 分隔条、左栏拖拽、记忆弹窗材质属于网页 UI，记录在
+`docs/frontend-style.md` / `docs/file-manager.md`，不要归因于 Codex reasoning 或 CLI 协议。
+
+### 2026-10-08：后续问题的排查与进度
+
+- 管理页会话数误用 `resourceIdsOwnedBy(...).size`。只读现场比对 Rebecca：归属记录
+  69 条（Claude 60 / Codex 9），原生文件或 Codex DB 实际存在 11 条（Claude 5 / Codex 6）；
+  58 条无对应实体，不能断言都是「没删成功」，也可能是失效/换号的遗留。计划修统计
+  口径，**尚未实施/发布，不为修计数删除权限归属或用户数据**。
+- Codex `ApplyPatch` 的 input.changes 已含 `file/type/unified_diff/move_path`，但旧网页
+  `StepDetails` 没接差异视图分支，退回通用 JSON。用户后续要求修复：现已接入
+  `ApplyPatchDiff.tsx` / `patch-diff.ts` 并发布，逐文件显示旧/新行号、红绿差异和 +/− 统计。
+  支持 native/exec 形状、移动、新建/删除；原始数据折叠保留，超 600 行先限量显示。
+  CLI 缺 diff 时明确告知，失败时不声称应用成功；**不读取当前文件冒充历史修改**。
+  Claude 原有 Edit/Write/NotebookEdit 渲染与 thinking 展示均未改。
+- 首页「最近项目」加载慢：首屏短摘录 + Codex 跨重启元数据索引已实施/发布；见下方验证。
+- 整个文件夹打包下载：用户此次明确要求，排在动效之后；尚未实施。用户早先的
+  「不要增加下载」仅针对模型编造的聊天下载链接，不得把新文件树打包需求混作同一件事。
+
+#### 首页性能探查（2026-10-08）
+
+`HomeView` 首屏请求 `listSessions(60, undefined, provider)`，但 Codex 的 limit 在
+`listNativeCodexSessions` **读取所有可见 native 元数据之后**才截取；扫描器逐行读到 EOF。
+本机共有 Codex 324 份 / 1195.5 MiB、Claude 1144 份 / 950.1 MiB 的 jsonl。
+`SessionSummaryCache` 已存在，但只要文件 size/mtime/ctime 改变，就会重新解析整个文件；
+活跃大文件持续追加也会失效，因此不能说「有缓存就不可能慢」。
+
+只读原生文件 + **隔离测试 DB**（仅复制会话 id/cwd/时间/长度，首问用占位字符串，不复制
+凭据或真实消息）的存储函数剖析如下。它不是公网 HTTP/浏览器端到端耗时，也不含登录
+模型目录的初始化；“冷”指本进程元数据缓存未命中，不指 OS 磁盘缓存冷启动。
+
+| 场景 | 本机耗时 | 返回条数 | 原始 JSON 量级 |
+|---|---:|---:|---:|
+| Codex 管理员，首次 limit=60 | 2898 ms | 60 | 986 KiB |
+| Codex 管理员，同进程热缓存 | 6 ms | 60 | 986 KiB |
+| Codex Rebecca 可见范围，缓存已预热 | 4 ms | 6 | 11 KiB |
+| Claude 管理员，首次 limit=60 | 177 ms | 60 | 4369 KiB |
+| Claude 管理员，热缓存 | 21 ms | 60 | 4369 KiB |
+
+修复前首页没有用已有 `compact=1`：首问全文对初始列表无用，却随 60 条全部传回。对同一批
+rows 仅截断 firstPrompt 到 256 字符，Codex 由 986 KiB 降到 **24 KiB**，Claude 由
+4369 KiB 降到 **51 KiB**。修复应区分首屏/搜索：首屏短摘录，搜索仍保留完整范围；
+不能简单只读头尾而丢掉中间改名和后续 cwd 更新。授权仍每次重新算、先可见性再
+limit，不缓存跨账号可见结果。
+
+#### 首页修复与验收（2026-10-08）
+
+- `HomeView` 初始 60 条用 `compact=1`，聚焦/输入搜索仍请求完整 `SEARCH_WINDOW=1000`，
+  不复用短摘录。两种请求都有 AbortSignal/过期回包守卫；加载错误显示重试，不伪装成空列表。
+- schema **11** 只新增可重建的 `native_session_summaries` 索引，不改写任何 CLI 文件、
+  会话、归属或记忆正文。索引仅允许路径/id/cwd/标题/首问/时间等原始 metadata，
+  不保存 mine/owner/shares/图片/工具内容。每个 parser namespace 最多 1024 条 / 32MiB，
+  LRU 淘汰；文件消失清索引。parser 语义变化必须更新 namespace。
+- Codex `SessionSummaryCache` 启用持久索引；每次请求仍枚举/stat，并按
+  dev/inode/size/mtime/ctime 验证。**任何变化都重新完整扫描**，不假设文件只追加，
+  因而重写/截断/换 inode 和中间标题/cwd 仍可靠。索引故障回退原生文件。
+- `summary-jsonl.ts` 对有明确 CLI 头部的无关记录只保留 1024-byte header，后续字节
+  直接流过，减少巨大工具/图片/reasoning 行的拼接/解码。相关记录完整读取，
+  不熟悉的字段顺序回退全行；所有行的 timestamp 仍参与最后更新时间。
+- 真实 native 文件 + 隔离 DB 的对比：旧冷元数据缓存 **2478ms**；新首次建索引
+  **2213ms**、同进程热缓存 **7ms**；**新进程复用已建索引 71ms**。60 条样本首屏
+  从约 983KiB 降至 24KiB；前后扫描版本的静态 summary 内容 hash 一致。
+  这些是本机存储层数据，**不是公网端到端承诺**。首次索引仍须读完整日志，活跃文件
+  变化仍会失效重扫；没有用限制搜索范围来掩盖慢请求。
+- 类型检查、**87 项**完整脚本测试、隔离构建通过。Chrome 原生 UI 用合成 fixture
+  检查逐文件红绿差异/双行号/统计、首屏 compact 请求、窗口外搜索的非 compact 请求；
+  未调用模型或操作真实用户数据。正式服务 idle 校验后重启加载后端，
+  本机/公网 HTML/JS/CSS 与已验证构建逐字节一致。
+- rollback：`/tmp/cc-webui-edit-home-rollback.XjZo5k/`，含旧 dist 和私有一致性 SQLite
+  快照。正式 schema 10→11、外键正常；用户2/归属90/Codex会话13/turn73/
+  记忆scope9/条目178/版本206 的前后计数一致。旧代码可忽略新增索引表；
+  不要为前端回滚恢复旧 DB 而丢弃发布后的用户写入。
+
+#### 文件夹打包探查（2026-10-08）
+
+前端 `FileExplorer` 在 pickedHasDir 时显式禁用下载；后端 `/api/files/download` 对
+`!st.isFile()` 回 400「只能下载文件」。不是没有打包能力：已有多文件 `zipStream`，
+中文名/相对目录/CRC/流式发送已由 `files-routes.test.ts` 与 `zip.test.ts` 验证。
+目前是 Store 模式的 ZIP（打包、不重新压缩），无 ZIP64、无目录条目表示；新增整目录
+不能只把按钮解除禁用。需要递归逐项授权、符号链接与越界处理、目录结构/空目录条目、
+重复选择去重、文件数和整体包大小上限（不只单文件 <4GiB）。两项现有测试通过，
+功能尚未实现/发布；没有建立匿名下载路由或让模型编造链接。

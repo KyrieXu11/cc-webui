@@ -7,6 +7,7 @@ import SummaryCard from "./SummaryCard";
 import ThinkingBlock from "./ThinkingBlock";
 import PendingHint from "./PendingHint";
 import RetryHint from "./RetryHint";
+import TurnStatus from "./TurnStatus";
 import { liveThinkingIds, liveToolIds, showCodexActivity } from "../lib/turn-activity";
 
 export type RetryInfo = {
@@ -107,7 +108,7 @@ export default function MessageList({
 
   const activeTools = codex ? liveToolIds(events, !!isRunning) : undefined;
   if (codex && !retryInfo && showCodexActivity(events, !!isRunning)) {
-    const row: TimelineRow = { id: "live-codex-activity", type: "activity", turnStartedAt };
+    const row: TimelineRow = { id: "live-codex-activity", type: "activity" };
     const last = blocks[blocks.length - 1];
     if (last?.kind === "timeline") last.rows.push(row);
     else blocks.push({ kind: "timeline", id: row.id, rows: [row] });
@@ -195,6 +196,7 @@ export default function MessageList({
       ) : (
         !codex && isPending && blocks.length > 0 && <PendingHint />
       )}
+      {codex && isRunning && <TurnStatus key={turnStartedAt ?? "unknown"} startedAt={turnStartedAt} effort={effort} />}
     </div>
   );
 }

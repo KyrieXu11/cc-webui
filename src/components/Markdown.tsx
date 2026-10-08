@@ -1,17 +1,20 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkAutolink from "../lib/cjk-autolink";
+import remarkCjkMemoryStrong from "../lib/cjk-memory-strong";
 
 interface Props {
   text: string;
+  /** Read-only compatibility for punctuation-adjacent bold in older memories. */
+  memoryCompat?: boolean;
 }
 
 // 唯一的 markdown 渲染器：聊天正文（流式，每个 delta 重渲染一次）和 .md 文件
 // 预览共用同一套排版，避免两处 components 映射漂移。
-export default function Markdown({ text }: Props) {
+export default function Markdown({ text, memoryCompat = false }: Props) {
   return (
     <ReactMarkdown
-      remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkAutolink]}
+      remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkAutolink, ...(memoryCompat ? [remarkCjkMemoryStrong] : [])]}
       components={{
         p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
         h1: ({ children }) => (

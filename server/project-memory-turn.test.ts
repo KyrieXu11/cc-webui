@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import { WEB_OUTPUT_RULES } from "./web-output-rules.ts";
+import { CODEX_ARTIFACT_PLUGIN_OVERRIDES, CODEX_ARTIFACT_PLUGIN_PROMPT } from "./codex-plugin-policy.ts";
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "cc-memory-turn-"));
 Object.assign(process.env, {
   CC_WEBUI_DB: path.join(tmp, "db"),
@@ -68,6 +70,7 @@ const {
 const {
   unwrapMemoryPrompt
 } = await import("../shared/project-memory-envelope.ts");
+const { projectSlug } = await import("./claude-sessions.ts");
 try {
   const user = createUser({
     username: "member",
@@ -88,7 +91,7 @@ try {
     sessionId: ""
   });
   const app = createApp();
-  const send = async (provider: "claude" | "codex", permissionMode = "auto") => {
+  const send = async (provider: "claude" | "codex", permissionMode = "auto", sessionId?: string) => {
     const res = await app.request(provider === "claude" ? "/api/chat" : "/api/codex/chat", {
       method: "POST",
       headers: {
@@ -99,7 +102,8 @@ try {
         cwd: tmp,
         prompt: "hello",
         clientTurnId: randomUUID(),
-        permissionMode
+        permissionMode,
+        sessionId
       })
     });
     assert.equal(res.status, 200);
@@ -122,6 +126,7 @@ try {
     assert.match(r.prompt, /INDEX_SENTINEL/);
     assert.doesNotMatch(r.prompt, /BODY_SENTINEL_DO_NOT_AUTO_INJECT/);
     assert.equal(unwrapMemoryPrompt(r.prompt).trim(), "hello");
+    assert.ok(r.codex ? r.prompt.includes(WEB_OUTPUT_RULES) : r.args.some((a: string) => a.includes(WEB_OUTPUT_RULES)), "both providers receive web output rules with memory enabled");
   }
   assert.equal(claude.nativeDisabled, "1");
   assert.ok(claude.args.includes(memoryPrompt(true)) || claude.args.some((a: string) => a.endsWith(memoryPrompt(true))));
@@ -150,18 +155,48 @@ try {
     assert.match(r.prompt, /INDEX_REFRESH_SENTINEL/);
     assert.doesNotMatch(r.prompt, /BODY_SENTINEL_DO_NOT_AUTO_INJECT/);
     assert.ok(r.codex ? r.prompt.includes(readonly) : r.args.some((a: string) => a.endsWith(readonly)), "both providers receive the same read-only fixture");
+    assert.ok(r.codex ? r.prompt.includes(WEB_OUTPUT_RULES) : r.args.some((a: string) => a.includes(WEB_OUTPUT_RULES)), "Plan mode keeps web output rules without changing memory restrictions");
   }
   process.env.CC_WEBUI_PROJECT_MEMORY_ENABLED = "false";
   await send("claude");
   const last = JSON.parse((await fs.readFile(capture, "utf8")).trim().split("\n").at(-1)!);
   assert.equal(last.prompt, "hello");
   assert.equal(last.nativeDisabled, undefined);
+  assert.ok(last.args[last.args.indexOf("--append-system-prompt") + 1].includes(WEB_OUTPUT_RULES), "Claude also receives web output rules with memory disabled");
   assert.doesNotMatch(last.args[last.args.indexOf("--mcp-config") + 1], /"memory"/);
   await send("codex");
   const offCodex = JSON.parse((await fs.readFile(capture, "utf8")).trim().split("\n").at(-1)!);
   assert.doesNotMatch(offCodex.prompt, /project-memory-v2|project-memory-snapshot/);
+  assert.ok(offCodex.prompt.includes(WEB_OUTPUT_RULES), "Codex also receives web output rules with memory disabled");
   assert.ok(!offCodex.args.includes("features.memories=false"));
   assert.ok(!offCodex.args.some((a: string) => a.startsWith("mcp_servers.memory.")), "feature-off restores native Codex behavior too");
+
+  // 旧会话也必须收到本轮规范，不能只在首次创建时注入。假 CLI 不落 native
+  // transcript，因此为 Claude 的 resume 存在性检查补一份隔离 fixture。
+  const nativeDir = path.join(process.env.CC_WEBUI_CLAUDE_PROJECTS_DIR!, projectSlug(tmp));
+  await fs.mkdir(nativeDir, { recursive: true });
+  await fs.writeFile(path.join(nativeDir, "11111111-1111-4111-8111-111111111111.jsonl"), JSON.stringify({
+    type: "user", uuid: randomUUID(), cwd: tmp,
+    message: { role: "user", content: "hello" },
+  }) + "\n");
+  await send("claude", "auto", "11111111-1111-4111-8111-111111111111");
+  await send("codex", "auto", "22222222-2222-4222-8222-222222222222");
+  const resumed = (await fs.readFile(capture, "utf8")).trim().split("\n").slice(-2).map(s => JSON.parse(s));
+  for (const r of resumed) {
+    assert.ok(r.args.includes(r.codex ? "resume" : "--resume"), "test actually resumes a native session");
+    assert.ok(r.codex ? r.prompt.includes(WEB_OUTPUT_RULES) : r.args.some((a: string) => a.includes(WEB_OUTPUT_RULES)), "native resume receives current web output rules too");
+  }
+  for (const r of (await fs.readFile(capture, "utf8")).trim().split("\n").map(s => JSON.parse(s))) {
+    if (r.codex) {
+      for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) {
+        assert.equal(r.args[r.args.indexOf(rule) - 1], "--config", "PPT/PDF are disabled in every actual Codex spawn, with memory on/off or resume");
+      }
+      assert.ok(r.prompt.includes(CODEX_ARTIFACT_PLUGIN_PROMPT), "old skill text cannot silently revive the disabled workflow on resume");
+    } else {
+      assert.ok(!r.args.some((a: string) => CODEX_ARTIFACT_PLUGIN_OVERRIDES.includes(a)), "Claude invocation is unaffected");
+      assert.ok(!r.prompt.includes(CODEX_ARTIFACT_PLUGIN_PROMPT));
+    }
+  }
 } finally {
   closeDb();
   await fs.rm(tmp, {

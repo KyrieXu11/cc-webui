@@ -3,6 +3,9 @@
 import assert from "node:assert/strict";
 import {
   getProjectMemory,
+  filterMemories,
+  memorySearchSnippet,
+  mergeMemoryPage,
   linkifyMemoryRefs,
   orderMemories,
   parseMemoryIndex,
@@ -64,6 +67,28 @@ assert.equal(
   "相关 [teacher-role-context](#memory:teacher-role-context)、[writing-style-no-ai-tone](#memory:writing-style-no-ai-tone)。",
 );
 assert.equal(linkifyMemoryRefs("没有链接"), "没有链接");
+
+const searchable = orderMemories([], [
+  { ...mem("format.md", "reading-format", "课堂步骤"), body: "先划关键词，然后逐题讲评。" },
+  { ...mem("font.md", "ppt-font-arial", "只使用 Arial"), body: "保留原来的设计风格" },
+]);
+assert.equal(filterMemories(searchable, "   "), searchable);
+assert.deepEqual(filterMemories(searchable, "ARIAL").map(x => x.memory.file), ["font.md"]);
+assert.deepEqual(filterMemories(searchable, "关键词").map(x => x.memory.file), ["format.md"], "body-only matches are searchable");
+assert.deepEqual(filterMemories(searchable, "reading 关键词").map(x => x.memory.file), ["format.md"], "keywords may match different fields of the same memory");
+assert.equal(filterMemories(searchable, "reading Arial").length, 0);
+assert.equal(filterMemories(searchable, "[.*]").length, 0, "query is literal text, never a regular expression");
+const reading = searchable.find(x => x.memory.file === "format.md")!;
+assert.match(memorySearchSnippet(reading, "关键词"), /^正文：.*关键词/);
+assert.equal(memorySearchSnippet(reading, "课堂"), "课堂步骤");
+const first = { dir: "/project", index: "- [first](first.md)", memories: [mem("first.md", "first")], total: 101, nextCursor: 100 };
+const second = { dir: "/project", index: "- [last](last.md)", memories: [{ ...mem("last.md", "last"), body: "第101条的目标关键词" }], total: 101, nextCursor: null };
+const merged = mergeMemoryPage(first, second);
+assert.equal(merged.nextCursor, null);
+assert.equal(merged.memories.length, 2);
+assert.equal(filterMemories(orderMemories(parseMemoryIndex(merged.index!), merged.memories), "目标关键词")[0].memory.file, "last.md", "search includes entries beyond the first page");
+assert.equal(mergeMemoryPage(merged, second).memories.length, 2, "repeated page entries are not duplicated");
+assert.equal(first.memories.length, 1, "page merging never mutates the current cache");
 
 // The daily UI never falls back to the standalone Claude memory endpoint.
 const originalFetch = globalThis.fetch;

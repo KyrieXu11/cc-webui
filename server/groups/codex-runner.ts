@@ -7,6 +7,7 @@ import {
   unregisterMcpSessionContext,
 } from "../mcp-context.ts";
 import { codexExecutor } from "../executors/codex-executor.ts";
+import { CODEX_ARTIFACT_PLUGIN_PROMPT } from "../codex-plugin-policy.ts";
 import type { McpServerSpec } from "../executors/types.ts";
 import { systemPromptFor } from "./input-builder.ts";
 import { isCodexNonFatalNotice } from "../codex-events.ts";
@@ -31,7 +32,7 @@ export async function* runCodex(args: {
   // into the prompt. The preamble + cross-injection prefixes give the
   // model enough context to behave as a group participant.
   const groupSystemPrompt = systemPromptFor({ config, target: ctx.agentId });
-  const fullPrompt = `[系统指引]\n${groupSystemPrompt}\n\n${prompt}`;
+  const fullPrompt = `[系统指引]\n${groupSystemPrompt}${CODEX_ARTIFACT_PLUGIN_PROMPT}\n\n${prompt}`;
 
   const mcpToken = randomUUID();
   registerMcpSessionContext({

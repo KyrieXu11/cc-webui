@@ -1,4 +1,5 @@
 import type { AgentProvider } from "./settings";
+import type { ImageAttachment } from "./types";
 
 export type SessionSummary = {
   sessionId: string;
@@ -46,6 +47,7 @@ export type CodexSessionTurn = {
   provider: "codex";
   prompt: string;
   startedAt: number;
+  images?: ImageAttachment[];
   events: unknown[];
 };
 

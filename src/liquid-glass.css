@@ -42,6 +42,9 @@
     -webkit-backdrop-filter: blur(var(--glass-blur-regular)) saturate(var(--glass-saturation));
     backdrop-filter: blur(var(--glass-blur-regular)) saturate(var(--glass-saturation));
   }
+  /* Match the dock's top inset. Move the toolbar as a whole, not its toggle
+     independently, so every desktop action sits on the same horizontal axis. */
+  .workbench-header { margin-top: 12px; }
   .workbench-header::before {
     inset: 6px 12px 6px 0;
     border-radius: 999px;
@@ -109,6 +112,20 @@
   .workbench-nav { padding: 12px 12px 12px 10px; }
   .nav-panel { display: flex; height: 100%; overflow: hidden; border-radius: var(--radius-card); }
   .nav-panel > aside { background: transparent; }
+  .sidebar-disclosure {
+    display: flex; flex: none; width: var(--sidebarw, 260px); min-width: 0;
+    overflow: hidden; opacity: 1;
+    transition: width 280ms cubic-bezier(.22, .8, .25, 1), opacity 160ms ease;
+  }
+  .sidebar-disclosure[data-pane-expanded="false"] { width: 0; opacity: 0; pointer-events: none; }
+  .workbench-nav[data-mobile-drawer], .dock-overlay { transition: opacity 200ms ease; }
+  /* Ordinary CSS backs up inert on older WebViews, including child controls
+     with their own pointer-events:auto during the bounded exit interval. */
+  .sidebar-disclosure[aria-hidden="true"] *, .dockcol[aria-hidden="true"] *, .dock-overlay[aria-hidden="true"] *, .workbench-nav[data-mobile-drawer="closed"] * { pointer-events: none !important; }
+  /* Keep content at its real width while the outer disclosure reveals it.
+     No host transform/filter/contain: viewport-fixed child dialogs still work. */
+  .dockcol > .dock-surface { flex: none; width: calc(var(--dockw, 22vw) - 12px); }
+  .dockcol[data-pane-expanded="false"] { width: 0; padding-right: 0; opacity: 0; pointer-events: none; }
   .workbench-rail { border-right-color: color-mix(in srgb, var(--color-line-strong) 55%, transparent); }
   .workbench-rail button { border-radius: 999px; }
   .chat-panel {
@@ -150,13 +167,136 @@
     border-radius: 999px;
     color: var(--color-muted);
     box-shadow: inset 0 1px 0 var(--glass-edge-light);
-    transition: background-color 160ms, border-color 160ms, color 160ms;
+    transition: background-color 160ms, border-color 160ms, color 160ms, transform 120ms ease, box-shadow 160ms;
   }
   .panel-toggle:hover { background: var(--color-raised); color: var(--color-fg); }
+  .panel-toggle:active { transform: scale(.92); box-shadow: inset 0 1px 3px rgb(0 0 0 / .1); }
   .panel-toggle[data-expanded="true"] { background: var(--color-wash); border-color: color-mix(in srgb, var(--color-blue) 35%, var(--color-line-strong)); }
-  .dock-surface { background: var(--color-surface); border-radius: var(--radius-card) 0 0 var(--radius-card); box-shadow: var(--shadow-card); }
+  /* One viewport-anchored disclosure. Opening the panel must never move it. */
+  .dock-toggle {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+  /* Gutters stay inside --dockw, so Splitter's reserved main-column width is
+     still correct. Only desktop docking gets this frame, never fullscreen. */
+  .dock-frame { padding: 12px 12px 12px 0; }
+  .dock-surface {
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    border: 1px solid color-mix(in srgb, var(--color-line-strong) 55%, transparent);
+    box-shadow: var(--shadow-card);
+    /* The opaque tree/editor children would otherwise paint over the corners.
+       No filter/transform/contain here: fixed delete dialogs stay viewport-wide. */
+    overflow: hidden;
+  }
   .dock-tab { border-radius: var(--radius-control) var(--radius-control) 0 0; }
   .dock-tab[data-active="true"] { background: var(--color-wash); border-color: var(--color-blue); color: var(--color-blue); }
+  /* The normal modal sheet is intentionally near-opaque. Memory gets a visible
+     frosted shell/index, while its long reading surface remains opaque. */
+  .memory-dialog-scrim { background: rgb(7 13 26 / 0.24); }
+  .memory-dialog {
+    --color-subtle: var(--color-muted);
+    border-radius: 28px;
+    box-shadow: var(--glass-shadow-float), 0 0 0 1px var(--glass-edge-low);
+  }
+  .memory-dialog::before {
+    background: linear-gradient(145deg, var(--glass-sheen), transparent 42%), rgb(var(--glass-regular-rgb) / var(--memory-glass-alpha));
+    -webkit-backdrop-filter: blur(24px) saturate(var(--glass-saturation));
+    backdrop-filter: blur(24px) saturate(var(--glass-saturation));
+  }
+  .memory-titlebar { min-height: 56px; padding: 10px 16px; }
+  .memory-toolbar { padding: 0 16px 12px; }
+  .memory-search { border-radius: 999px; }
+  .memory-layout { gap: 10px; padding: 0 12px 12px; }
+  .memory-navigation-rail, .image-view-modes, .conversation-selection-rail { position: relative; }
+  .memory-item { border-radius: 12px; margin-bottom: 2px; }
+  .memory-item:hover { background: color-mix(in srgb, var(--color-surface-2) 70%, transparent); }
+  .memory-item[aria-current="true"] {
+    background: var(--color-wash);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 15%, transparent), 0 2px 6px rgb(0 0 0 / 0.03);
+  }
+  .memory-reading-surface { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-line); }
+
+  /* Switches move one elastic glass capsule between targets. The skin stretches
+     and catches a passing highlight while the outer sheet changes geometry. */
+  .liquid-selection {
+    position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none;
+    border-radius: 12px;
+    transition: transform 440ms cubic-bezier(.2, .85, .22, 1.08), width 360ms ease, height 360ms ease;
+  }
+  .liquid-selection[data-axis="horizontal"] { border-radius: 999px; }
+  .liquid-selection-skin { display: block; position: absolute; inset: 0; border-radius: inherit; overflow: hidden; animation: liquid-flow-y 440ms ease-out; }
+  .liquid-selection-skin::before, .liquid-selection-skin::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+  .liquid-selection-skin::before {
+    background: linear-gradient(145deg, var(--glass-sheen), transparent 55%), color-mix(in srgb, var(--color-wash) 92%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent), inset 0 1px 0 var(--glass-edge-light), 0 3px 8px rgb(0 0 0 / 0.05);
+    -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%);
+  }
+  .liquid-selection-skin::after { background: linear-gradient(115deg, transparent 20%, var(--glass-edge-light) 48%, transparent 75%); opacity: 0; animation: liquid-glint 440ms ease-out; }
+  .liquid-selection[data-axis="horizontal"] .liquid-selection-skin { animation-name: liquid-flow-x; }
+  .memory-navigation-rail > div, .memory-navigation-rail > .memory-item, .image-view-modes > button { position: relative; z-index: 1; }
+  .conversation-selection-rail > .conversation-row { position: relative; z-index: 1; }
+  .memory-navigation-rail:has(> .liquid-selection) .memory-item[aria-current="true"] { background: transparent; box-shadow: none; }
+  .image-view-modes:has(> .liquid-selection) .image-view-button--active { background: transparent; }
+  .conversation-selection-rail:has(> .liquid-selection) .conversation-row[aria-current="true"] { background: transparent; box-shadow: none; }
+
+  /* Frost the floating picture window's chrome, never the picture itself. */
+  .image-preview-window {
+    --color-subtle: var(--color-muted);
+    border-radius: 28px;
+    box-shadow: var(--glass-shadow-float), 0 0 0 1px var(--glass-edge-low);
+  }
+  .image-preview-window::before {
+    background: linear-gradient(145deg, var(--glass-sheen), transparent 55%), rgb(var(--glass-regular-rgb) / var(--preview-glass-alpha));
+    -webkit-backdrop-filter: blur(28px) saturate(140%);
+    backdrop-filter: blur(28px) saturate(140%);
+    box-shadow: inset 1px 1px 0 var(--glass-edge-light), inset -1px -1px 0 var(--glass-edge-low);
+  }
+  .image-preview-titlebar { min-height: 54px; padding: 10px 16px 4px; }
+  .image-preview-badge {
+    display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0;
+    border-radius: 10px; color: var(--color-muted);
+    background: color-mix(in srgb, var(--color-surface) 52%, transparent);
+    box-shadow: inset 0 0 0 1px var(--glass-edge);
+  }
+  .image-preview-close, .memory-close {
+    display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+    color: var(--color-muted); background: color-mix(in srgb, var(--color-surface) 48%, transparent);
+    transition: color 160ms, background-color 160ms;
+  }
+  .image-preview-close:hover, .memory-close:hover { color: var(--color-fg); background: var(--color-raised); }
+  .image-preview-body { padding: 0 6px 6px; }
+  .image-preview-resize { right: 4px; bottom: 4px; }
+  .image-view { gap: 10px; padding: 10px; }
+  .image-view-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .image-view-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+  .image-control-group {
+    display: inline-flex; align-items: center; padding: 3px; gap: 2px; border-radius: 999px;
+    background: color-mix(in srgb, var(--color-surface) 68%, transparent);
+    box-shadow: inset 0 0 0 1px var(--glass-edge-low), inset 0 1px 0 var(--glass-edge-light);
+  }
+  .image-view-button {
+    height: 30px; min-width: 30px; padding: 0 10px; border-radius: 999px; font-size: 11.5px;
+    color: var(--color-muted); transition: color 160ms, background-color 160ms;
+  }
+  .image-view-button:hover { color: var(--color-fg); background: var(--color-raised); }
+  .image-view-button--active { color: var(--color-blue); background: var(--color-wash); }
+  .image-view-zoom { width: 44px; font-size: 11.5px; }
+  .image-view-dimensions { font-size: 10.5px; margin-left: auto; }
+  .image-view-stage { border-radius: var(--radius-panel); background-color: var(--color-surface-2); box-shadow: inset 0 0 0 1px var(--color-line); }
+  .image-view-stage--checker {
+    background-image: repeating-conic-gradient(color-mix(in srgb, var(--color-muted) 7%, transparent) 0% 25%, transparent 0% 50%);
+    background-position: 50%; background-size: 16px 16px;
+  }
+  .image-view-image { box-shadow: 0 3px 14px rgb(0 0 0 / 0.12); }
   .soft-empty { background: var(--color-surface-2); border-radius: var(--radius-panel); padding: 24px; }
 
   .home-workspace { padding-top: 44px; }
@@ -171,9 +311,26 @@
   .login-material-icon { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--glass-edge); border-radius: 16px; color: var(--color-blue); background: var(--color-wash); box-shadow: inset 1px 1px 0 var(--glass-edge-light), var(--shadow-chip); margin-bottom: 24px; }
 }
 
+@keyframes liquid-flow-y {
+  0%, 100% { transform: scale(1); }
+  35% { transform: scale(.96, 1.12); }
+  65% { transform: scale(1.02, .97); }
+}
+@keyframes liquid-flow-x {
+  0%, 100% { transform: scale(1); }
+  35% { transform: scale(1.13, .93); }
+  65% { transform: scale(.97, 1.02); }
+}
+@keyframes liquid-glint {
+  0% { opacity: 0; transform: translateX(-8%); }
+  35% { opacity: .35; }
+  100% { opacity: 0; transform: translateX(8%); }
+}
+
 /* Progressive enhancement must never make the navigation unreadable. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .nav-panel::before, .workbench-header::before, .soft-dialog::before, .soft-popover::before, .login-surface::before { background: var(--color-surface); }
+  .liquid-selection-skin::before { background: var(--color-wash); }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .nav-panel::before, .workbench-header::before, .soft-dialog::before, .soft-popover::before, .login-surface::before {
@@ -182,18 +339,32 @@
     backdrop-filter: none;
   }
   .home-address { background: var(--color-surface); }
+  .liquid-selection-skin::before { background: var(--color-wash); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .soft-button, .soft-primary, .soft-input, .soft-segment, .panel-toggle, .home-project, .composer-surface { transition: none; }
   .soft-button:active:not(:disabled), .soft-primary:active:not(:disabled) { transform: none; }
+  .image-view-button, .image-preview-close, .memory-close { transition: none; }
+  .liquid-selection { transition: none; }
+  .liquid-selection-skin, .liquid-selection-skin::after { animation: none; }
+  .sidebar-disclosure, .workbench-nav[data-mobile-drawer], .dock-overlay { transition: none; }
+  .panel-toggle:active { transform: none; }
 }
 @media (forced-colors: active) {
   .app-workbench, .auth-scene { background: Canvas; }
   .nav-panel::before, .workbench-header::before, .soft-dialog::before, .soft-popover::before, .login-surface::before { background: Canvas; border: 1px solid CanvasText; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
-  .soft-panel, .chat-panel, .composer-surface, .home-address { border: 1px solid CanvasText; }
+  .soft-panel, .chat-panel, .dock-surface, .composer-surface, .home-address { border: 1px solid CanvasText; }
   .conversation-row[aria-current="true"], .navigation-row[data-active="true"], .soft-segment[aria-selected="true"], .panel-toggle[data-expanded="true"] { outline: 1px solid Highlight; }
+  .image-preview-window, .image-control-group, .image-view-stage, .memory-dialog, .memory-reading-surface { box-shadow: none; border: 1px solid CanvasText; }
+  .memory-item[aria-current="true"] { outline: 1px solid Highlight; box-shadow: none; }
+  .image-view-button--active { outline: 1px solid Highlight; }
+  .liquid-selection { display: none; }
 }
 @media (max-width: 767px) {
+  .image-preview-close, .memory-close { width: 44px; height: 44px; }
+  .image-view-button { height: 40px; min-width: 40px; }
+  .workbench-header { margin-top: 0; }
+  .dock-toggle { top: 6px; right: 12px; width: 44px; height: 44px; }
   .workbench-nav { padding: 0; }
   .nav-panel { border-radius: 0 24px 24px 0; }
   .nav-panel::before { background: var(--color-surface); -webkit-backdrop-filter: none; backdrop-filter: none; }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { CODEX_ARTIFACT_PLUGIN_OVERRIDES } from "../codex-plugin-policy.ts";
 
 const {
   resolveCodexBin,
@@ -97,6 +98,13 @@ try {
   const overrides = buildConfigOverrides(base({ effort: "high" }));
   assert.ok(overrides.includes('approval_policy="never"'));
   assert.ok(overrides.includes('model_reasoning_effort="high"'));
+  assert.deepEqual(CODEX_ARTIFACT_PLUGIN_OVERRIDES, [
+    'plugins.presentations@openai-primary-runtime.enabled=false',
+    'plugins.pdf@openai-primary-runtime.enabled=false',
+  ]);
+  for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) assert.ok(overrides.includes(rule));
+  assert.ok(!overrides.includes("features.plugins=false"), "do not disable unrelated plugins");
+  assert.ok(!overrides.some(rule => rule.includes("spreadsheets@")), "only disable the requested PPT/PDF plugins");
 
   // ── argv ──────────────────────────────────────────────────────────────────
 
@@ -113,6 +121,9 @@ try {
   assert.ok(!fresh.includes("resume"));
   // The prompt travels on stdin and must never become a positional argument.
   assert.ok(!fresh.includes("hi"), "prompt is not in argv");
+  for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) {
+    assert.equal(fresh[fresh.indexOf(rule) - 1], "--config", "fresh processes receive per-invocation config, not a global write");
+  }
 
   // Omitting --model lets ~/.codex/config.toml's own `model` win, which is the
   // behavior the SDK had.
@@ -124,6 +135,10 @@ try {
   const rIdx = resumed.indexOf("resume");
   assert.ok(rIdx > 0);
   assert.equal(resumed[rIdx + 1], "01a0-thread");
+  for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) {
+    assert.equal(resumed[resumed.indexOf(rule) - 1], "--config");
+    assert.ok(resumed.indexOf(rule) < rIdx, "resumed processes also disable plugins before the resume subcommand");
+  }
   for (const flag of ["--config", "--model", "--sandbox", "--cd", "--skip-git-repo-check"]) {
     assert.ok(
       resumed.indexOf(flag) < rIdx,

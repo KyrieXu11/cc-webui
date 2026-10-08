@@ -5,6 +5,7 @@ const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const materials = readFileSync(new URL("../liquid-glass.css", import.meta.url), "utf8");
 const participants = readFileSync(new URL("../components/group/ParticipantsBar.tsx", import.meta.url), "utf8");
 const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const dock = readFileSync(new URL("../components/RightDock.tsx", import.meta.url), "utf8");
 const props = (block: string) => Object.fromEntries(
   [...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1]!, m[2]!.trim()]),
 );
@@ -36,6 +37,23 @@ for (const [theme, palette] of [["dark", dark], ["light", light]] as const) {
       assert(ratio >= 4.5, `${theme} ${material}: ${token} is ${ratio.toFixed(2)}:1 on the composited glass`);
     }
   }
+  const fill = palette["--glass-regular-rgb"]!.split(/\s+/).map(Number);
+  const alpha = Number(palette["--memory-glass-alpha"]);
+  assert(alpha > .8 && alpha < .9, "memory's dedicated sheet must be visibly translucent, not the regular 96% fill");
+  const under = theme === "light" ? [0, 0, 0] : [255, 255, 255];
+  const background = composite(fill, alpha, under);
+  const previewBackground = composite(fill, Number(palette["--preview-glass-alpha"]), under);
+  for (const token of ["--color-fg", "--color-muted"]) {
+    const values = [luminance(rgb(palette[token]!)), luminance(previewBackground)].sort((a,b) => a-b);
+    assert((values[1]!+.05)/(values[0]!+.05) >= 4.5, `${theme}: frosted picture chrome text remains readable`);
+  }
+  for (const selected of [false, true]) {
+    const bg = selected ? composite(rgb(palette["--color-fg"]!), .07, background) : background;
+    for (const token of ["--color-fg", "--color-muted"]) {
+      const values = [luminance(rgb(palette[token]!)), luminance(bg)].sort((a,b) => a-b);
+      assert((values[1]!+.05)/(values[0]!+.05) >= 4.5, `${theme}: memory glass text remains readable even over an extreme backdrop`);
+    }
+  }
 }
 
 assert(css.includes('@import "./liquid-glass.css";'));
@@ -48,8 +66,17 @@ assert(materials.includes("(prefers-reduced-motion: reduce)"));
 assert(!/\.chat-panel\s*\{[^}]*backdrop-filter/.test(materials));
 assert(!/\.composer-surface\s*\{[^}]*overflow:\s*hidden/.test(materials));
 assert(!/\.chat-panel\s*\{[^}]*overflow:\s*hidden/.test(materials));
+const dockSurface = materials.match(/^\s*\.dock-surface\s*\{([^}]+)\}/m)![1]!;
+assert.match(dockSurface, /border-radius:\s*var\(--radius-card\);/, "file panel has four matching corners, not a flush square edge");
+assert.match(dockSurface, /overflow:\s*hidden/, "opaque tree/editor contents cannot paint over those corners");
+assert.doesNotMatch(dockSurface, /(?:backdrop-filter|\bfilter|\btransform|\bcontain)\s*:/, "fixed file delete confirmations must not become panel-scoped");
+assert.match(materials, /\.dock-frame\s*\{\s*padding:\s*12px 12px 12px 0;/, "dock gutters belong inside the measured width, not unreserved external margins");
+assert(dock.includes('"dockcol dock-frame"'));
+assert(dock.includes('!narrow && !maxed ? "dock-surface" : ""'), "mobile/maximized/slide presentation does not inherit desktop clipping or gutters");
 assert(participants.includes("color-mix(in srgb, ${a.color} 40%, transparent)"));
 assert(!participants.includes("${a.color}66"), "CSS var() cannot take a hexadecimal alpha suffix");
-assert(app.includes('display: navOpen ? "flex" : "none"'), "Closed mobile navigation must not rely on transform support");
+assert(app.includes('display: navMotion.present ? "flex" : "none"'), "Closed mobile navigation eventually uses display:none, not offscreen transforms");
+assert(app.includes('pointerEvents: navOpen ? "auto" : "none"'), "logical close stops intercepting taps before the exit finishes");
+assert(app.includes('narrow && !navOpen ? { inert: "" }'), "hidden drawer descendants cannot retain keyboard focus during exit");
 assert(!app.includes("max-md:-translate-x-full"), "An offscreen-only drawer can still block taps on older WebViews");
 console.log("Liquid glass: composited chrome contrast, quiet content and accessible fallbacks are guarded");

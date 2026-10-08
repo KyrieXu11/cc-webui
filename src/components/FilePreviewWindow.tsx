@@ -43,10 +43,10 @@ function isMarkdownPath(p: string): boolean {
 function getInitial(): { position: Position; size: Size } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const width = Math.min(720, Math.max(MIN_WIDTH, vw - 320));
-  const height = Math.min(Math.round(vh * 0.6), vh - 80);
-  const x = Math.max(40, Math.round((vw - width) / 2) - 80);
-  const y = Math.max(40, Math.round((vh - height) / 2) - 30);
+  const width = Math.min(720, Math.max(MIN_WIDTH, vw - 320), vw - 24);
+  const height = Math.min(Math.max(MIN_HEIGHT, Math.round(vh * 0.6)), vh - 24);
+  const x = Math.max(12, Math.min(Math.max(40, Math.round((vw - width) / 2) - 80), vw - width - 12));
+  const y = Math.max(12, Math.min(Math.max(40, Math.round((vh - height) / 2) - 30), vh - height - 12));
   return { position: { x, y }, size: { width, height } };
 }
 
@@ -125,11 +125,11 @@ export default function FilePreviewWindow({
         const vw = window.innerWidth;
         const vh = window.innerHeight;
         const width = Math.max(
-          MIN_WIDTH,
+          Math.min(MIN_WIDTH, vw - position.x - 8),
           Math.min(r.startW + (e.clientX - r.startX), vw - position.x - 8)
         );
         const height = Math.max(
-          MIN_HEIGHT,
+          Math.min(MIN_HEIGHT, vh - position.y - 8),
           Math.min(r.startH + (e.clientY - r.startY), vh - position.y - 8)
         );
         setSize({ width, height });
@@ -188,7 +188,9 @@ export default function FilePreviewWindow({
 
   return (
     <div
-      className="fixed z-40 soft-dialog flex flex-col overflow-hidden"
+      role="dialog"
+      aria-label={kind === "image" ? "图片预览" : "文件预览"}
+      className={`fixed z-40 soft-dialog flex flex-col overflow-hidden ${kind === "image" ? "image-preview-window" : ""}`}
       style={{
         left: position.x,
         top: position.y,
@@ -198,9 +200,11 @@ export default function FilePreviewWindow({
     >
       <div
         onMouseDown={onTitleMouseDown}
-        className="flex items-center gap-2 px-3 py-2 border-b border-line bg-fg/[0.02] cursor-move select-none"
+        className={kind === "image"
+          ? "image-preview-titlebar flex items-center gap-3 shrink-0 cursor-move select-none"
+          : "flex items-center gap-2 px-3 py-2 border-b border-line bg-fg/[0.02] cursor-move select-none"}
       >
-        <FileIcon />
+        {kind === "image" ? <span className="image-preview-badge"><PictureIcon /></span> : <FileIcon />}
         <span
           className="font-mono text-[12px] text-muted truncate flex-1"
           title={absPath}
@@ -243,7 +247,7 @@ export default function FilePreviewWindow({
         <button
           data-no-drag
           onClick={onClose}
-          className="shrink-0 text-subtle hover:text-fg transition-colors px-1"
+          className={kind === "image" ? "image-preview-close shrink-0" : "shrink-0 text-subtle hover:text-fg transition-colors px-1"}
           title="关闭 (Esc)"
           aria-label="关闭"
         >
@@ -255,7 +259,7 @@ export default function FilePreviewWindow({
           两个在 iframe 里由浏览器管），外层再套一层 overflow-auto 会变成两条滚动条
           互相打架。 */}
       <div
-        className={`flex-1 min-h-0 bg-surface ${
+        className={`flex-1 min-h-0 ${kind === "image" ? "image-preview-body" : "bg-surface"} ${
           kind === "text" && !(isHtml && rendered)
             ? "overflow-auto"
             : "overflow-hidden"
@@ -327,7 +331,7 @@ export default function FilePreviewWindow({
 
       <div
         onMouseDown={onResizeMouseDown}
-        className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize"
+        className={`absolute right-0 bottom-0 w-4 h-4 cursor-se-resize ${kind === "image" ? "image-preview-resize" : ""}`}
         title="拖拽调整大小"
       >
         <svg
@@ -368,6 +372,14 @@ const FileIcon = () => (
       strokeWidth="1.2"
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+const PictureIcon = () => (
+  <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden>
+    <rect x="2.5" y="3" width="15" height="14" rx="3" stroke="currentColor" strokeWidth="1.3" />
+    <circle cx="7" cy="7.5" r="1.4" fill="currentColor" />
+    <path d="m3 14 4-4 3 3 2.5-2.5 4.5 4.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 

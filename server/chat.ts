@@ -21,6 +21,7 @@ import { memorySnapshot } from "./project-memory/prompt.ts";
 import { wrapMemoryPrompt } from "../shared/project-memory-envelope.ts";
 import { assertProviderAllowed } from "./auth/users.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
+import { WEB_OUTPUT_RULES } from "./web-output-rules.ts";
 import { claudeSessionExists } from "./claude-sessions.ts";
 import type { ExecResult } from "./executors/types.ts";
 import { getMcpRouteUrl, localMcpRouteUrl } from "./codex-mcp-config.ts";
@@ -566,7 +567,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
         // it disabled so the model only uses mcp__schedule__wakeup, whose
         // timers the server owns (survive across turns, cancellable).
         disallowedTools: ["Bash", "BashOutput", "KillBash", "ScheduleWakeup"],
-        appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers) + (memory?.rules ?? ""),
+        appendSystemPrompt: SYSTEM_PROMPT_APPEND + localToolsPrompt(localServers) + WEB_OUTPUT_RULES + (memory?.rules ?? ""),
         // 只在真有本地工具时才抬高超时（见 CLI_MCP_TOOL_TIMEOUT_MS 的注释）。
         // 无条件抬高会让服务端那些本该快速失败的 MCP 调用也拖到 5 分钟。
         extraEnv:

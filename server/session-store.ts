@@ -3,9 +3,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import { getDb, transact } from "./db.ts";
 import path from "node:path";
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { SessionSummaryCache } from "./session-summary-cache.ts";
+import { summaryJsonlLines, skipCodexSummaryLine } from "./summary-jsonl.ts";
+import type { ImageAttachment } from "../src/lib/types.ts";
 
 export type AgentProvider = "claude" | "codex";
 
@@ -23,6 +23,7 @@ export interface CodexStoredTurn {
   provider: "codex";
   prompt: string;
   startedAt: number;
+  images?: ImageAttachment[];
   events: unknown[];
 }
 
@@ -99,6 +100,18 @@ function contentText(value: unknown): string {
   return "";
 }
 
+// Recover only image bytes already embedded in the authorized transcript.
+// Never fetch a remote image_url or open a rollout-supplied local_image path:
+// exec deletes its temporary files, and arbitrary paths are not attachments.
+function inlineCodexImages(content: unknown): ImageAttachment[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((block) => {
+    if (block?.type !== "input_image" || typeof block.image_url !== "string") return [];
+    const match = /^data:(image\/(?:png|jpeg|jpg|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/i.exec(block.image_url);
+    return match ? [{ mediaType: match[1].toLowerCase(), data: match[2] }] : [];
+  });
+}
+
 function userPrompt(value: unknown): string {
   const text = unwrapMemoryPrompt(contentText(value));
   const marker = "\n\nUSER REQUEST:\n";
@@ -162,15 +175,14 @@ async function parseNativeCodexSummary(
   let customTitle: string | undefined;
   let lastModified = stat.mtimeMs;
 
-  const stream = createReadStream(filePath, { encoding: "utf8" });
-  const lines = createInterface({ input: stream, crlfDelay: Infinity });
   try {
-  for await (const line of lines) {
-    if (!line.trim()) continue;
+  for await (const { head, line } of summaryJsonlLines(filePath,
+    head => skipCodexSummaryLine(head, !!firstPrompt, !!fallbackPrompt))) {
     // Native records put the timestamp before their payload. Do not parse
     // huge tool/private reasoning payloads after finding the initial prompt.
-    const ts = timestampMs(line.slice(0, 512).match(/"timestamp"\s*:\s*"([^"]+)"/)?.[1]);
+    const ts = timestampMs(head.match(/"timestamp"\s*:\s*"([^"]+)"/)?.[1]);
     if (ts && ts > lastModified) lastModified = ts;
+    if (line === undefined || !line.trim()) continue;
     const needed = line.includes('"session_meta"') || line.includes('"turn_context"') ||
       line.includes('"thread_name_updated"') || (!firstPrompt &&
         (line.includes('"user_message"') || line.includes('"UserMessage"'))) ||
@@ -212,7 +224,6 @@ async function parseNativeCodexSummary(
     }
   }
   } catch { return null; }
-  finally { lines.close(); stream.destroy(); }
 
   if (!sessionId) return null;
   if (!firstPrompt) firstPrompt = fallbackPrompt;
@@ -229,7 +240,9 @@ async function parseNativeCodexSummary(
   };
 }
 
-const nativeSummaries = new SessionSummaryCache<NativeCodexSession>();
+// Bump the namespace when summary parsing semantics change. Only metadata is
+// durable; changed files are still scanned fully to retain middle title/cwd.
+const nativeSummaries = new SessionSummaryCache<NativeCodexSession>(1024, 32 * 1024 * 1024, "codex-summary-v1");
 
 async function listNativeCodexSessions(visible?: (id: string) => boolean): Promise<NativeCodexSession[]> {
   const files = await listJsonlFiles(CODEX_SESSIONS_DIR);
@@ -336,10 +349,13 @@ async function readNativeCodexTurns(
   let current: CodexStoredTurn | null = null;
   let seq = 0;
   let lastAgentText = "";
+  let pendingImages: ImageAttachment[] | undefined;
+  let taskUserTurn: CodexStoredTurn | null = null;
+  let hasTaskBoundary = false;
 
   const pushCurrent = () => {
     if (!current) return;
-    if (!current.prompt.trim() && current.events.length === 0) {
+    if (!current.prompt.trim() && !current.images?.length && current.events.length === 0) {
       turns.pop();
     }
     current = null;
@@ -349,21 +365,52 @@ async function readNativeCodexTurns(
   for (const line of raw.split(/\n/)) {
     if (!line.trim()) continue;
     const record = parseJsonLine(line);
-    if (!record?.payload || record.type !== "event_msg") continue;
+    if (!record?.payload) continue;
 
     const payload = record.payload;
+    if (record.type === "response_item" && payload.type === "message" && payload.role === "user") {
+      const images = inlineCodexImages(payload.content);
+      if (images.length) {
+        // Current CLI writes response_item's inline bytes just before the
+        // UserMessage event (which only records a soon-deleted temp path).
+        // Also accept bytes after that event within an explicit task boundary.
+        if (hasTaskBoundary && taskUserTurn) taskUserTurn.images = images;
+        else pendingImages = images;
+      }
+      continue;
+    }
+    if (record.type !== "event_msg") continue;
+    if (payload.type === "task_started") {
+      pendingImages = undefined;
+      taskUserTurn = null;
+      hasTaskBoundary = true;
+      continue;
+    }
+    if (payload.type === "task_complete" || payload.type === "turn_aborted") {
+      pendingImages = undefined;
+      taskUserTurn = null;
+      hasTaskBoundary = false;
+      continue;
+    }
     const startedAt = timestampMs(record.timestamp) ?? Date.now();
 
     const modernItem = payload.type === "item_completed" ? payload.item : undefined;
     if (payload.type === "user_message" || modernItem?.type === "UserMessage") {
       pushCurrent();
+      const embeddedImages = inlineCodexImages(modernItem?.content);
+      const legacyImages = inlineCodexImages(Array.isArray(payload.images)
+        ? payload.images.map((image_url: unknown) => ({ type: "input_image", image_url })) : []);
+      const images = embeddedImages.length ? embeddedImages : legacyImages.length ? legacyImages : pendingImages;
       current = {
         provider: "codex",
         prompt: userPrompt(modernItem?.content ?? payload.message),
         startedAt,
+        ...(images?.length ? { images } : {}),
         events: [],
       };
       turns.push(current);
+      taskUserTurn = current;
+      pendingImages = undefined;
       continue;
     }
 
@@ -569,6 +616,7 @@ export async function appendCodexTurn(opts: {
   cwd?: string;
   prompt: string;
   startedAt: number;
+  images?: ImageAttachment[];
   events: unknown[];
 }): Promise<void> {
   const now = Date.now();
@@ -602,7 +650,13 @@ export async function appendCodexTurn(opts: {
       opts.sessionId,
       opts.prompt,
       opts.startedAt,
-      JSON.stringify(opts.events),
+      // exec's output never echoes attachment bytes. Keep the already-used
+      // turn_user envelope in the existing payload as a durable DB fallback;
+      // no schema migration or dependency on the executor's temp directory.
+      JSON.stringify(opts.images?.length ? [{
+        type: "turn_user", provider: "codex", prompt: opts.prompt,
+        startedAt: opts.startedAt, images: opts.images,
+      }, ...opts.events] : opts.events),
     );
   });
 }

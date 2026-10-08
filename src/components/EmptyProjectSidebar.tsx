@@ -4,7 +4,7 @@ interface Props {
 
 export default function EmptyProjectSidebar({ onOpenProject }: Props) {
   return (
-    <aside className="session-sidebar w-[260px] shrink-0 flex flex-col">
+    <aside className="session-sidebar shrink-0 flex flex-col">
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
         <div className="w-10 h-10 rounded-panel bg-wash text-blue flex items-center justify-center mb-4">
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">

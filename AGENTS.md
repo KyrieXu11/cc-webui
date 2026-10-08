@@ -90,6 +90,24 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   `on-brand`，状态图标用 `on-status`，不能写死白色；小字对比度由
   `src/lib/soft-card-theme.test.ts` 与 `liquid-glass-theme.test.ts` 守住。**字体保留原来的 IBM Plex Sans / IBM Plex Mono**
   （用户明确偏好，不跟设计参考换字体）。**仅验证构建要指定隔离 outDir**，默认 dist 即上线。
+  2026-10-08 用户补充：浅色背景/表面采用 `soft-card-dashboard-kit` 的 `#EEF2F8` / 白卡，
+  不叠青蓝渐变。文件开关由 `.dock-toggle` 保证圆角内缩与固定位置，各表头必须同步预留空间；
+  窗口右上角仍只有一颗同图标按钮，不能重新出现关栏 ✗ 或改变 Claude 的思考展示。
+  **开/关禁止改坐标**。外侧分隔线用 quiet Splitter 隐藏（悬停也隐藏），拖动热区不能删。
+  桌面左会话栏用 `--sidebarw` 和既有 Splitter 调宽/持久化，手机栏固定 260px，左右夹取互相留空间。
+  记忆弹窗毛玻璃在 `.memory-dialog::before`，正文实底，不把滤镜放到含 fixed 内容的宿主上。
+  Codex 活动行只显示动态词和省略号，不加「处理中 / 思考中」前缀；阶段语义保留在
+  aria-label/title，总耗时仍独立展示。不要因此改动 Claude 的思考行和计时。
+  图片浮窗用独立 `.image-preview-window::before` 毛玻璃，标题/胶囊工具栏轻透，图片画布
+  保持实底和原像素；共享 ImageView 的倍率/滚轮/缓存尺寸/旋转算法不能改丢。
+  记忆弹窗搜索只读筛名称/描述/正文，搜索时顺序补取剩余分页，不能只搜首 100 条。
+  2026-10-08 用户进一步确认：液态玻璃切换要有流动，不只是 blur。`LiquidSelection`
+  复用于记忆导航和图片「适应/原图」：单块选中层随真实坐标移动、拉伸回弹/高光，
+  pointer-events:none；滚动/改大小重新测量，减少动态效果时静态，不新增持续 RAF。
+  左侧 `ProjectSidebar` 也复用同款流动层：provider/sessionId 作为目标 key，scope 切换
+  重建 rail，排序/删除重新测量；分页 sentinel 必须留在原滚动容器内、装饰 rail 外。
+  左右开合用 `usePaneMotion` 保留短促退场，逻辑关闭立即 inert/aria-hidden/禁命中，
+  手机结束后 display:none；拖动调宽不做过渡，编辑器不卸载，最大化/放映不走缩栏动画。
 - `App.tsx` — 中枢：路由/视图切换、发送、session 打开、attach、in-flight 轮询。
 - `lib/` — `api.ts`（SSE 客户端）、`processor.ts`（**SDK 事件 → UI 状态映射**，很关键）、
   `settings.ts`（**model / mode / effort 选项与默认值**）、`groups.ts`、`sessions.ts`、`types.ts` 等。
@@ -101,6 +119,11 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   两处共用 `Highlighted.tsx` 画命中段，共用 `sessions.ts` 的 `SEARCH_WINDOW`
   （**默认列表 60 条 ≠ 搜索范围**：搜索必须能翻到底，本机 786 个会话全拿是 ~677ms，
   实测数据记在那个常量的注释里；聚焦搜索框才拉，首屏不拉）。
+- **首页首屏用 compact=1，搜索仍保留完整首问/窗口**，切 provider/卸载会中止旧请求，
+  失败要显示重试而不是假空列表。Codex `SessionSummaryCache` 使用 schema 11 的可重建
+  `native_session_summaries` 索引跨重启复用；只存原始 metadata（1024 条/32MiB），
+  每次 stat/dev/inode/size/mtime/ctime 失效，授权仍逐次/先可见性再 limit。改 summary
+  语义要 bump parser namespace；不能采样头尾丢中间标题/cwd，也不假设变化必然只是追加。
 - **「打开项目」选目录不是会话搜索**：`OpenProjectDialog` 先取当前账号的最近项目和 home，
   `/api/fs/scan` 后台补齐目录；最近项目和手输绝对路径 / `~/` 路径**不等扫描**。
   `server/directory-scan-cache.ts` 按 canonical root 缓存原始目录候选 30 秒（最多 32 根），
@@ -157,10 +180,15 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   在 `main.tsx` 挂一次兜住全局，`TextEditor` 自己再 catch 一次。
   带 30s 冷却防转圈：刷完还是同样的错就说明不是陈旧构建，让它正常报出来。
 - `Markdown.tsx` — 唯一的 markdown 渲染器（聊天正文 + .md 预览共用）。
+  记忆浏览显式传 `memoryCompat`：`lib/cjk-memory-strong.ts` 仅修复解析后 text 节点里的
+  `**标题：**正文` 等旧 CJK 粗体边界，跳过代码/链接/转义示例，不写回记忆，不改变普通聊天解析。
   **GFM autolink 在中文里会吞掉整句**（中文没空格，`（www.x.cn）、后面一大段…` 全进
   href），修在 `lib/cjk-autolink.ts`：一个 remark 插件，在 **GFM 产出的 link 节点上**
   把越界的尾巴挪回正文。⚠️ 别退回"用正则改源文本"那种写法 —— 那等于自己重实现一遍
   GFM 的 URL 匹配规则，上一版就漏了裸 `www.` 这一种形式，用户报的例子完全没修到。
+- Codex `ApplyPatch` 的 `input.changes` 在 `StepTimeline` 接 `ApplyPatchDiff` / `patch-diff.ts`：
+  文件/双行号/红绿差异/+− 统计。缺 diff 要明说，不读今日文件冒充历史修改；失败差异
+  不代表已应用。Claude Edit/Write/NotebookEdit 保持 `EditDiff`；thinking 展示独立不动。
 - `components/files/TextEditor.tsx` — CodeMirror 包装。语言在 `LANG` 那张表里
   （**加语言就加表，别堆 if**：上一版三个 if + `return null`，打开 .py 完全没高亮）。
   语法配色在 `files/highlight.ts`，颜色是 `var(--syn-*)` CSS 变量（index.css 里明暗
@@ -285,6 +313,12 @@ claude CLI（你 Mac 上的子进程）
 - **Bash MCP 只剩 HTTP 一套**：`mcp-bash-route.ts`（bearer-token），Claude / Codex / 飞书都走它。
   `bash-mcp.ts` 现在只提供任务注册表和 `runBashTool`，不再自己起 MCP server——CLI 迁移前那套
   「进程内 vs HTTP 两套」的说法已经作废（旧文档里还能看到）。
+- **PPT/PDF 插件仅在 cc-webui 的 Codex 子进程禁用**（2026-10-08 用户确认）：
+  `server/codex-plugin-policy.ts` 的两个 `plugins.…@openai-primary-runtime.enabled=false`
+  由 executor 加到每次 spawn 的 `--config`，包括 resume；网页与会话引擎还每轮说明旧 skill
+  正文不再适用。**不写全局 config、不关全部插件、不影响原生 Codex 或 Claude**；项目自有
+  PPT/PDF 脚本和普通库仍可用。⚠️ CLI key 不带 TOML 表头的引号（0.161.0 的 config/read +
+  skills/list 已实测，带引号没有关掉目标插件）。禁用发现不是缓存文件访问隔离，也不删除历史。
 - **MCP 的 per-turn token 带身份**：`McpSessionContext.ownerId` 是这个 turn 代表的账号。
   这三条路由**看不到登录 cookie**，是全仓唯一绕开 `authMiddleware` 的面，所以路径护栏要在
   `mcp-bash-route.ts` 里按 `ownerId` 再查一次；解析不出账号就拒。起 turn 的一侧负责填它
@@ -309,6 +343,14 @@ claude CLI（你 Mac 上的子进程）
 - **测试是纯脚本风格**（top-level `await` + `node:assert`，不是 `describe/it`），但 `tsx --test` 能发现并跑。
   绝大多数在 `server/`；`src/` 下只跑**纯逻辑**（`processor.test.ts`），要 DOM / React 的别往这里塞。
   加测试就照 `server/groups/*.test.ts` 的样子写。
+- **网页单聊的模型输出规范**在 `server/web-output-rules.ts`：Claude 每轮通过 system append 注入，
+  Codex 每轮通过 runtime preamble 注入（resume、项目记忆开/关都不能漏）。磁盘文件位置用行内
+  code 报告，**不把本地路径伪装成下载链接、不编网站/API URL**；只有交付工具或可信 runtime
+  明确提供了可用 URL 才能声称可下载。中文相邻的强调标记把首尾标点留在外面，如
+  `**how to do**：如何做某事。这里用…`。只规范模型自己的新回复，**不改历史、不修补源文本、
+  不改下载接口**。artifact skill 的成品制作规则照用，但最终回复必须适配普通 Markdown，
+  **不泄露 `:codex-followup` 等其它宿主的按钮/附件/内部引用指令**，有用的下一步建议改为普通
+  文字/列表；不改全局 skill。会话引擎/飞书有真实发文件工具，不套用网页交付规则。
 - **Claude 模型/权限及 effort 标签集中在 `src/lib/settings.ts`**；Codex 模型与 effort 由 `server/codex-models.ts`
   调实际 `CC_WEBUI_CODEX_BIN` / PATH CLI 的短命 app-server `model/list`（**只查 metadata，不起 thread/turn**）。
   `/api/meta/models` 是独立鉴权、no-store 接口，登录/切回标签/每分钟刷新，模型菜单可强制刷新；服务端
@@ -448,6 +490,17 @@ claude CLI（你 Mac 上的子进程）
   事件白名单里，别删；`server/chat-turn-meta.test.ts` 用假 CLI 钉住「第一帧、值来自请求」。
   同一天顺手修的：首页上文件面板关不掉（开关只在项目里有，面板却按 `dockOpen` 在哪都显示；
   现在 `open={inProject && dockOpen}`）。
+- **Codex 的回合总计时不放在思考行**（2026-10-08）：`CodexActivityRow` 保留动态词/sparkle，
+  可见文案不加中文阶段前缀，明确 reasoning / 未知处理留在 aria-label/title；
+  `TurnStatus` 独立显示「本轮总耗时 / 含工具与等待」，
+  只从服务端 `turn_meta.startedAt` 累计，缺失则不编起点。当前 exec 没有可靠的单轮累计 reasoning
+  时长，不能用总耗时减工具耗时推算。**只改 Codex；Claude 的 `ThinkingRow`、token 活动计时、
+  动态文案都保持原样**，相关回归在 `server/turn-status.test.ts` 与 `src/lib/turn-activity.test.ts`。
+- **[已修] Codex 重新打开对话丢图片**（2026-10-08）：`session-store.ts` 从用户
+  `response_item` 的 inline `input_image` 恢复图片，按 task 对应到 `UserMessage`；后者只有
+  随后清理的临时 `local_image` 路径，不能依赖它，更不能按记录里的任意路径读取文件。
+  新带图 turn 在 DB 的既有 events 中保存 `turn_user` 图片兜底，前端支持纯图片气泡；
+  原生记录不改，图片仍沿现有 session 授权读取，不新增 raw/下载路由。
 - **[已修] attach/重连保留真实错误**：`api.ts` 的 attach error 监听器把命名 SSE error 帧的 `message`
   交给 App，传输断线/坏帧才用「流式连接中断」。`src/lib/api-attach.test.ts` 钉住这条。
 - **[低] 打开任意非 in-flight 会话会闪一下 busy**：`App` 同步 `setAttachedStreaming(true)` 后服务端

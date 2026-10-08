@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import Markdown from "../src/components/Markdown.tsx";
+
+const render = (text: string, memoryCompat = true) => renderToStaticMarkup(createElement(Markdown, { text, memoryCompat }));
+const source = "**阅读理解讲评 PPT 的固定顺序（用户 2026-10-07 连续修订）：**先让学生划关键词。\n\n**落实：**逐题检查。\n\n**Why：**学生基础弱。";
+const html = render(source);
+assert.match(html, /<strong[^>]*>阅读理解讲评 PPT 的固定顺序（用户 2026-10-07 连续修订）：<\/strong>先让学生/);
+assert.match(html, /<strong[^>]*>落实：<\/strong>逐题检查/);
+assert.match(html, /<strong[^>]*>Why：<\/strong>学生基础弱/);
+assert.doesNotMatch(html, /\*\*/);
+assert.match(render(source, false), /\*\*落实：\*\*/, "ordinary chat rendering is not silently redefined");
+const protectedSyntax = render("`**落实：**逐题`\n\n```md\n**落实：**逐题\n```\n\n\\*\\*落实：\\*\\*逐题\n\n[**落实：**逐题](https://example.com)");
+assert.doesNotMatch(protectedSyntax, /<strong/, "code, escaped examples and links are not rewritten");
+assert.match(protectedSyntax, /href="https:\/\/example.com"/);
+assert.match(protectedSyntax, /\*\*落实：\*\*/);
+const standard = render("## 标题\n\n- **正常粗体**\n\n|项目|内容|\n|---|---|\n|一|二|\n\n**未闭合：正文\n\n<script>alert(1)</script>");
+assert.match(standard, /<h2/); assert.match(standard, /<ul/); assert.match(standard, /<table/);
+assert.match(standard, /<strong[^>]*>正常粗体<\/strong>/);
+assert.match(standard, /\*\*未闭合：正文/);
+assert.doesNotMatch(standard, /<script>/, "compatibility does not enable raw HTML");
+console.log("Older memory CJK bold renders safely without changing stored text or normal chat Markdown");

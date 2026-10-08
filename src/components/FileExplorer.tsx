@@ -61,7 +61,7 @@ interface Props {
   /** 内嵌在右侧格里时用：不自带宽度/左边框，由那一格给。 */
   embedded?: boolean;
   /**
-   * 右端留出 52px 给窗口右上角那颗浮动的「文件面板」开关。
+   * 右端留出 64px（手机 68px）给圆角内缩后的「文件面板」开关。
    * 只有当这一栏就是右侧格最上面那条（＝没有文档打开、树占满整格）时才需要。
    */
   reserveRight?: boolean;
@@ -322,7 +322,7 @@ export default function FileExplorer({
           看着就是「对不齐」（用户 2026-08-27 反馈）。 */}
       <div
         className={`flex items-center gap-1.5 h-14 pl-3 border-b border-line shrink-0 ${
-          reserveRight ? "pr-[52px]" : "pr-3"
+          reserveRight ? "pr-[64px] max-md:pr-[68px]" : "pr-3"
         }`}
       >
         <span

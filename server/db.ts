@@ -335,6 +335,21 @@ const MIGRATIONS: Array<string | ((db: Database) => void)> = [
   `,
   // 10 — 用户确认只按项目共享；actor 只负责授权及幂等请求的归属，不再拥有记忆。
   migrateProjectOnlyMemory,
+  // 11 — disposable raw metadata, not ownership/visibility or turn content.
+  // Reuse native summaries across restarts, but invalidate on ANY stat change.
+  `
+  CREATE TABLE native_session_summaries (
+    namespace TEXT NOT NULL,
+    file TEXT NOT NULL,
+    stamp TEXT NOT NULL,
+    value TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    touched_at INTEGER NOT NULL,
+    PRIMARY KEY(namespace, file)
+  );
+  CREATE INDEX idx_native_session_summaries_lru
+    ON native_session_summaries(namespace, touched_at);
+  `,
 ];
 
 function migrateProjectOnlyMemory(db: Database): void {

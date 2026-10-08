@@ -1,18 +1,29 @@
 import assert from "node:assert/strict";
 import { applySDKMessage, sessionMessagesToEvents } from "./processor.ts";
-import { activityLabel, formatActivityElapsed, liveThinkingIds, liveToolIds, showCodexActivity } from "./turn-activity.ts";
+import { activityLabel, codexActivityLabel, formatActivityElapsed, formatTurnElapsed, liveThinkingIds, liveToolIds, showCodexActivity, turnElapsedSeconds } from "./turn-activity.ts";
 import type { ChatEvent } from "./types.ts";
 
 // Animated words are decorative status feedback, not measured reasoning.
-// Keep the designed effect while identifying elapsed time as TOTAL turn time.
+// Keep only the designed verb visible; aria/title carry phase semantics in the
+// component, and total elapsed time lives in a separate statistic.
 for (const word of ["Decoding", "Whirring", "Tinkering"]) {
-  assert.equal(activityLabel(true, word, true), `${word}…`);
+  assert.equal(activityLabel(true, word, true), `${word}…`, "legacy Claude presentation remains unchanged");
+  assert.equal(codexActivityLabel(true, word, "processing"), `${word}…`);
+  assert.equal(codexActivityLabel(true, word, "reasoning"), `${word}…`);
 }
 assert.equal(formatActivityElapsed(14 * 60 + 35, true), "回合已用 14m35s");
 assert.equal(formatActivityElapsed(0, true), "回合已用 0s");
 assert.equal(formatActivityElapsed(59, true), "回合已用 59s");
 assert.equal(formatActivityElapsed(60, true), "回合已用 1m00s");
 assert.equal(formatActivityElapsed(61, true), "回合已用 1m01s");
+assert.equal(formatTurnElapsed(311), "本轮总耗时 5m11s");
+assert.equal(codexActivityLabel(false, "Whirring", "reasoning"), "thought");
+assert.equal(codexActivityLabel(false, "Whirring", "processing"), "已结束");
+assert.equal(turnElapsedSeconds(1000, 312000), 311, "attach/remount uses the original server turn start");
+assert.equal(turnElapsedSeconds(undefined, 312000), null, "unknown start time must not become a mount-time counter");
+assert.equal(turnElapsedSeconds(NaN, 312000), null);
+assert.equal(turnElapsedSeconds(1000, Infinity), null);
+assert.equal(turnElapsedSeconds(2000, 1000), 0, "small server/client clock skew never shows negative time");
 assert.equal(activityLabel(true, "Decoding"), "Decoding…", "Claude keeps its own token-activity label");
 assert.equal(activityLabel(false, "Decoding"), "thought");
 assert.equal(formatActivityElapsed(875), "14m35s");
