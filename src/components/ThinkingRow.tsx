@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { pickThinkingWord } from "../lib/thinking-words";
 import { activityLabel, formatActivityElapsed } from "../lib/turn-activity";
+import { inTimelineSlot, useTimelineActivity, type TimelineStatusProps } from "./TimelineStatusSlot";
 
 // Encrypted-thinking status row — the equivalent of Claude Code's
 //   ✻ Tinkering… (49s · ↓ 2.0k tokens · thinking with max effort)
@@ -20,7 +21,7 @@ function formatTokens(n: number): string {
   return `${(n / 1000).toFixed(1)}k`;
 }
 
-interface Props {
+interface Props extends TimelineStatusProps {
   tokens: number;
   // Explicit liveness is separate from the meaning of the row. Codex can
   // report a pending reasoning item without public text or token deltas.
@@ -32,7 +33,7 @@ interface Props {
   effort?: string;
 }
 
-export default function ThinkingRow({ tokens, effort, live, kind = "thinking", turnStartedAt }: Props) {
+export default function ThinkingRow({ tokens, effort, live, kind = "thinking", turnStartedAt, statusSlot, statusMetaSlot, activityId, onActivityChange, onStatusClick }: Props) {
   const totalTurn = kind === "turn";
   const [label, setLabel] = useState(() => pickThinkingWord());
   // Deliberately starts inactive: a row replayed from history has a fixed token
@@ -40,6 +41,7 @@ export default function ThinkingRow({ tokens, effort, live, kind = "thinking", t
   const initialTokens = useRef(tokens);
   const [tokenActive, setActive] = useState(false);
   const active = live ?? tokenActive;
+  useTimelineActivity(active, activityId, onActivityChange);
   const [elapsed, setElapsed] = useState<number | null>(null);
   const startedAt = useRef<number | null>(totalTurn && live ? turnStartedAt ?? Date.now() : null);
 
@@ -77,6 +79,13 @@ export default function ThinkingRow({ tokens, effort, live, kind = "thinking", t
     tokens > 0 ? `↓ ${formatTokens(tokens)} tokens` : null,
     active && effort ? `${effort} effort` : null,
   ].filter(Boolean);
+
+  if (statusSlot) return <>
+    {inTimelineSlot(<span className="timeline-status-word" aria-label={active ? "思考中" : undefined} title={activityLabel(active, label, totalTurn)}>
+      <Sparkle active={active} /><span>{activityLabel(active, label, totalTurn)}</span>
+    </span>, statusSlot, onStatusClick)}
+    {statusMetaSlot && meta.length > 0 && inTimelineSlot(<span className="timeline-status-meta">{meta.join(" · ")}</span>, statusMetaSlot, onStatusClick)}
+  </>;
 
   return (
     <div className="relative flex items-center py-[6px] gap-3 w-full text-left"

@@ -55,6 +55,7 @@ for (const [theme, palette] of [["light", light], ["dark", dark]] as const) {
     }
   }
   readable(palette, "--color-on-brand", "--color-blue", theme);
+  readable(palette, "--color-blue", "--color-wash", theme, 4.5);
   for (const state of ["--color-green", "--color-red"]) {
     readable(palette, "--color-on-status", state, theme, 3);
   }

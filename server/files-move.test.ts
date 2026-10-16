@@ -135,6 +135,32 @@ try {
     assert.equal(await read(path.join(box, "plan.md")), "hello", "原地不动");
   }
 
+  // 非空目录整个移动，内容与 registry 都随目录迁移；同名目录不覆盖。
+  {
+    const src = path.join(mine, "Unit 1");
+    const lesson = path.join(src, "nested", "lesson.md");
+    await fs.mkdir(path.dirname(lesson), { recursive: true });
+    await fs.writeFile(lesson, "lesson stays intact");
+    const session = randomUUID();
+    recordSessionFiles(session, [{ path: lesson, firstSeenMs: 1, lastTouchedMs: 2, size: 19, mtimeMs: 2 }]);
+    const body = await (await move([src], box)).json() as { moved: unknown[]; failed: unknown[] };
+    assert.equal(body.moved.length, 1); assert.equal(body.failed.length, 0);
+    const newLesson = path.join(box, "Unit 1", "nested", "lesson.md");
+    assert.equal(await read(newLesson), "lesson stays intact");
+    assert.equal(await read(lesson), null);
+    assert.deepEqual(listSessionFiles(session).map(file => file.path), [newLesson]);
+    await fs.mkdir(src); await fs.writeFile(path.join(src, "keep.md"), "new source");
+    const collision = await (await move([src], box)).json() as { moved: unknown[]; failed: { error: string }[] };
+    assert.equal(collision.moved.length, 0); assert.match(collision.failed[0].error, /已经有/);
+    assert.equal(await read(newLesson), "lesson stays intact");
+    assert.equal(await read(path.join(src, "keep.md")), "new source");
+    const child = path.join(src, "child"); await fs.mkdir(child);
+    const alias = path.join(mine, "alias-to-child"); await fs.symlink(child, alias);
+    const invalid = await (await move([src], alias)).json() as { moved: unknown[]; failed: { error: string }[] };
+    assert.equal(invalid.moved.length, 0); assert.match(invalid.failed[0].error, /自己里面/);
+    assert.equal(await read(path.join(src, "keep.md")), "new source");
+  }
+
   console.log("files-move.test.ts ok");
 } finally {
   closeDb();

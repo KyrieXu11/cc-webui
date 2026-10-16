@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:,">
+<title>Claude Code 记忆机制 · 律枢数据库记忆实现方案</title>
+<style>
+:root{--paper:#eef2f8;--white:#fff;--ink:#192c3c;--muted:#516578;--line:#d3dce7;--accent:#a4492b;--accent-soft:#f7e8df;--blue:#245a79;--blue-soft:#e7eff5;--good:#26704e;--bad:#a1352e;--mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;--sans:"IBM Plex Sans","PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:84px}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.85 var(--sans);text-rendering:optimizeLegibility}button,input,textarea{font:inherit}button{cursor:pointer}a{color:var(--blue);text-underline-offset:4px}code{font-family:var(--mono);font-size:.85em;overflow-wrap:anywhere}p{margin:0 0 16px}h1,h2,h3{line-height:1.28;margin:0;font-weight:600}h1{font-size:clamp(40px,5.5vw,72px);letter-spacing:-.055em}h2{font-size:clamp(28px,3vw,40px);letter-spacing:-.04em}h3{font-size:20px}strong{font-weight:600}small,.small{font-size:13px}.muted{color:var(--muted)}.mono{font-family:var(--mono)}.wrap{max-width:1180px;padding:0 44px;margin:auto}.skip{position:absolute;left:12px;top:-80px;background:var(--white);padding:12px;z-index:20}.skip:focus{top:12px}.masthead{border-bottom:1px solid var(--line);padding:20px 0}.masthead .wrap{display:flex;justify-content:space-between;gap:20px;align-items:center}.brand{font:500 13px/1.5 var(--mono);letter-spacing:.12em}.edition{font:12px/1.5 var(--mono);color:var(--muted)}.nav{position:sticky;top:0;background:rgba(238,242,248,.97);border-bottom:1px solid var(--line);z-index:5}.nav .wrap{display:flex;gap:24px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}.nav a{font-size:13px;color:var(--muted);text-decoration:none;white-space:nowrap}.nav a:hover{color:var(--accent)}.hero{padding:70px 0 48px;display:grid;grid-template-columns:1.5fr 1fr;gap:44px;align-items:end}.eyebrow{color:var(--accent);font:500 12px/1.5 var(--mono);letter-spacing:.16em;margin-bottom:22px}.hero h1 span{display:block;color:var(--accent)}.hero .lead{font-size:18px;color:var(--muted);max-width:660px;margin:28px 0 0}.hero-note{border-left:3px solid var(--accent);padding-left:24px;align-self:center}.hero-note b{display:block;font-size:24px;line-height:1.45;margin:12px 0}.scope{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:16px 0;color:var(--muted);font-size:13px}.scope code{font-size:12px}.section{padding:64px 0;border-bottom:1px solid var(--line)}.section-head{display:flex;align-items:baseline;gap:20px;margin-bottom:28px}.chapter{font:13px var(--mono);color:var(--accent);flex:none}.intro{max-width:860px;color:var(--muted);margin:0 0 28px}.triptych{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}.concept{padding:28px;background:var(--white)}.concept .type{font:12px var(--mono);color:var(--accent);margin-bottom:18px}.concept h3{margin-bottom:12px}.concept p{font-size:14px;color:var(--muted)}.concept .bottom{font-size:13px;padding-top:14px;border-top:1px solid var(--line)}.takeaway{margin-top:24px;padding:20px 24px;background:var(--blue-soft);border-left:3px solid var(--blue);font-size:15px}.source-ref{font:11px var(--mono);margin-left:5px;color:var(--muted);text-decoration:none;white-space:nowrap}.split{display:grid;grid-template-columns:1fr 1fr;gap:36px}.paper{padding:28px;background:var(--white);box-shadow:0 7px 25px #1a2c3c07}.file-label{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:20px;font:12px var(--mono)}.flag{color:var(--accent);font-size:12px;font-family:var(--sans)}pre{margin:0;font:12px/1.9 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}.filetree{color:var(--muted);margin:20px 0}.index-demo{font:13px/2 var(--mono);background:var(--paper);padding:18px;color:var(--blue)}.timeline{list-style:none;padding:0;margin:0;counter-reset:steps}.timeline li{position:relative;padding:0 0 26px 42px;border-left:1px solid var(--line);margin-left:13px}.timeline li:last-child{border-left-color:transparent;padding-bottom:0}.timeline li:before{counter-increment:steps;content:counter(steps);position:absolute;left:-14px;top:0;border:1px solid var(--line);background:var(--paper);width:27px;height:27px;text-align:center;font:12px/26px var(--mono);color:var(--accent)}.timeline h3{font-size:17px;margin-bottom:8px}.timeline p{font-size:14px;color:var(--muted);margin:0}.flow{margin-top:32px;display:grid;grid-template-columns:1fr 35px 1fr 35px 1fr;align-items:center;gap:8px}.flow-node{padding:18px 20px;background:var(--white);border-top:3px solid var(--blue);min-height:116px}.flow-node b{display:block;font-size:17px;margin-bottom:5px}.flow-node span{font-size:13px;color:var(--muted)}.arrow{text-align:center;font-size:24px;color:var(--muted)}.limit-feature{display:grid;grid-template-columns:1fr 1fr;background:var(--ink);color:var(--white);margin-bottom:24px}.limit-feature>div{padding:32px}.limit-feature>div+div{border-left:1px solid #ffffff33}.big-number{font:500 clamp(46px,7vw,72px)/1 var(--mono);letter-spacing:-.06em;margin-bottom:12px}.limit-feature small{color:#b8c9d8}.limit-feature h3{font-size:17px;margin:0 0 8px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;text-align:left}th{font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap}td,th{padding:17px 14px 17px 0;vertical-align:top;border-bottom:1px solid var(--line)}td:first-child{width:24%;font-weight:600}td:nth-child(2){width:25%}.kind{font-size:11px;padding:3px 7px;background:var(--blue-soft);color:var(--blue);display:inline-block;margin-bottom:6px}.kind.optional{background:var(--accent-soft);color:var(--accent)}.precision{margin-top:24px;background:var(--white);padding:26px 28px}.precision h3{margin-bottom:14px}.precision ul{margin:0;padding-left:20px;font-size:14px;color:var(--muted)}.precision li+li{margin-top:9px}.precision b{color:var(--ink)}details{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}summary{cursor:pointer;font-size:15px;font-weight:500;padding:8px 0}details p,details li{font-size:14px;color:var(--muted)}details ul{padding-left:20px}.sandbox{background:var(--white);padding:28px}.lab-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:18px}.lab-toolbar span{font-size:13px;color:var(--muted);margin-right:7px}.preset{border:1px solid var(--line);padding:7px 12px;background:transparent;color:var(--ink);font-size:12px;border-radius:4px;min-height:36px}.preset:hover{background:var(--paper)}.preset[aria-pressed="true"]{background:var(--ink);color:var(--white);border-color:var(--ink)}.lab-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.lab-grid label,.lab-label{display:block;font:12px var(--mono);margin-bottom:9px;color:var(--muted)}textarea{display:block;resize:vertical;width:100%;height:235px;border:1px solid var(--line);border-radius:0;padding:14px;background:var(--paper);color:var(--ink);font:12px/1.7 var(--mono);tab-size:2}.output{background:#edf5f0}.counts{display:flex;gap:20px;flex-wrap:wrap;margin:12px 0 0;font-size:12px;color:var(--muted)}.counts b{color:var(--ink);font-family:var(--mono)}.meter{height:8px;background:var(--paper);display:flex;margin:20px 0 10px}.meter-kept{background:var(--good);transition:width .2s}.meter-cut{background:var(--accent);transition:width .2s}.meter-legend{display:flex;justify-content:space-between;gap:15px;font-size:12px;color:var(--muted)}.result{padding:15px 0 0;font-size:14px;min-height:52px}.result strong{color:var(--good)}.result[data-state="cut"] strong{color:var(--bad)}.lab-note{margin:16px 0 0;font-size:12px;color:var(--muted)}.maintenance{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}.maintenance article{border-top:3px solid var(--blue);padding-top:20px}.maintenance article.optional{border-color:var(--accent)}.maintenance h3{margin:12px 0}.maintenance p,.maintenance li{font-size:14px;color:var(--muted)}.maintenance ul{padding-left:18px;margin-bottom:0}.maintenance .phase{font:11px var(--mono);color:var(--blue)}.maintenance .optional .phase{color:var(--accent)}.snapshot{margin-top:28px;padding:24px 28px;background:var(--accent-soft)}.snapshot h3{font-size:17px;margin-bottom:10px}.snapshot p{font-size:14px;margin-bottom:8px}.snapshot p:last-child{margin:0}.rules-list{display:grid;grid-template-columns:1fr 1fr;gap:28px 40px}.rule{display:grid;grid-template-columns:38px 1fr;gap:12px}.rule .num{font:18px var(--mono);color:var(--accent);padding-top:3px}.rule h3{font-size:18px;margin-bottom:10px}.rule p{font-size:14px;color:var(--muted);margin:0}.memory-types{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin:26px 0}.memory-types div{padding-top:15px;border-top:1px solid var(--line)}.memory-types code{color:var(--accent)}.memory-types p{font-size:13px;color:var(--muted);margin:8px 0 0}.faq{margin-top:24px}.faq details{padding:14px 0;margin:0}.faq details p{padding-top:10px;max-width:900px}.evidence{list-style:none;margin:0;padding:0}.evidence li{display:grid;grid-template-columns:45px 1fr;gap:12px;padding:20px 0;border-bottom:1px solid var(--line);scroll-margin-top:90px}.evidence li:last-child{border:0}.evidence .source-id{font:12px var(--mono);color:var(--accent);padding-top:5px}.evidence h3{font-size:16px;margin-bottom:7px}.evidence p{font-size:13px;color:var(--muted);margin:0}.evidence code{font-size:11px}.evidence .path{display:block;margin-top:8px;overflow-wrap:anywhere}.footer{padding:32px 0 50px;display:flex;justify-content:space-between;gap:24px;font-size:12px;color:var(--muted)}.print{background:none;border:1px solid var(--line);padding:7px 12px;color:var(--muted);font-size:12px;white-space:nowrap}.footer .print{align-self:start}
+.plan-heading{margin:36px 0 18px;font-size:22px}.plan-list{padding-left:20px;margin:0;color:var(--muted);font-size:14px}.plan-list li+li{margin-top:10px}.plan-list strong{color:var(--ink)}.plan-status{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:18px}.plan-status .kind{margin:0}.acceptance{display:grid;grid-template-columns:1fr 1fr;gap:14px 28px;padding:0;margin:0;list-style:none}.acceptance li{padding-left:16px;border-left:3px solid var(--good);font-size:14px}.acceptance b{display:block;margin-bottom:3px}.acceptance span{color:var(--muted)}
+.plan-nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:22px 0 28px;font-size:13px}.plan-nav a{text-decoration:none}.plan-example{margin-top:20px}.plan-example h3{font-size:17px;margin:0 0 12px}.plan-example p:last-child{margin-bottom:0}.plan-heading[id]{scroll-margin-top:120px}
+@media(max-width:800px){.wrap{padding:0 24px}.hero{padding-top:42px;grid-template-columns:1fr;gap:30px}.hero-note{max-width:620px}.triptych{grid-template-columns:1fr}.split{grid-template-columns:1fr;gap:28px}.section{padding:44px 0}.maintenance{grid-template-columns:1fr}.maintenance article{padding-top:16px}.memory-types{grid-template-columns:1fr 1fr}.nav .wrap{gap:8px 18px}.rules-list{grid-template-columns:1fr}.flow{grid-template-columns:1fr;gap:0}.arrow{line-height:1.5;transform:rotate(90deg)}.flow-node{min-height:0}.lab-grid{grid-template-columns:1fr}.limit-feature>div{padding:24px}.table-wrap table{min-width:630px}.section-head{gap:14px}.hero .lead{font-size:16px}.acceptance{grid-template-columns:1fr}}
+@media(max-width:440px){.wrap{padding:0 18px}.masthead .wrap{align-items:flex-start}.edition{max-width:95px;text-align:right}.brand{font-size:11px}.hero h1{font-size:36px}.hero-note b{font-size:21px}.concept,.paper,.sandbox{padding:22px}.limit-feature{grid-template-columns:1fr}.limit-feature>div+div{border-left:0;border-top:1px solid #ffffff33}.nav a{font-size:12px}.memory-types{gap:18px}.precision,.snapshot{padding:22px}.footer{flex-direction:column}.preset{min-height:44px}.lab-toolbar{gap:7px}.table-wrap{margin-right:-2px}.evidence li{grid-template-columns:30px 1fr;gap:8px}.section-head{align-items:start}}
+@media(max-width:440px){#lvshu .section-head{display:block}#lvshu .section-head .chapter{display:block;margin-bottom:12px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+@media print{body{background:white;font-size:11pt}.wrap{max-width:none;padding:0 12px}.nav,.print,.lab-toolbar{display:none}.hero{padding:25px 0}.hero h1{font-size:38px}.section{padding:28px 0}.paper,.sandbox{box-shadow:none;border:1px solid var(--line)}.limit-feature{background:var(--paper);color:var(--ink)}.limit-feature small{color:var(--muted)}.section-head,.concept,.flow-node,.rule,.maintenance article{break-inside:avoid}details{display:block}details>*{display:block}.table-wrap{overflow:visible}.lab-grid{grid-template-columns:1fr 1fr}textarea{height:170px}.hero-note{font-size:11pt}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+<header class="masthead"><div class="wrap"><div class="brand">CLAUDE CODE / FIELD NOTES</div><div class="edition">SOURCE EDITION<br>2.1.283 · 2026.10.13</div></div></header>
+<nav class="nav" aria-label="章节导航"><div class="wrap"><a href="#map">01 三种“记忆”</a><a href="#lifecycle">02 如何工作</a><a href="#limits">03 限制真相</a><a href="#lab">04 截断实验台</a><a href="#maintenance">05 后台维护</a><a href="#practice">06 怎么写</a><a href="#lvshu">07 律枢最终方案</a><a href="#sources">08 源码证据</a></div></nav>
+<main id="main" class="wrap">
+<section class="hero" aria-labelledby="title">
+  <div><div class="eyebrow">PERSISTENCE ≠ CONTEXT ≠ TRAINING</div><h1 id="title">记忆，不是大脑。<span>是文件读取机制。</span></h1><p class="lead">Claude Code 把值得跨会话保留的经验写成 Markdown。下一次先把目录索引放进上下文，再由模型按需打开相关正文。模型没有因为“记住”而修改自己的权重。</p></div>
+  <aside class="hero-note"><span class="small muted">先记住这一句</span><b>存在磁盘上<br>≠ 已装进上下文<br>≠ 一定被模型采用。</b><span class="small muted">截断通常发生在“读给模型看”这一步，不是把文件后半截删掉。</span></aside>
+</section>
+<div class="scope"><strong>证据范围：</strong>前六章说明本机解包的 Claude Code <code>2.1.283</code> 原生机制，普通文件记忆为主。使用 2026-10-03 的新会话 / resume 捕获和 2026-10-10 的后台维护实验；不是对所有未来版本的承诺。<strong>第七章为律枢最终讨论方案：索引与正文全部数据库管理，不使用独立记忆文件。</strong>实验与灰度分支、尚未实施的设计均明确标注。<a class="source-ref" href="#s1">[S1]</a><a class="source-ref" href="#lvshu">[律枢方案]</a></div>
+
+<section id="map" class="section">
+  <div class="section-head"><span class="chapter">01 / MAP</span><h2>先分清三种“记忆”</h2></div>
+  <div class="triptych">
+    <article class="concept"><div class="type">A · INSTRUCTIONS</div><h3>你写的项目说明</h3><p><code>CLAUDE.md</code>、<code>CLAUDE.local.md</code>、<code>.claude/rules/</code>。告诉它项目怎么做、有什么固定规则；可随 Git 共享。</p><div class="bottom">本质：持久化的行为说明。<br>不是自动学习的笔记。</div></article>
+    <article class="concept"><div class="type">B · AUTO MEMORY</div><h3>它写的长期笔记</h3><p><code>MEMORY.md</code> 是索引，<code>feedback_testing.md</code> 等是正文。保存用户偏好、纠正、非代码背景和外部资料入口。</p><div class="bottom">本质：跨会话复用的文件。<br>本页的重点。</div></article>
+    <article class="concept"><div class="type">C · SESSION CONTEXT</div><h3>本次对话与历史</h3><p>聊天消息、工具结果、JSONL transcript、resume 和 compact。resume 恢复一段会话；compact 在上下文压力下压缩对话。</p><div class="bottom">本质：会话连续性。<br>不等于给每次新会话装入所有旧聊天。</div></article>
+  </div>
+  <div class="takeaway"><strong>因此：</strong>“上次聊过”不等于“本次新会话知道”。要么 resume 那个会话，要么相关知识已经进入持久记忆，并在这次被召回。说明文件和记忆都是模型上下文，不是强制权限控制。<a class="source-ref" href="#s7">[S7]</a></div>
+</section>
+
+<section id="lifecycle" class="section">
+  <div class="section-head"><span class="chapter">02 / LIFECYCLE</span><h2>它如何从“记下来”到“想起来”</h2></div>
+  <p class="intro">默认位置是 <code>~/.claude/projects/&lt;project-key&gt;/memory/</code>。普通路径以项目 / 仓库为范围；同一仓库的子目录和 worktree 通常共用。不是给每个聊天新建一个记忆库；自定义目录与远端模式另有路径分支。<a class="source-ref" href="#s2">[S2]</a></p>
+  <div class="split">
+    <div>
+      <div class="paper"><div class="file-label"><span>ON DISK / 持久存储</span><span class="flag">索引 + 正文</span></div><pre class="filetree">memory/
+├── MEMORY.md                 ← 索引，启动时加载
+├── feedback_testing.md       ← 按需读取
+├── user_expertise.md         ← 按需读取
+└── reference_observability.md ← 按需读取</pre><div class="index-demo"># MEMORY.md<br>- [测试偏好](feedback_testing.md) — 接数据库，不用 mock<br>- [技术背景](user_expertise.md) — 熟悉 Go，React 新手</div><p class="small muted" style="margin:16px 0 0">索引不写大段知识。它负责让未来的模型判断：“这件事可能与当前任务相关，去打开这个文件。”</p></div>
+      <div class="paper" style="margin-top:20px"><div class="file-label"><span>feedback_testing.md</span><span class="flag">正文示例 · 合成数据</span></div><pre>---
+name: feedback-testing
+description: 写数据库集成测试时的用户要求及原因
+metadata:
+  type: feedback
+---
+数据库集成测试使用真实数据库，不以 mock 替代。
+
+**Why:** 用户曾遇到 mock 与生产行为不一致，
+导致迁移问题未被测试发现。
+
+**How to apply:** 写这类集成测试时，先准备隔离
+测试数据库；单元测试不因此一律禁止 mock。</pre></div>
+    </div>
+    <ol class="timeline">
+      <li><h3>获得长期有效的信息</h3><p>用户纠正、确认非显然的做法，或提供背景。普通提示要求模型主动判断是否值得保存，不必等用户说“记住”。<a class="source-ref" href="#s1">[S1]</a></p></li>
+      <li><h3>先查重，再写正文</h3><p>检查有没有同主题文件；有则更新，没有才新建。普通分支用 Read / Write / Edit 等文件工具，不是向量数据库自动做语义 upsert。</p></li>
+      <li><h3>另一步更新 MEMORY.md</h3><p>给正文加一行标题、链接和具体的用途提示。正文和索引是两次文件操作，不是“存一条就保证原子更新全库”。</p></li>
+      <li><h3>新会话先加载有限索引</h3><p>捕获中：记忆行为规则在 system；索引在 user-role 的提醒块。只自动装入有限的索引，不把所有主题正文预先灌进去。</p></li>
+      <li><h3>模型选择相关文件，按需 Read</h3><p>“数据库测试”命中索引后，模型读取 <code>feedback_testing.md</code>。description 和索引提示太泛，会增加漏读或选错的风险。</p></li>
+      <li><h3>先核实，再采用；变化则修正</h3><p>记忆是过去的快照，不是当前事实保证。文件、函数、flag 可能已失效；新证据冲突时优先新证据，更新或移除旧笔记。</p></li>
+    </ol>
+  </div>
+  <div class="flow" aria-label="记忆召回流程：完整磁盘文件，有限索引进入上下文，模型再按需读正文"><div class="flow-node"><b>磁盘文件</b><span>保留完整内容<br>跨会话存在</span></div><div class="arrow" aria-hidden="true">→</div><div class="flow-node"><b>有限索引</b><span>启动时进入上下文<br>超限的尾部不在这里</span></div><div class="arrow" aria-hidden="true">→</div><div class="flow-node"><b>相关正文</b><span>模型调用工具读取<br>读过才有内容可用</span></div></div>
+  <div class="takeaway"><strong>resume 的细节：</strong>已有离线捕获验证：修改索引后，启动一个新的 CLI 进程 resume，会重发新索引并提醒它替代旧副本；历史中的旧副本仍保留。这个结论不等于“外部随时改文件，正在跑的进程立刻完整刷新”。<a class="source-ref" href="#s1">[S1]</a></div>
+</section>
+
+<section id="limits" class="section">
+  <div class="section-head"><span class="chapter">03 / LIMITS</span><h2>限制到底卡在哪里？</h2></div>
+  <div class="limit-feature"><div><div class="big-number">200</div><h3>MEMORY.md 最多加载的行数</h3><small>第 201 行起不自动注入；内部空行也算行。</small></div><div><div class="big-number">25,000</div><h3>索引加载的 JS 字符串长度上限</h3><small>不是 25,000 tokens，也不是严格的 UTF-8 字节数。</small></div></div>
+  <p><strong>两道门取更早的一道。</strong>先截到前 200 行；若仍超过 25,000 个字符串单位，再在上限以内找最后一个换行，尽量保留完整行。第一行本身就过长且没有可用换行时，直接截到 25,000。裁的是给模型的副本。<a class="source-ref" href="#s3">[S3]</a></p>
+  <div class="table-wrap"><table><thead><tr><th>对象 / 路径</th><th>阈值</th><th>真正的效果</th></tr></thead><tbody>
+    <tr><td>普通 MEMORY.md<br><span class="kind">硬加载限制</span></td><td><strong>200 行 + 25,000 JS 单位</strong><br>哪道限制先到就在哪停</td><td>截断自动注入的索引；追加 WARNING。磁盘尾部还在，之后可用文件工具打开。并非全库最多 200 条。</td></tr>
+    <tr><td>索引写入后的检查<br><span class="kind">提醒，不是拒写</span></td><td><strong>达到 80% 开始提醒</strong><br>160 行 / 20,000 单位；建议缩到 70%</td><td>超出 200 行或 25,000 单位时返回带 Error 的重写提示，明确“write succeeded”。也就是写已成功，但下次读不全；建议目标为 140 行 / 17,500 单位。<a class="source-ref" href="#s4">[S4]</a></td></tr>
+    <tr><td>普通主题正文<br><span class="kind">按需文件读取</span></td><td><strong>不套索引的 200 行 / 25,000 上限</strong></td><td>普通捕获路径不自动注入正文；模型用标准文件工具按需读。仍受该工具的分页、结果和上下文预算约束，不能推成“任意大文件一次全读”。</td></tr>
+    <tr><td>CLAUDE.md 与导入文件<br><span class="kind">单文件读取护栏</span></td><td><strong>超过 4 MiB 整份跳过</strong><br>4,194,304 字节；200 行是建议</td><td>在此文件读取上限内，不按 MEMORY.md 的 200 行 / 25,000 规则截断。源码只在 <code>type === "AutoMem"</code> 时调用那个裁剪器；大说明文件另有性能警告。<a class="source-ref" href="#s4">[S4]</a></td></tr>
+    <tr><td>CLAUDE.md 的 @ 导入<br><span class="kind">递归边界</span></td><td><strong>根文件 + 最多 4 跳</strong><br>根深度 0；深度 ≥ 5 跳过</td><td>限制导入嵌套，不是单文件行数；循环 / 已处理文件也会去重。拆成无条件 @ 导入改善组织，但仍会占用启动上下文。<a class="source-ref" href="#s4">[S4]</a></td></tr>
+    <tr><td>后台提取的已有文件清单<br><span class="kind optional">有开关的维护分支</span></td><td><strong>最多 200 个条目</strong></td><td>给提取模型的是文件名、类型、mtime、description 清单，不是预取全部正文；这不是最多只能保存 200 个文件。<a class="source-ref" href="#s5">[S5]</a></td></tr>
+    <tr><td>选择器 recall 的正文预取<br><span class="kind optional">灰度 / 非本次普通捕获</span></td><td><strong>每文件 200 行 / 4,096 字节</strong><br>单次最多 5 个候选文件</td><td>仅选择器预取路径；截断时提示用 Read 看完整文件。普通文件工具读取不因此被强制裁成 4 KiB。<a class="source-ref" href="#s6">[S6]</a></td></tr>
+  </tbody></table></div>
+  <div class="precision"><h3>“25KB”的精确含义：代码与文档的差别</h3><ul><li>文档简写为 25KB；<code>IDt → Klt</code> 实际用 <code>trimmed.length</code>，也就是 <b>UTF-16 code units</b>。变量虽然叫 <code>byteCount</code>，这里却没用 <code>Buffer.byteLength</code>。</li><li>普通英文字符、常见汉字通常各算 1 单位；很多 emoji 算 2 单位。<b>9,000 个“记” = 9,000 单位，却是 27,000 个 UTF-8 字节，不会仅因超过 25,000 字节就在此裁剪。</b></li><li>首尾先 <code>trim()</code>；再按 <code>\n</code> 数行。编辑器视觉自动换行不算新行，内部空行算。边界是 <code>&gt;</code>：恰好 200 行 / 25,000 单位本身不超限。</li><li>索引警告文字会附在裁剪结果之后，所以<b>最终提醒块可以比 25,000 更长</b>；25,000 限的是保留的原始索引，不含追加警告。</li></ul></div>
+  <details><summary>展开：还有哪些数字不能误读为“自动截断”？</summary><ul><li><b>一行约 150 / 200 字符：</b>保存提示建议一条索引约 150 字符内；裁剪警告建议一行约 200 字符内。都不是逐行硬裁剪阈值。</li><li><b>40,000 与 120,000：</b>说明文件性能警告的字符阈值下限，不是截断点。单文件警告阈值 = max(40,000, 按模型窗口估算的 5% 字符预算)，合计阈值 = max(120,000, 单文件阈值)。与 4 MiB 读取护栏分开。</li><li><b>选择器的 61,440：</b><code>QEr</code> 在已累计预取正文达到该值时停止发起新召回；虽然叫 <code>totalBytes</code>，<code>s5o</code> 累加的是正文 <code>.length</code>。这是启动新预取前的检查，不是每次装入严格裁到 61,440。此灰度路径不能当作普通记忆的全局硬预算。</li><li><b>4 条 pinned、生成清单 200 / 50 条：</b>来自 stone-shell 等其它条件分支，不是本次已捕获普通索引模式的普遍保证。</li><li><b>4 MiB：</b>启动索引走的普通 <code>KSe</code> 文件读取也有这道护栏。极端巨大 MEMORY.md 会先被整份跳过，根本走不到 200 行 / 25,000 裁剪。实验台仅模拟裁剪器，不模拟该文件读取护栏。</li></ul><a class="source-ref" href="#s4">[S4]</a><a class="source-ref" href="#s6">[S6]</a></details>
+</section>
+
+<section id="lab" class="section">
+  <div class="section-head"><span class="chapter">04 / TRY IT</span><h2>亲眼看：文件没删，模型少看了什么</h2></div>
+  <p class="intro">修改左侧文本，右侧按该版本索引裁剪算法实时显示可加载的内容。这个实验完全在页面内运行，不读取、不改动你的真实记忆文件。</p>
+  <div class="sandbox">
+    <div class="lab-toolbar" aria-label="示例场景"><span>试一个边界</span><button class="preset" type="button" data-preset="normal" aria-pressed="true">简短索引</button><button class="preset" type="button" data-preset="lines" aria-pressed="false">第 201 行</button><button class="preset" type="button" data-preset="longlines" aria-pressed="false">未到 200 行，先超长</button><button class="preset" type="button" data-preset="han" aria-pressed="false">中文：字节 ≠ 长度</button><button class="preset" type="button" data-preset="single" aria-pressed="false">超长单行</button><button class="preset" type="button" data-preset="emoji" aria-pressed="false">emoji 的双单位</button></div>
+    <div class="lab-grid"><div><label for="index-input">磁盘原文 / 可编辑</label><textarea id="index-input" spellcheck="false" aria-describedby="lab-caveat"></textarea><div class="counts"><span>计入 <b id="raw-lines">0</b> 行</span><span><b id="raw-units">0</b> JS 单位</span><span><b id="raw-bytes">0</b> UTF-8 字节</span></div></div><div><label for="index-output">模型可加载的原始索引 / 只读</label><textarea id="index-output" class="output" readonly spellcheck="false"></textarea><div class="counts"><span>保留 <b id="kept-lines">0</b> 行</span><span><b id="kept-units">0</b> JS 单位</span><span>源文本仍完整</span></div></div></div>
+    <div class="meter" role="img" aria-label="索引保留和未自动加载的比例"><div id="meter-kept" class="meter-kept" style="width:100%"></div><div id="meter-cut" class="meter-cut" style="width:0%"></div></div><div class="meter-legend"><span id="kept-percent">自动加载 100%</span><span id="cut-percent">留在磁盘、未自动加载 0%</span></div>
+    <div id="lab-result" class="result" aria-live="polite" aria-atomic="true"></div>
+    <p id="lab-caveat" class="lab-note">只复现 IDt 的 trim → 200 行 → 25,000 单位裁剪，不模拟 Markdown 前处理、4 MiB 读取护栏或追加 WARNING。空字符串在源码计数器里算 1 行；界面显示为空。状态提醒按原文是否超过阈值判断，因此原文两项都超限时会标两项，即使保留量实际先被行数卡住。</p>
+  </div>
+  <details><summary>展开：裁剪器的等价逻辑</summary><pre style="padding:18px 0">text = source.trim()
+overLines  = countNewlines(text) + 1 &gt; 200
+overLength = text.length &gt; 25_000    // JS UTF-16 单位
+
+kept = overLines ? first200Lines(text) : text
+if (kept.length &gt; 25_000) {
+  lastBreak = kept.lastIndexOf("\n", 25_000)
+  kept = kept.slice(0, lastBreak &gt; 0 ? lastBreak : 25_000)
+}
+// 原文件不动；实际实现还会在 kept 后附加警告。</pre></details>
+</section>
+
+<section id="maintenance" class="section">
+  <div class="section-head"><span class="chapter">05 / MAINTENANCE</span><h2>“自动记忆”不只有一种自动</h2></div>
+  <p class="intro">普通主对话主动维护、后台增量提取、Auto Dream 是三条不同路径。后两条在同一 CLI 内部 fork 父对话，继承上下文和工具表，再由专用权限回调限制执行；不是每写一个文件就启动一个去重函数。<a class="source-ref" href="#s5">[S5]</a></p>
+  <div class="maintenance">
+    <article><div class="phase">01 / MAIN CONVERSATION</div><h3>主对话：当场记笔记</h3><p>普通记忆提示让主模型判断什么值得跨会话保留，按需读写文件、查重、更新索引。</p><ul><li>学到角色、偏好、纠正或非显然的正向确认时主动保存。</li><li>用户说“记住”时保存适合长期记忆的信息。</li><li>是否真的调用工具，仍取决于模型执行；没有 100% 遵守保证。</li></ul></article>
+    <article class="optional"><div class="phase">02 / GATED EXTRACTION</div><h3>后台提取：补漏</h3><p>主 turn 结束后检查 gate 和增量窗口，提取最近新增对话值得保存的信号。</p><ul><li>需 <code>passport_quail</code> gate；headless 另需 <code>slate_thimble</code>。</li><li>频率由配置控制，源码 fallback 为 1；不是固定每一轮必跑。</li><li>至少一条合格非 meta 用户文本，空白切词 ≥ 3。无空格中文可能不过此过滤，主对话保存中文不受这一条件限制。</li><li>主对话已经发出记忆 Write / Edit 时会跳过该窗口；失败的 Edit 也可能被算作“已写过”。</li><li><strong>最多 5 个 agentic turns</strong>，不是最多 5 次工具调用；headless 退出默认最多等 60 秒 drain，不是每个任务 60 秒超时。</li></ul></article>
+    <article class="optional"><div class="phase">03 / AUTO DREAM</div><h3>Dream：跨会话整理</h3><p>turn 结束时判断是否到期，再整理已有记忆与近期活动信号；不是每 24 小时自启动的守护进程。</p><ul><li>需可用性 rollout + 用户开关；<code>sdk-cli</code> / <code>sdk-ts</code> / <code>sdk-py</code> 入口排除。</li><li>源码默认距标记 ≥ 24 小时、≥ 5 个更新会话；服务端可覆盖，排除当前会话。</li><li>扫描节流 10 分钟，有 PID 标记锁。</li><li>Orient → Gather → Consolidate → Prune &amp; index。</li><li><strong>默认最多 50 个 agentic turns</strong>。界面保留最近 30 轮不等于只执行 30 轮。</li></ul></article>
+  </div>
+  <div class="snapshot"><h3>别把“源码里有”当作“你的机器已经在跑”</h3><p>2026-10-10 的本机缓存快照：后台提取两个 gate 都是 false；Dream <code>enabled:false</code>，配置 <code>minSessions:3</code>。这个 3 与源码 fallback 的 5 必须分开。缓存可能变化，本页不声称当前 rollout 状态。</p><p>24 个正向 / 负向机制用例使用隔离配置和本地假 API；Dream 正向还使用合成 desktop 入口。它们验证调度与工具边界，不是“真实模型一定会整理得好”。普通 <code>claude -p</code> 的捕获入口是 <code>sdk-cli</code>，即使 gate 打开也不跑这条 Dream。</p></div>
+  <details><summary>展开：后台写完，主对话如何知道？还有什么可靠性限制？</summary><ul><li>后台成功改文件后同步主对话读缓存，并排队 <code>memory_update</code>；下一模型请求提醒“已加载的旧副本过期，需重新 Read”。不会把所有新正文自动塞回 system。</li><li>普通后台 Write / Edit 只准记忆目录内、通过保护检查的 <code>.md</code>；可读工具仍查显式阻断和目录限制。父工具表里即使看见 Agent / MCP，执行权限也不因此放行。</li><li>主对话、提取器和 Dream 的普通本地文件分支，没有全库 CAS 原子合并、整库事务回滚或确定性的语义查重阈值。部分写入失败时，之前成功的文件可能已落盘。</li><li>Dream 修正旧记忆、合并重复项、缩短索引，但不在这条整理任务内修改 CLAUDE.md。正常完成即使没改任何记忆，也会推进冷却标记。</li></ul></details>
+</section>
+
+<section id="practice" class="section">
+  <div class="section-head"><span class="chapter">06 / PRACTICE</span><h2>怎样写，才更容易被正确用上</h2></div>
+  <div class="memory-types"><div><code>user</code><p>你的角色、经验、长期协作偏好。</p></div><div><code>feedback</code><p>纠正与确认过的做法；包含原因与适用范围。</p></div><div><code>project</code><p>代码推不出的目标、动机、约束、截止日期。</p></div><div><code>reference</code><p>到哪里找最新信息，而不是复制一份易过期内容。</p></div></div>
+  <div class="rules-list">
+    <article class="rule"><div class="num">01</div><div><h3>把索引当目录，不当正文</h3><p>一行一条具体“检索钩子”；细节放主题文件。不要只写“重要”“偏好”“注意事项”，要写“何时需要这条经验”。</p></div></article>
+    <article class="rule"><div class="num">02</div><div><h3>重要条目靠前，但不要迷信排序</h3><p>尾部越界会失去启动可见性。先合并重复项、迁移细节；目录没有列出也不代表正文被删，显式查文件仍可能找回。</p></div></article>
+    <article class="rule"><div class="num">03</div><div><h3>一主题，写 Why 和 How to apply</h3><p>“不用 mock”过于绝对；“数据库集成测试不用 mock，原因是……，仅此场景适用”才能让未来的模型正确迁移经验。</p></div></article>
+    <article class="rule"><div class="num">04</div><div><h3>不存项目已经能回答的内容</h3><p>普通提示排除代码结构、Git 历史、调试修复配方、CLAUDE.md 已写内容和临时进度。即使用户说“记住”，也要提炼真正非显然、跨会话有用的经验。</p></div></article>
+    <article class="rule"><div class="num">05</div><div><h3>记录时间，使用前检查现状</h3><p>项目背景里的“下周四”应转为绝对日期。老记忆引用文件 / 函数 / flag 时先确认仍存在；旧信息不是当前事实的证明。</p></div></article>
+    <article class="rule"><div class="num">06</div><div><h3>保存成功，要看实际文件操作</h3><p>“我会记住”不等于已经落盘。检查主题正文和索引是否都更新；去重 / 修正依赖模型，没有保证零遗漏、零矛盾的存储魔法。</p></div></article>
+  </div>
+  <div class="takeaway"><strong>怎么检查：</strong>原生终端 <code>/memory</code> 可打开记忆目录、说明文件和开关；<code>/context</code> 可查看已加载的说明。关闭自动记忆可用 <code>autoMemoryEnabled:false</code> 或 <code>CLAUDE_CODE_DISABLE_AUTO_MEMORY=1</code>，但这不等于关闭 CLAUDE.md，也不等于禁止所有文件工具读取。<a class="source-ref" href="#s2">[S2]</a><a class="source-ref" href="#s7">[S7]</a></div>
+  <div class="faq">
+    <details><summary>记忆会自动过期删除吗？</summary><p>没有在普通分支中发现“超过 200 行就删除旧记忆”或固定年龄 TTL。会话 transcript 的清理与记忆文件是两套事。记忆保留到用户或模型修改 / 删除；模型被要求在有新证据证明错误或过期时修正或移除。Dream 的语义修剪也不是按容量静默删尾部。<a class="source-ref" href="#s1">[S1]</a><a class="source-ref" href="#s7">[S7]</a></p></details>
+    <details><summary>这是向量检索或自动 embedding 吗？</summary><p>本次已捕获的普通索引模式不是：有限索引进入上下文，模型用文件工具按相关性读主题。源码另有 <code>memorySelector</code> 的灰度自动预取路径；不能因此把普通模式描述成始终运行的向量搜索，也不能断言所有未来分支都采用相同检索机制。<a class="source-ref" href="#s6">[S6]</a></p></details>
+    <details><summary>子 agent 会自动继承主 agent 的所有记忆吗？</summary><p>一般子 agent 不默认装入主对话的 auto memory。定义了 <code>memory:user|project|local</code> 的 agent 有自己的目录：<code>~/.claude/agent-memory/&lt;name&gt;/</code>、<code>.claude/agent-memory/&lt;name&gt;/</code> 或 <code>.claude/agent-memory-local/&lt;name&gt;/</code>，其 MEMORY.md 也走索引裁剪。后台维护这样的 conversation fork 是例外，会继承父上下文；“独立子 agent”和“fork”不能混为一谈。<a class="source-ref" href="#s3">[S3]</a><a class="source-ref" href="#s5">[S5]</a><a class="source-ref" href="#s7">[S7]</a></p></details>
+    <details><summary>本地存文件，是否意味着内容永不发送给模型服务？</summary><p>不是。存储可以是本地的，但被注入的索引和工具读出的正文会成为正常模型请求的一部分。本次假 API 捕获直接验证了这件事；别把“机器本地存储”误解为“永远只在磁盘上”。</p></details>
+    <details><summary>在 cc-webui 里看到的统一项目记忆，也是这套限制吗？</summary><p>不是同一存储，但<strong>同样有索引预算，并非无限索引</strong>。启用 <code>CC_WEBUI_PROJECT_MEMORY_ENABLED</code> 后使用独立 Memory MCP / DB 索引 / 正文版本，且给 Claude 子进程设置 <code>CLAUDE_CODE_DISABLE_AUTO_MEMORY=1</code>。原生后台任务不会代它整理。</p><ul><li>自动快照最多 <strong>200 条</strong>记忆，不是 200 行；编码 JSON 最多 <strong>24,980 个 JS 字符串单位</strong>，按完整条目截断。</li><li>索引按更新时间倒序，只带元数据。未展示条目仍保留，快照标记 <code>truncated:true</code>，模型可用 list / search 补查。</li><li>list 每页最多 100 条；search 每次最多 20 条，覆盖整个授权项目，但只匹配<strong>名称和描述，不搜正文</strong>。</li><li>单条记忆含生成的 frontmatter 硬上限 <strong>32 KiB</strong>；超限拒绝保存，不静默截断正文。</li></ul><p>所以库变大后，较旧记忆可能不再自动出现；模型是否主动补查仍影响召回，不能保证零遗漏。此说明没有修改任何运行时配置。<a class="source-ref" href="#s8">[S8]</a></p></details>
+  </div>
+</section>
+
+<section id="lvshu" class="section" aria-labelledby="lvshu-title">
+  <div class="section-head"><span class="chapter">07 / FINAL DESIGN</span><h2 id="lvshu-title">律枢 × Claude Code：数据库记忆方案</h2></div>
+  <div class="plan-status"><span class="kind optional">最终讨论方案 · 尚未实施</span><span class="small muted">2026-10-13 · 结合当前源码与本次讨论整理</span></div>
+  <p class="intro"><strong>一个统一记忆库，两条分类轴，PostgreSQL 是唯一真相。</strong>索引和正文全部在数据库中管理；不再选择“单独的 Markdown 文件”方案。借鉴 Claude Code 的短索引、按需读正文与主动记忆规则，替换律枢复杂的召回／学习流程，但保留实体授权、版本与出处。本章是实施蓝图，不代表已改代码、迁移数据或发布。<a class="source-ref" href="#s9">[S9]</a><a class="source-ref" href="#s10">[S10]</a></p>
+  <nav class="plan-nav" aria-label="律枢方案小节"><a href="#lvshu-classification">两轴分类</a><a href="#lvshu-database">数据库结构</a><a href="#lvshu-index">实体索引</a><a href="#lvshu-tools">工具与行为</a><a href="#lvshu-boundary">安全边界</a><a href="#lvshu-migration">迁移步骤</a><a href="#lvshu-acceptance">验收标准</a></nav>
+  <div class="snapshot" style="margin:0 0 28px"><h3>判断：律枢复杂的主要不是存储，而是记忆周围叠了太多决策流程。</h3><p>用户真正关心的是“它到底记住了吗？”和“下次到底会不会用？”。优化目标应是可理解、可追溯的单一读写链，而不是再往旧状态机上增加一套记忆。</p></div>
+  <div class="split">
+    <article class="paper"><div class="file-label"><span>CURRENT / 当前源码</span><span class="flag">不同职责叠在多条链上</span></div><ul class="plan-list"><li><strong>召回：</strong>授权过滤 → 候选超过 35 条时另起模型挑选 → 最多 6 轮、默认 30 秒超时 → 失败确定性回退。没超预算不调用 picker。</li><li><strong>保存：</strong>模型要理解 scope、rule / fact、long_term / one_off、risk，以及新建、印证、冲突、确认和取代。</li><li><strong>事后学习：</strong>对话提炼、改稿提炼、改稿质量检查各有输入、进度与重试。</li><li><strong>维护：</strong>候选核对、日终确认、跨律师归纳、共享复核叠加。每层都有来由，但整体生效路径不直观。</li></ul></article>
+    <article class="paper"><div class="file-label"><span>TARGET / 最终目标</span><span class="flag">数据库唯一真相</span></div><pre>当前律师／客户／项目 + host 授权
+        ↓
+查询 PostgreSQL，生成有限实体索引
+        ↓
+主 Agent 按需 list / search → read 正文
+        ↓
+通过 save / delete 保存、纠正或停止使用
+        ↓
+统一记忆服务提交数据库事务
+记录、版本、出处一致；目录由查询生成</pre><p class="small muted" style="margin:18px 0 0">取消前置“挑记忆模型”，让正在处理任务的主 Agent 判断相关性。可以减少一个前置模型等待点，但不等于主模型总用量必然下降，也不保证零漏召回；要用律枢任务实测。模型不连 PG，不拿 DSN。</p></article>
+  </div>
+
+  <h3 id="lvshu-classification" class="plan-heading">一、两条分类轴：归谁 × 讲什么</h3>
+  <p class="intro">实体维度与业务维度是两个独立字段，不是二选一，也不按它们拆出多个记忆库。分类负责组织与理解；谁能访问、何时可生效、能否跨客户共享，是另外的服务端判据。</p>
+  <div class="split">
+    <article class="paper"><div class="file-label"><span>ENTITY / 实体归属</span><span class="flag">这条记忆归谁</span></div><ul class="plan-list"><li><strong>律师：</strong>某位律师的长期习惯、工作方法与协作背景。</li><li><strong>客户：</strong>围绕某个客户的要求、沟通方式与背景。</li><li><strong>项目：</strong>仅适用于某个项目的目标、方法与约束。</li></ul><p class="small muted" style="margin:18px 0 0">律所 ID 是每条记录必带的租户隔离键，不要求用户把“律所”再选成第四种日常记忆实体。旧所级资产仍需保留与映射，不因新分类只有三种实体就被删除。</p></article>
+    <article class="paper"><div class="file-label"><span>BUSINESS / 业务内容</span><span class="flag">这条记忆讲什么</span></div><ul class="plan-list"><li><strong>偏好：</strong>希望结果是什么样，例如表达风格、文书呈现方式。</li><li><strong>做事方式：</strong>工作过程怎么开展，例如核对顺序、沟通方式。</li><li><strong>背景与约束：</strong>影响工作的稳定事实、目标、范围与限制。</li></ul><p class="small muted" style="margin:18px 0 0">不生搬 Claude Code 的 user / feedback / project / reference 四个标签；保留其主动保存和质量规则，换成律枢业务语言。交叉内容选主类别，适用条件写正文，不追求多重分类组合。</p></article>
+  </div>
+  <div class="table-wrap" style="margin-top:22px"><table><thead><tr><th>实体归属</th><th>业务类别</th><th>记忆示例 · 合成数据</th></tr></thead><tbody><tr><td>张律师</td><td>偏好</td><td>意见书先给结论，再展开论证。</td></tr><tr><td>张律师</td><td>做事方式</td><td>审稿先核对原始材料，再提出修改。</td></tr><tr><td>甲客户</td><td>做事方式</td><td>材料疑问统一汇总给指定联系人。</td></tr><tr><td>某项目</td><td>背景与约束</td><td>本项目仅做内部梳理，不对外出具意见。</td></tr></tbody></table></div>
+  <div class="plan-example paper"><h3>边界例子：“张律师给甲客户的意见书，要先结论后分析”</h3><p class="small muted">可以归属甲客户、分类为偏好，但必须保留“仅适用于张律师”的限定，不能自动变成所有律师对甲客户的要求。作者是谁也不等于适用律师是谁；来源、适用限定与实体归属分别记录。客户背景里含单案事实时，还要收窄到对应项目，不能默认为客户永久事实。</p></div>
+
+  <h3 id="lvshu-database" class="plan-heading">二、数据库管理全部内容，不存在第二份文件真相</h3>
+  <p class="intro">优先演进现有 <code>memory_item</code> 与历史／出处结构。下面是逻辑字段分工，不是已经执行的 DDL，也不要求为了字段分组新建多张表。正文以数据库中的 Markdown 文本保存，属于记忆记录，不是单独的 <code>.md</code> 文件。</p>
+  <div class="table-wrap"><table><thead><tr><th>字段组</th><th>逻辑字段</th><th>责任与规则</th></tr></thead><tbody>
+    <tr><td>稳定身份</td><td><code>id</code></td><td>稳定记录 ID；迁移保留旧 ID／ref 或可核对映射，不靠标题或文件名当身份。</td></tr>
+    <tr><td>租户与实体</td><td><code>workspace_id</code><br><code>entity_type / entity_id</code></td><td>实体类型为 lawyer / client / project；host 校验实体存在、属本所、当前可见且可写，不信模型声明。</td></tr>
+    <tr><td>业务分类</td><td><code>business_type</code></td><td>偏好／做事方式／背景与约束。旧 rule / fact 不机械一对一映射；需结合正文和来源，未判清不强行自动分类。</td></tr>
+    <tr><td>检索信息</td><td><code>title / description</code></td><td>标题命名主题，描述说明什么时候用得上。自动索引只携带这些元数据及必要的 ID、分类、版本。</td></tr>
+    <tr><td>正文</td><td><code>body</code></td><td>完整 Markdown 文本。偏好／方式说明具体做法、Why、How to apply 与例外；不另维护 frontmatter、正文文件或 MEMORY.md。</td></tr>
+    <tr><td>版本与生命周期</td><td><code>revision / state</code><br>创建／更新时间</td><td>业务上区分有效、待核对、停止使用；不把旧状态与取代链粗暴丢弃。更新检查 expected_revision；状态有效不等于允许共享。</td></tr>
+    <tr><td>授权与可信来源</td><td>适用律师、共享批准、风险／冻结判据<br>消息／对话／KnowledgeSlice／改稿出处</td><td>后台管理并复用现有约束，非用户第三套分类。出处由 host 验证并绑定；原话、diff 与完整历史证据保持私有。</td></tr>
+  </tbody></table></div>
+  <div class="takeaway"><strong>“实体索引”不是额外存一份正文：</strong>它是从当前数据库记录生成的目录投影。记录保存成功后，再次查询自然得到新目录；不需要模型“先写正文、再补索引”，也不为每位律师／客户／项目建一张独立表或独立数据库。</div>
+  <details><summary>两个“索引”不要混淆</summary><ul><li><strong>记忆目录索引：</strong>给模型看的标题、描述、分类、版本清单，由查询生成。</li><li><strong>数据库查询索引：</strong>用于提高查询效率，例如以租户、实体、状态等字段设计 SQL 索引；它不承载第二份记忆内容。</li><li>正文、版本和出处使用同一事务保持一致。纯遥测与业务凭据区分：遥测失败不阻断工作；保存一致性或必要共享批准失败必须回滚，不能报保存成功。</li><li>可复用已有版本／证据表，不为“数据库化”再引入独立文件仓、双写缓存或通用事件框架。若后续加缓存，缓存不能成为授权或内容真相。</li></ul></details>
+
+  <h3 id="lvshu-index" class="plan-heading">三、实体索引按当前轮生成，正文按需读取</h3>
+  <ol class="timeline">
+    <li><h3>host 固定身份、归属与工具能力</h3><p>根据当前运行者、对话 kind、客户和项目确定本轮允许的实体。模型可使用这些授权实体的引用，不能靠传入任意 entity_id 扩大范围。</p></li>
+    <li><h3>数据库先授权过滤，再排序与截断</h3><p>同所过滤之后仍查实体可见性、适用律师、当前生效状态和共享复核。范围内目录按实体分组，条目使用稳定确定性顺序；不把现行 picker 或“每层三条”的配额再复制进新链。</p></li>
+    <li><h3>只注入有预算的元数据快照</h3><p>快照含授权实体、可见条目数、已显示数和 truncated；总数不能泄露不可见记忆。仅在完整条目边界截断，不发正文、不发全所客户总目录。索引是当前轮背景数据，不提升为能覆盖执行规则的指令。</p></li>
+    <li><h3>主 Agent 决定读什么</h3><p>看到相关标题／描述后调用 read。索引不足时 list 翻页或 search；搜索匹配标题、描述及正文，但先返回元数据，再显式读完整正文，不增加前置选记忆模型。</p></li>
+    <li><h3>每轮与续聊刷新，读写再次验权</h3><p>新会话、resume、换 provider、后续普通轮次都获取当前快照。旧快照不能替代当前权限；归属或授权改变时旧能力失效，下一轮重新签发。历史保留不等于旧记忆仍可用。</p></li>
+  </ol>
+  <div class="paper plan-example"><div class="file-label"><span>INDEX SNAPSHOT / 逻辑示例</span><span class="flag">数据来自查询，不是索引文件</span></div><pre>当前授权实体：张律师、甲客户、某项目
+
+[张律师] 已显示 1 / 当前可见 8 条
+  id: …  类别: 偏好  revision: 3
+  标题: 意见书表达顺序
+  描述: 写意见书时先结论再论证，解释原因与例外
+
+[某项目] 已显示 1 / 当前可见 5 条
+  id: …  类别: 背景与约束  revision: 1
+  标题: 委托工作范围
+  描述: 本项目的工作范围及不可超出的交付边界
+
+truncated: true → 需要其它条目时分页／搜索
+body: 不在快照中 → 用 read 获取数据库正文</pre></div>
+  <details><summary>预算与长正文：借鉴原生机制，不混淆单位或冒充已定参数</summary><ul><li>新方案必须有条目数、编码长度／上下文预算和单次工具返回上限；这限制一次给模型多少内容，不是最多能保存多少条。</li><li>Claude Code 的 200 行／25,000 JS 单位与 cc-webui 的 200 条／24,980 JS 单位是两种实现。律枢为 Go 服务，须明确字节、rune、UTF-16 单位或 token 估算的具体口径，不能把它们叫同一个“25KB”。</li><li><strong>具体首版参数尚未在本次讨论中定值。</strong>可以参考 cc-webui 预算，但需由律枢实际语料与延迟／召回评测确定；这不影响已经确定的全数据库存储和两轴分类。</li><li>超出快照的条目仍可通过授权分页／搜索读取。正文默认按完整记录读取；超大记录如需分段，必须给出总量与后续游标，不能悄悄截尾或把半段说成全文。</li><li>新写入超限应明确拒绝并要求按主题缩短／拆分；旧记录迁移不得直接按新上限截断。不得为了追求小索引自动删除旧记忆。</li></ul></details>
+
+  <h3 id="lvshu-tools" class="plan-heading">四、五个工具、一处写入、同一套行为规则</h3>
+  <div class="table-wrap"><table><thead><tr><th>工具语义</th><th>作用</th><th>必须保证</th></tr></thead><tbody>
+    <tr><td><code>list</code></td><td>分页列当前授权实体的元数据；可按业务类别筛选</td><td>不默认返回正文；游标与 total 只覆盖当前可见集合。</td></tr>
+    <tr><td><code>search</code></td><td>在授权范围搜标题、描述及正文，返回命中记录元数据</td><td>授权先于 LIMIT；不把不可见正文片段带进搜索结果。</td></tr>
+    <tr><td><code>read</code></td><td>按稳定 ID 读取当前完整正文和 revision</td><td>每次重新验权／状态；未知与不可见的返回不用于存在性探测。</td></tr>
+    <tr><td><code>save</code></td><td>新建或更新：实体引用、业务类别、标题、描述、正文</td><td>更新须 id＋expected_revision，写入绑定幂等 operation_id。host 核定实体与出处，单事务保存记录／版本／证据；重复请求不重复沉淀。</td></tr>
+    <tr><td><code>delete</code></td><td>停止以后使用指定记忆，而非擦除全部历史</td><td>验权、验版本并留失效原因与证据；不绕过离职冻结、既有规则管理权或既定审计／产品保留要求。</td></tr>
+  </tbody></table></div>
+  <p class="small muted" style="margin-top:16px">名称表示目标工具语义，不是已经上线的协议。模型经现有受限 MCP → 主服务 → PG 调用，不直接发 SQL，不拿数据库凭据，也不通过 Read / Write / shell 绕过记忆服务。</p>
+  <p class="small muted">启用律枢托管记忆后，不允许原生记忆另起一套并行库：Claude 子进程使用已验证的 <code>CLAUDE_CODE_DISABLE_AUTO_MEMORY=1</code> 关闭原生自动记忆；其它 provider 由受管适配器确认只装配本平台索引与工具，不继承个人记忆来源。限制仅作用于律枢运行，不修改个人 CLI 全局配置。</p>
+  <div class="rules-list" style="margin-top:24px">
+    <article class="rule"><div class="num">A</div><div><h3>保存前查重，更新已有主题</h3><p>不要用“写过一次”或“重复出现次数多”自动证明长期正确。先搜索、读取同主题，能更新则更新；并发版本冲突后重读，不强制覆盖。</p></div></article>
+    <article class="rule"><div class="num">B</div><div><h3>只保存能跨会话改变行为的信息</h3><p>明确长期偏好、做事方式、稳定背景与约束才入库。临时计划、进度、模型自我推断和单案修改不自动当长期通则；相对日期变绝对日期。</p></div></article>
+    <article class="rule"><div class="num">C</div><div><h3>记忆是旧背景，不是当前事实保证</h3><p>使用前核对新证据与适用条件。纠正后更新，错误且无可保留内容时停止使用；不依据旧聊天复活失效记忆。</p></div></article>
+    <article class="rule"><div class="num">D</div><div><h3>保存、采用、共享三件事分开</h3><p>工具如只确认记录为待核对，就显示“已记录，待核对”，不能说“以后已自动采用”。风险与来源要求由服务处理，不让模型给自己的内容盖共享批准章。</p></div></article>
+  </div>
+  <div class="takeaway"><strong>律师看到的交互保持简单：</strong>本次读了什么、记了什么、改了什么、哪些确实需要核对。业务分类只有“归谁＋讲什么”；来源、版本、生效判据与共享批准由后台管理，完整敏感载荷仍仅给有权限的观测面。</div>
+
+  <h3 class="plan-heading">迁移核心思路，不照搬实现外壳</h3>
+  <div class="table-wrap"><table><thead><tr><th>部分</th><th>建议取舍</th><th>为什么</th></tr></thead><tbody>
+    <tr><td>索引与召回</td><td>确定性索引＋分页／搜索</td><td>在授权过滤后生成有限快照，超限明确标记；不在首答前额外起 picker。预算可先参考 cc-webui，但最终须明确本系统单位、条数和超限行为，不直接宣称已采用其阈值。</td></tr>
+    <tr><td>模型工具</td><td><code>list / search / read / save / delete</code></td><td>收敛模型面对的交互，不让它掌握整套印证状态机。工具命名是目标接口；是否可调用和能改变什么，仍由服务端能力与写闸决定。</td></tr>
+    <tr><td>正文结构</td><td>一主题一条数据库记录，两轴分类</td><td>实体为律师／客户／项目；业务为偏好／做事方式／背景与约束。正文保留 Why、How to apply 和适用条件，不复制原生四类型标签当律枢分类。</td></tr>
+    <tr><td>底层存储</td><td><strong>索引元数据与正文全部在 PostgreSQL</strong></td><td>不新增 SQLite、不落独立 Markdown 记忆文件、不用 cwd 建库、不维护真实 MEMORY.md。实体目录由记录查询生成，不是第二份内容真相。</td></tr>
+    <tr><td>搜索</td><td>复用正文关键词匹配</td><td>不必照搬 cc-webui 只搜名称／描述的限制；先返回索引，随后显式读取全文。范围过滤仍须先于搜索结果 LIMIT。</td></tr>
+    <tr><td>更新与遗忘</td><td>版本冲突检查、可追溯失效</td><td>保存成功后才能宣称记住；“忘记”停止以后使用，保留必要历史证据。不要直接复制 cc-webui 删除全部正文版本的语义。</td></tr>
+    <tr><td>后台学习</td><td>所有来源写入同一服务</td><td>对话与改稿学习不再形成另一套生命周期；明确长期偏好与从 diff 推测出的经验仍区别处理。保留反馈／改稿证据与必要核对，不把纯个案修改直接自动生效。</td></tr>
+    <tr><td>强制规则与参考资产</td><td>不并入相关性竞争</td><td>草稿态、交付限制等进入常驻执行规则；reference 经验清单、Skill 与母版保留各自职责，不因为“统一记忆”就随意合库。首版不移植 Dream。</td></tr>
+  </tbody></table></div>
+  <div class="takeaway"><strong>关键：</strong>模型负责判断“哪些信息值得整理成记忆”；host 决定“能不能写、归到哪里、能不能生效、能不能跨客户共享”。这些判断可以集中在服务内部，但不能因工具参数少了就消失。</div>
+
+  <h3 id="lvshu-boundary" class="plan-heading">五、必须保留的安全与资产边界</h3>
+  <div class="rules-list">
+    <article class="rule"><div class="num">01</div><div><h3>按业务身份授权，不按目录共享</h3><p>律所隔离之外，仍查律师、客户、项目、对话可见性。同所同 cwd 不证明可读对方记忆；换 provider 也不能改变授权范围。</p></div></article>
+    <article class="rule"><div class="num">02</div><div><h3>consult 只读，正式工作按写闸学习</h3><p>保留当前对话 kind／归属的服务端判据。对话归属变化时旧 capability 失效，不把一次签出的能力当永久授权。</p></div></article>
+    <article class="rule"><div class="num">03</div><div><h3>客户事实不混进跨客户通用规则</h3><p>广 scope、active、律师采用都不等于客户中立。共享批准继续绑定完整正文与归属，内容修改后重新检查。</p></div></article>
+    <article class="rule"><div class="num">04</div><div><h3>离职只读，修改和学习能追溯</h3><p>保留离职冻结、KnowledgeSlice、消息／文件 diff 出处和必要历史。不批量把旧候选变成已采用，也不让模型自评代替隐私或高风险核对。</p></div></article>
+  </div>
+
+  <h3 id="lvshu-migration" class="plan-heading">六、最终一套机制，实施三步切换</h3>
+  <ol class="timeline">
+    <li><h3>先替换读取链</h3><p>先盘点旧 memory／reference／所级资产及出处，制定两轴字段映射，不自动改写正文或生效状态。在数据库兼容读取层保留原授权过滤，生成有限实体索引；改工具教学与主 Agent 按需读取，取消前置 picker。同步 run-context 的同轮来源，避免聊天看到一套、技能拿到另一套。</p></li>
+    <li><h3>再统一写入与学习</h3><p>主对话保存、对话提炼、改稿学习全部接同一新服务；记录、正文、版本、出处在 PG 事务内更新，目录不双写。律师反馈／diff 仍落可追溯证据，推测经验仍需必要核对。旧生命周期由新入口承接，不并行写两套记忆。</p></li>
+    <li><h3>最后迁移数据、退役旧流程</h3><p>保留旧 ID／ref、出处、采用状态、共享批准与历史映射；旧所级资产明确去向，不因为不属于三种日常实体就丢弃。显式备份并核对旧学习队列／在途批次，切换后停用旧写入与旧注入。冻结／兼容保留旧结构直到验收；回滚不覆盖切换后新增业务，不自动整库 restore。</p></li>
+  </ol>
+  <details><summary>实施地图：优先改哪里，不是现在已修改</summary><ul><li><code>server/internal/service/memory.go</code>：用授权后的有界索引、分页和搜索替换 <code>MemorySelected</code> 的 picker 分支；同时保持全文读取语义。</li><li><code>server/internal/runner/memory_pick.go</code>：读取链切换并验证后退役前置模型选择，而不是仅把超时调低。</li><li><code>server/internal/agents/tools/memory/memory.go</code> 与 <code>server/internal/toolgateway/</code>：收敛工具接口，能力注册、实际执行、provider 工具表同步；不借新名字扩大免审／调用权限。</li><li><code>server/internal/service/memory_gateway.go</code>、<code>memory_collect.go</code>、<code>memory_from_edits.go</code>：接统一写入口，保留出处和必要核对；旧归纳／日维护职责逐项确认再退役。</li><li><code>server/internal/service/conv.go</code>、<code>server/internal/runner/consult.go</code> 与 run-context：每轮一致地使用当前授权快照和新教学；旧历史不是永久有效的记忆源。</li><li><code>server/internal/store/queries_memory.go</code>、共享复核查询与迁移：优先复用 PG 和安全谓词。若新增表／版本，做可核对映射，不原地清空旧库或给历史语料批量盖章。</li></ul></details>
+
+  <h3 id="lvshu-acceptance" class="plan-heading">七、验收看实际行为，不只看工具是否成功</h3>
+  <ul class="acceptance"><li><b>记住后找得回</b><span>新会话、换 provider，仍能读取正确范围的正文并实际采用。</span></li><li><b>纠正后不再用旧版</b><span>更新与冲突有明确版本语义，旧历史不能复活失效记录。</span></li><li><b>忘记后不再召回</b><span>停止使用与保留历史证据分别验证，不宣称旧聊天被擦除。</span></li><li><b>超预算还能找到</b><span>构造超过快照预算的记忆，验证分页／关键词补查及正文命中。</span></li><li><b>换客户不会串事实</b><span>跨所、跨客户、跨律师、归属变化与共享批准失效都有负向用例。</span></li><li><b>学习失败不假报成功</b><span>consult 拒写、版本冲突、存储失败、后台重放与改稿出处分别核对。</span></li><li><b>正文只存在数据库</b><span>无独立记忆 .md 或索引文件；正文更新后目录正确刷新，事务失败无半条记录。</span></li><li><b>迁移不改变旧资产含义</b><span>核对 ID、正文、出处、状态与共享批准；旧所级和未判清分类的记录不被丢弃或自动转正。</span></li></ul>
+  <p class="small muted" style="margin-top:22px">验证分层：纯逻辑／假模型回归 → 假 CLI＋本轮随机 PG 验事务和权限 → 另行授权的真实模型任务评测。比较首答等待、工具轮次、实际应用与漏召回，不能只用“没有 picker 了”宣称总成本下降，也不能把替身测试说成真实模型质量验收。</p>
+  <div class="takeaway"><strong>最终结论：</strong>一个 PostgreSQL 记忆库，实体归属＋业务类别两条分类轴；目录由数据库查询生成，正文按需读取，所有保存／学习走同一受限服务。借鉴 Claude Code 的使用机制，不复制文件存储与灰度 Dream，更不删除律枢业务安全边界。</div>
+</section>
+
+<section id="sources" class="section">
+  <div class="section-head"><span class="chapter">08 / EVIDENCE</span><h2>数字与建议从哪里来</h2></div>
+  <p class="intro">优先使用已解包代码和隔离请求捕获；公开文档只做交叉检查。完整私有源码未复制进这份页面；以下模块名与符号可在原件中定位。</p>
+  <ol class="evidence">
+    <li id="s1"><div class="source-id">S1</div><div><h3>实际 prompt 与六个离线捕获用例</h3><p><code>docs/research/claude-memory-2.1.283/</code> 中的两模型 new / resume / index 快照及 <code>capture-summary.json</code>。验证 system 规则、user-role 索引、主题正文未自动预取、新进程 resume 更新及原生关闭。普通 Sonnet / Opus 提示长短不同，不能把模板全部当作每种模型都实际送出的规则。</p><span class="path small muted">机制整理：docs/claude-memory-prompts.md</span></div></li>
+    <li id="s2"><div class="source-id">S2</div><div><h3>记忆开关与目录解析</h3><p><code>0131-chunk-1vt3h958.js.txt</code>：<code>cl / Db / Hb.defaultPath / Lb / UV</code>。默认启用、环境关闭、特殊模式、用户 / 项目设置的目录选择与受保护路径检查。<code>autoMemoryDirectory</code> 可改变库位置，不能只凭 cwd 字面拼接就断言目录。</p></div></li>
+    <li id="s3"><div class="source-id">S3</div><div><h3>索引裁剪器：200 与 25,000</h3><p><code>0184-chunk-4f79m39g.js</code> 格式化版第 2698–2703、3172–3188 行：<code>GF=200; cK=25e3; Klt; IDt</code>。<code>Klt</code> 的 <code>byteCount=n.length</code> 是本页区分 JS 单位与 UTF-8 字节的直接依据。<code>pa / uln / GWn</code> 用于 agent 自有记忆与三个作用域。</p></div></li>
+    <li id="s4"><div class="source-id">S4</div><div><h3>加载护栏与写后提醒</h3><p><code>0365-chunk-wyjbafrm.js.txt</code>：<code>aZe / KSe / o8=4194304</code>；只有 AutoMem 调用 <code>IDt</code>。底层 <code>0095-chunk-tyg10zsd.js.txt</code> 的 <code>LI</code> 以 <code>stat.size &gt; limit</code> 跳过非普通或超大文件。<code>NEn=5; hZe; O8</code> 限制导入深度。<code>zCn=.8; JZe=.7; dke / w8 / eet</code> 定义 80% 提醒、70% 目标和“写已成功”的超限提示。<code>VGe / TEn</code> 定义动态说明文件性能警告，不是裁剪。</p></div></li>
+    <li id="s5"><div class="source-id">S5</div><div><h3>后台提取与 Auto Dream：24 个机制用例</h3><p><code>0563-chunk-525qs7wc.js.txt</code>、<code>0564-chunk-0wcm1gj1.js.txt</code>、<code>0536-chunk-9hyxppty.js.txt</code>、<code>0365-chunk-wyjbafrm.js.txt</code>；维护研究已追踪入口、频率、权限、5 / 50 turns 和更新通知。<code>0255-chunk-hzevqd7x.js.txt</code> 的 <code>JMe</code> 以 <code>$B=200</code> 裁已有文件清单。</p><span class="path small muted">docs/claude-memory-maintenance.md · docs/research/claude-memory-2.1.283/maintenance/maintenance-capture-summary.json</span></div></li>
+    <li id="s6"><div class="source-id">S6</div><div><h3>灰度 recall：4 KiB、200 行、5 文件与累计预算</h3><p><code>0184</code> 定义 <code>ihe=200; ste=4096</code>；<code>0365</code> 的 <code>v8 / i5o / r5o</code> 裁预取正文并提示 Read 完整文件，候选 <code>slice(0,5)</code>。<code>QEr</code> 要求 selector、主 agent、原生记忆、<code>$V()</code> 等条件；<code>s5o</code> 累加 <code>.length</code>，<code>R4o.MAX_SESSION_BYTES=61440</code> 是新召回的启动检查。普通捕获没有启用该路径。</p></div></li>
+    <li id="s7"><div class="source-id">S7</div><div><h3>Anthropic 官方说明 · 2026-10-13 交叉检查</h3><p><a href="https://code.claude.com/docs/en/memory#how-it-works" target="_blank" rel="noopener noreferrer">How Claude remembers your project</a> 对比说明文件与 auto memory，写明索引 200 行 / 25KB、CLAUDE.md 超过 4 MiB 跳过、按需主题读取、子 agent 例外和查看命令。数字精度与灰度机制仍以本页注明的 2.1.283 本地源码为准。</p></div></li>
+    <li id="s8"><div class="source-id">S8</div><div><h3>cc-webui 的有界索引与统一记忆</h3><p><code>server/project-memory/prompt.ts:40</code>：<code>memorySnapshot</code> 先取 200 条，编码快照超出 24,980 时移除最后完整条目，记录 <code>total / truncated</code>。<code>shared/project-memory-envelope.ts</code> 定义 JSON 转义。<code>server/mcp-memory-route.ts</code> 限 list 每页 100、search 返回 20；<code>server/project-memory/store.ts</code> 搜 name / description，按更新时间排序，并以真实 UTF-8 字节检查含 frontmatter 的 32 KiB 保存上限。</p></div></li>
+    <li id="s9"><div class="source-id">S9</div><div><h3>律枢当前链路与不可降级边界 · 本地只读分析</h3><p>仓库 <code>/Users/xuqiang/code/ts/lvshu</code>。<code>server/internal/service/memory.go</code> 定义 <code>MemoryInjectCap=35</code> 与 <code>MemorySelected</code>；<code>server/internal/runner/memory_pick.go</code> 设置 6 turns／默认 30 秒。<code>memory_gateway.go</code>、<code>memory_collect.go</code>、<code>memory_from_edits.go</code>、<code>memory_daily.go</code> 和 store 查询体现写入、学习、维护及授权分层。</p><span class="path small muted">边界依据：AGENTS.md 与 .claude/context/memory.md、memory-observability.md、conversation-runtime.md。本页第 07 章是建议，不是已实施或已部署说明；未修改律枢代码、真实记忆或运行配置。</span></div></li>
+    <li id="s10"><div class="source-id">S10</div><div><h3>本次讨论收敛的目标方案 · 不是代码现状</h3><p>用户明确日常记忆按律师／客户／项目的实体维度与偏好／做事方式等业务维度独立组织，并要求数据库管理而非单独文件。第 07 章将其落实为 PostgreSQL 记录、查询生成的实体目录和按需正文读取；首版业务类别增加“背景与约束”以容纳工作事实。字段分工、五工具、版本事务及迁移步骤为实施设计，精确预算和最终 DDL 尚待实施前确认，不冒充已经上线。</p></div></li>
+  </ol>
+  <details><summary>原件位置与版本指纹</summary><p>私有解包目录：<code>/Users/xuqiang/.cc-webui/research/claude-memory/2.1.283-2026-10-03/</code>，其中 <code>modules/</code> 为原始模块，<code>formatted/</code> 为已有格式化版本。本页只读分析，未执行解包模块、未访问真实记忆正文、未改真实 rollout 或运行配置。</p><p>二进制 SHA-256：<code>d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e</code>。机制探针是 CLI 对本地假 API 的请求，不是线上模型行为测评。新版本不能直接沿用这些阈值与开关结论。</p></details>
+</section>
+<footer class="footer"><div>一句话带走：<strong>短索引负责找到，主题正文负责解释，当前证据负责纠错。</strong><br>独立、离线 HTML · 不依赖外部字体 / 脚本 · 不连接你的记忆库</div><button type="button" class="print" id="print-button">打印 / 保存 PDF</button></footer>
+</main>
+<script>
+(() => {
+  'use strict';
+  const root = document.getElementById('lab');
+  const input = root.querySelector('#index-input');
+  const output = root.querySelector('#index-output');
+  const encoder = new TextEncoder();
+  const fmt = n => n.toLocaleString('zh-CN');
+  // Reimplementation of the source's pure index-content crop, not its file loader.
+  function clipIndex(source) {
+    const text = source.trim();
+    const lines = text.split('\n').length;
+    const overLines = lines > 200;
+    const overLength = text.length > 25000;
+    let kept = overLines ? text.split('\n').slice(0, 200).join('\n') : text;
+    if (kept.length > 25000) {
+      const lastBreak = kept.lastIndexOf('\n', 25000);
+      kept = kept.slice(0, lastBreak > 0 ? lastBreak : 25000);
+    }
+    return { text, lines, overLines, overLength, kept };
+  }
+  const presets = {
+    normal: '# 项目记忆索引\n- [数据库测试](feedback_testing.md) — 集成测试用真实数据库，原因与范围\n- [技术背景](user_expertise.md) — 熟悉 Go，解释 React 时可用后端类比\n- [观测入口](reference_observability.md) — 查 API 延迟时使用哪个看板',
+    lines: Array.from({length:201}, (_,i) => i === 200 ? '- 第 201 行：我还在磁盘，但启动模型看不到我。' : '- [' + String(i+1).padStart(3,'0') + '](topic-' + (i+1) + '.md) — 一条简短记忆').join('\n'),
+    longlines: Array.from({length:100}, (_,i) => ('条目' + String(i+1).padStart(3,'0') + '：').padEnd(299,'长')).join('\n'),
+    han: '记'.repeat(9000),
+    single: 'A'.repeat(25000) + '【这些在第 25,001 单位以后】',
+    emoji: '🙂'.repeat(15000)
+  };
+  function update() {
+    const r = clipIndex(input.value);
+    output.value = r.kept;
+    const set = (id,value) => { root.querySelector('#'+id).textContent = value; };
+    set('raw-lines', fmt(r.lines));
+    set('raw-units', fmt(r.text.length));
+    set('raw-bytes', fmt(encoder.encode(r.text).length));
+    set('kept-lines', r.kept ? fmt(r.kept.split('\n').length) : '0');
+    set('kept-units', fmt(r.kept.length));
+    const ratio = r.text.length ? r.kept.length / r.text.length : 1;
+    root.querySelector('#meter-kept').style.width = ratio*100+'%';
+    root.querySelector('#meter-cut').style.width = (1-ratio)*100+'%';
+    root.querySelector('.meter').setAttribute('aria-label', '索引自动加载 '+(ratio*100).toFixed(1)+'%，未自动加载 '+((1-ratio)*100).toFixed(1)+'%');
+    set('kept-percent', '自动加载 '+(ratio*100).toFixed(1)+'%');
+    set('cut-percent', '留在磁盘、未自动加载 '+((1-ratio)*100).toFixed(1)+'%');
+    const result = root.querySelector('#lab-result');
+    result.replaceChildren();
+    const label = document.createElement('strong');
+    if (r.overLines || r.overLength) {
+      result.dataset.state = 'cut';
+      label.textContent = '部分索引没有进入上下文。';
+      const reasons = [r.overLines ? '原文超过 200 行' : '', r.overLength ? '原文超过 25,000 JS 单位' : ''].filter(Boolean).join('；');
+      result.append(label, document.createTextNode(' '+reasons+'。省略 '+fmt(r.text.length-r.kept.length)+' 单位，文件原文不会被删除。'));
+    } else {
+      result.dataset.state = 'full';
+      label.textContent = r.text ? '这份索引可完整加载。' : '索引为空。';
+      const near = r.lines >= 160 || r.text.length >= 20000;
+      const note = near ? ' 写后检查会提醒缩短；这还不是硬截断。' : ' 不代表所有主题正文已读取，也不保证模型一定采用。';
+      result.append(label, document.createTextNode(note));
+    }
+  }
+  root.querySelectorAll('[data-preset]').forEach(button => button.addEventListener('click', () => {
+    input.value = presets[button.dataset.preset];
+    root.querySelectorAll('[data-preset]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
+    update();
+  }));
+  input.addEventListener('input', () => {
+    root.querySelectorAll('[data-preset]').forEach(button => button.setAttribute('aria-pressed','false'));
+    update();
+  });
+  document.getElementById('print-button').addEventListener('click', () => window.print());
+  input.value = presets.normal;
+  update();
+})();
+</script>
+</body>
+</html>

@@ -7,6 +7,8 @@
 > 定稿日期：2026-08-22 · **两侧都已实施完毕（Claude 2026-08-30，Codex 2026-09-17）**
 > 相关：架构总览见 [`../AGENTS.md`](../AGENTS.md)，飞书见 [`./feishu.md`](./feishu.md)。
 > ⚠️ 不要参照 `docs/superpowers/`——那是设计期文档，AGENTS.md 已列出它与实现的漂移。
+> **2026-10-10 更新**：仅 Codex 网页单聊改用 app-server 支持实时插话；引擎/飞书仍用 exec。
+> 本文早期 exec-only 结论有时间边界，最新实现与验收见末节。
 
 ## 目标
 
@@ -544,8 +546,10 @@ finally 里自己管。
 3. **bearer token 只走环境变量**（`mcp_servers.<name>.bearer_token_env_var`），argv 里只有变量名。
    argv 是 `ps` 可见的，而一个 MCP token 等价于一个 shell（见 AGENTS.md 安全边界）。每个 server
    一个变量名，因为 `McpServerSpec` 允许 per-server token。
-4. **`approval_policy` 只能是 `"never"`。** `codex exec` 没有审批通道，传别的值只会挂住或让工具被拒。
-   所以 `mode` 对 Codex 只翻译成 sandbox —— 决策 #15 的「`default` 接上真实审批」**对 Codex 不成立**。
+4. **迁移当时只能用 `"never"`；2026-10-09 已按 0.162.0 修正。** `codex exec` 仍没有
+   网页手动审批控制通道，但现在 CLI 内部支持 `on-request` + `approvals_reviewer="auto_review"`。
+   Auto 用原生自动审查，其他模式仍 never。不能只开 on-request、让 headless CLI 等用户。
+   决策 #15 的「`default` 接上用户权限卡」仍**对 Codex 不成立**，见文末实测。
 5. ⚠️ **`node_modules/.bin/codex` 会遮住真的 CLI。** `@openai/codex-sdk` 依赖 `@openai/codex`，后者
    在 `.bin` 里放了一个 `codex`；而 npm scripts 会把 `node_modules/.bin` 前置到 PATH。所以在
    `npm run dev` / `npm start` 下 `resolveCodexBin()` 解析到的是**它钉住的 0.142.5**，不是机器上的
@@ -606,10 +610,11 @@ finally 里自己管。
   一次回答就是一条 `item.completed`（`item.started` 只在工具调用那类 item 上出现）。和 SDK 时代
   完全一样（SDK 跑的就是同一条命令），所以迁移没有带来任何流式粒度上的回退；要更细的粒度只能
   换 `codex app-server`。
-- **Codex 的审批**：`codex exec` 没有审批通道（`-a/--ask-for-approval` 只长在 TUI 上，
+- **Codex 的用户审批卡**：`codex exec` 没有网页审批控制通道（`-a/--ask-for-approval` 只长在 TUI 上，
   `--experimental-json` 的事件集里也没有审批请求），所以决策 #15 的「`default` 接上真实审批」
   这半条**对 Codex 不成立**，只对 Claude 落地了。要给 Codex 做权限卡，得评估
-  `codex app-server`（另一套 JSON-RPC 协议，未调研）。
+  `codex app-server`（另一套 JSON-RPC 协议）。**这不等于不能自动审查**：2026-10-09
+  按 CLI 0.162.0 将 Auto 接到内部 reviewer，见文末；不新增用户卡/自建浏览器代理。
 
 ### 2026-09-29：ignored feature 设置不是 turn 失败
 
@@ -781,3 +786,217 @@ limit，不缓存跨账号可见结果。
 不能只把按钮解除禁用。需要递归逐项授权、符号链接与越界处理、目录结构/空目录条目、
 重复选择去重、文件数和整体包大小上限（不只单文件 <4GiB）。两项现有测试通过，
 功能尚未实现/发布；没有建立匿名下载路由或让模型编造链接。
+
+### 2026-10-09：cc-webui Codex 固定普通档位，不继承 Fast
+
+用户明确要求线上 Codex **不是 Fast 模式**。现场仅提取相关配置/参数，未输出凭据：
+
+- 全局 `~/.codex/config.toml` 为 `service_tier="fast"`；旧 executor 未覆盖该字段。
+  metadata-only `config/read` 在 Rebecca cwd 确认有效值仍是 fast。线上 Codex 进程只有
+  插件/effort 覆盖，没有 service_tier 覆盖；不能凭「argv 没有 --fast」说它没开 Fast。
+- `buildConfigOverrides` 每次 spawn（新建与 exec resume、网页与会话引擎）固定
+  `service_tier="default"` 与 `features.fast_mode=false`，保留 model/effort/沙箱/插件策略。
+  **不修改全局 config、不改变原生 Codex 或 Claude**。只关 feature 并不等于改了请求档位。
+- 官方配置定义见 [Configuration Reference](https://learn.chatgpt.com/docs/config-file/config-reference)：
+  service_tier 与 reasoning effort 是不同设置；Fast 选择映射请求中的 priority。
+- 真实 CLI **0.161.0** 的 config/read 确认覆盖后的 `service_tier=default` /
+  `features.fast_mode=false`；全局文件 SHA-256 前后一致，未启动真实模型轮次。
+- 另用临时 CODEX_HOME + **localhost 假 Responses 服务**实测线路：此前 fast 发
+  `service_tier=priority`，补丁新建会话与从 fast 历史 resume 均**省略 service_tier 字段**。
+  CLI 的 default 是普通模式的内部表示，**不是在 HTTP 上发送字面 default**；不能把
+  config/read 或 argv 测试写成「抓到了 HTTP service_tier=default」。没有调用真实模型。
+- 当前 metadata-only account/read 确认为 **ChatGPT 登录**。若以后改成 API key，省略字段
+  可能继承 API Project Service Tier；届时必须核对项目设置/实际返回档位，不能沿用这次
+  ChatGPT 模式的结论去保证任意 API 项目。参见 [Responses service_tier](https://developers.openai.com/api/reference/resources/responses/methods/create)。
+- 单测增加真实 spawn 假 CLI 的 fresh/resume 捕获，防止 executor 绕过参数构造；
+  类型检查与 87 项完整回归通过。已经启动的轮次不能改档位，用户选择**等当前轮结束
+  后重启**，不杀正在执行的模型/工具。后端重启验收完成前不能声称已在线生效。
+- PR #2 已由用户在远端 rebase 合并；本机安全快进并切到 `main@ce44a6e`，同步时
+  原功能分支文件树与远端完全一致，未临时检出旧版源码，原功能分支保留。
+- 安全重启监测在当前轮及工具自然退出后才执行：正式服务 PID 10576→70653，
+  启动日志确认 codex-cli 0.161.0，生产 HTTP 健康、前端未变。普通档位补丁已加载；
+  已结束旧轮不追溯改档位。补丁/测试/文档尚未提交，不自动推送 main。
+
+#### 同日：原生 Playwright MCP 被 never 审批策略拒绝
+
+用户截图 `playwright.browser_navigate` 返回 `MCP tool call requires approval, but approval policy is never`。
+这发生在 Codex 调用审批层，**尚未调用浏览器**，不能归因于网页网络或 file:// 支持。
+全局 `mcp_servers.playwright` 已启用，但只有 command/args/startup_timeout_sec，
+没有 `default_tools_approval_mode` 或逐工具策略。cc-webui 为 `codex exec` 固定
+`approval_policy=never`（它没有逐工具审批控制通道）；`mcpConfigOverrides` 只对
+应用显式装配的 bash/memory 等 server 配 approve，遗漏了从全局继承的 Playwright。
+因此「never」不是自动允许，缺少显式许可的工具会被拒绝。
+
+初始诊断时未修改 Playwright 权限。用户随后明确要**自动审查，不要用户审批，也不要一律
+放行**；0.162.0 的方案见下节。不改全局 config、不无差别给所有原生 MCP 配 approve，
+也不把 on-request 单独拿来假装已有可交互审批。file:// 支持、浏览器启动等仍是不同层
+的验证，不能从这次权限报错断言它们正常。
+
+### 2026-10-09：Codex Auto 接原生自动审查（0.162.0）
+
+用户自行升级后，线上 PATH 优先解析的 `~/.local/bin/codex` 实测为 **0.162.0**。
+之前“exec 的审批只能 never”的总结不够完整：**没有宿主手动审批通道**仍成立，
+但新版 CLI 已支持内部 Auto-review（`exec --help` 有 `--approve-for-me`）。
+官方 [Auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review) 说明它是 reviewer
+替换而非权限授予；只审查本来就需要审批的请求，不检查沙箱里原本已允许的所有动作。
+
+- `codexApprovalOverrides` 仅对 `mode="auto"` 成对设置 `approval_policy="on-request"`
+  与 `approvals_reviewer="auto_review"`。CLI 处理 Playwright 等原生 MCP 的可审查调用，
+  审查允许才执行；拒绝或审查失败不兜底 approve。不新增 cc-webui 用户审批卡。
+- 不用 `--approve-for-me` 的 workspace-write 预设去覆写自定义沙箱；用等价的两个配置字段。
+  Auto 的 sandbox 仍 workspace-write；Plan 仍 read-only + never，其他模式保留既有
+  never 策略。**不能为修浏览器而扩大 Plan 写权限或使用 danger-full-access**。
+- 明确按调用者的 Auto 选择启用；不会给全局 Playwright 配 `approve`，也不会凭空创建
+  一个缺 command/url 的 Playwright server。继承的原生 MCP 仍遵循工具/管理策略；
+  显式装配的 bash/memory 等 capability 网关保持原来的许可和逐次账号护栏，
+  **不宣称这些自定义网关里的每条操作也会经过 CLI reviewer**。Claude 完全不改。
+- `service_tier=default` / `features.fast_mode=false`、主模型/effort、插件局部禁用均保留。
+  reviewer 使用 CLI 自己的 `codex-auto-review` 模型，会有额外用量/延迟；不是更换用户主模型。
+- 单测覆盖 Auto/严格模式、fresh/resume 的真实 spawn argv、Plan 只读和非 Fast。
+  `scripts/verify-codex-auto-review.py` 是**可选真实 CLI**集成验证：临时 CODEX_HOME、
+  仅回环 Responses 假服务、假 stdio Playwright，无真实模型调用、用户数据或真实浏览器操作。
+  它使用仓库实际 argv builder，而不是复制一份配置。
+- 0.162.0 的模型工具定义可能位于 `input/additional_tools`，code-mode-only 模型要走
+  `functions.exec` 的 custom_tool_call，不能硬发旧的 flat function_call；否则只是
+  unsupported call，不能当作权限验证。审查结构输出必须有 `outcome: allow|deny`，
+  不是 decision。实测 reviewer HTTP 请求没有 priority/fast/ultrafast，根 turn_context
+  记录 on-request / auto_review；审批错误通过原有 MCP 失败工具行返回，不混入用户正文。
+- 实测六场景通过：旧 never（0 review/0 调用）、旧会话 resume Auto（1/1）、新会话
+  Auto（1/1）、reviewer deny（1/0）、malformed review（重试3次/0）、Plan（0/0）。
+  reviewer 的结果是 fixture 给定的，**这是审批路由/失败关闭的验证，不是实际风险判断
+  准确率或真实浏览器导航的验收**；MCP 也可能因 file:// 规则、启动失败等另行拒绝。
+- 类型检查、87 项完整回归通过。确认正式服务只有空闲 Node/esbuild 子进程后上线，
+  PID 70653→95009；日志确认 codex-cli 0.162.0、本机/公网 HTTP 正常，前端和 DB 未改。
+  Auto-review 与非 Fast 补丁仍在工作区未提交，不自动推送 main；不追溯改变已经结束的轮次。
+
+### 2026-10-10：网页单聊补齐两端原生实时插话（0.162.1）
+
+用户反馈 Codex 输入只排到下一轮，并选择「Codex 网页改用原生 app-server；Claude 保留 stdin」。
+并非给 `codex exec` 继续写 stdin：该命令不是双向控制通道。官方协议为
+[Steer an active turn](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn)，
+本机 0.162.1 `generate-json-schema` 同时核对 `turn/steer`、`expectedTurnId` 与
+`clientUserMessageId` 等线格式。早期文档关于 exec 不支持 delta/插话的事实仍成立，
+但不再代表网页单聊的驱动。
+
+- **范围最窄**：`codex-chat.ts` 使用新的 `executors/codex-app-server.ts`，每轮一个本地
+  stdio 进程，initialize → thread/start 或 thread/resume → turn/start；不暴露监听端口，
+  不跨账号共享线程或进程。会话引擎/飞书保留原 `codex-executor.ts`。
+- Claude 使用既有 stream-json stdin，Codex 等待 `turn/steer` ACK；都把原始用户气泡
+  排入同一事件队列，不能抢到已接收的原生工具帧前面。ACK 与 completed/cancel 竞争时
+  先排完已确认输入，再发终止帧/保存。Claude 的最终耐久历史仍由原生 CLI 写入。
+- `/api/{codex/}chat/steer` 校验 clientTurnId + sessionId 的**严格乐观锁**，不回退到
+  同会话后来开的轮次；messageId 幂等，改 payload 用同 id 回 400。每次仍重查 provider、
+  cwd 授权和项目记忆快照；只能原 turn actor 追加，不把阅读者的记忆或权限送给运行者。
+- 每个连接单独发 `steer_target`（不写全局 buffer，不暴露 ownerId）：同账号别的标签页
+  即使没有本地 ActiveTurn 也能获取当前目标；共享阅读者显示排队而非可插话。
+  新轮次与自动 wakeup 没带 clientTurnId 时由服务端生成，不放松乐观锁。
+- 前端串行发送、防双击、防跨会话迟到 ACK。启动未就绪等待 `steer_available` 后再试；
+  确实结束才回退下一轮。未知网络结果回 503/暂停待核对，**不能当 409 自动重发**。
+  切视图清本地队列，停止冻结待发送，图片暂保留下一轮；不强行杀掉正在执行的工具。
+- `codex-app-events.ts` 将 camel-case item/公开摘要/text/output delta 转换为既有 UI
+  事件。native turn/item ID 在插话气泡前后稳定，不能把未完成工具复制成第二行。
+  buffer 存实际 text/output delta，避免长输出的累积前缀造成平方级占用；不读取 raw reasoning。
+- 新驱动复用旧配置 builder：普通 service tier + fast_mode=false，Auto 的
+  on-request/auto_review 成对，Plan 只读、其他模式 never，插件局部禁用、原生记忆关闭、
+  HTTP bash/memory per-turn 网关全部保留。bearer 只进环境，不进 argv；不写全局 config。
+  effective thread 配置与关键策略冲突即失败；意外宿主审批拒绝，未知 server request
+  -32601，未知 config/security warning 保留为提示。不添加 schedule/local-* 给 Codex。
+- `scripts/verify-codex-steering.py` 使用**实际新 executor + 本机 CLI**，临时 HOME/
+  CODEX_HOME、只允许回环网络的 macOS sandbox、假 Responses 与合成 pause MCP。
+  在工具尚未返回时 steer，下一次模型请求确实含 STEER_SENTINEL，仍为同一 native turn，
+  输出 STEERED_OK。0 次真实模型调用，1 次合成工具调用；无 priority/fast 字段，全局
+  config 哈希不变。这验证原生路由/驱动，不是实际模型执行质量的测量。
+  加 `--inherited-review` 还验证从临时 config 继承的 prompt-policy MCP 确实先经过
+  `codex-auto-review`，随后执行合成工具并接受同轮插话。测试先等 fixture 真收到
+  tools/call：仅看到 item/started 可能还在审批，新插话可以原生取消待决审批，不能
+  把那种「工具根本没执行」误记为正在执行工具期间的验证。
+- 单测覆盖 ACK/拒绝/迟到 ACK、进程退出/超时/取消、resume/图片清理、事件顺序/稳定 ID、
+  幂等/权限/跨标签页回放和前端串行/迟到结果。隔离浏览器 UI 验证工作中提交中文反馈后
+  当前轮即时回显，不再遗留待发送；删除浏览器本地 ActiveTurn 后刷新仍能插话，
+  3 个用户气泡各出现一次。类型检查与 96 项完整回归通过。
+- **10 月 10 日验收时尚未部署**：构建使用 `/private/tmp/cc-webui-steering-build`，没有写生产 `dist/` 或
+  重启线上服务，不影响截图里正在跑的旧轮。上线须等线上任务安全结束再更新前后端；
+  已启动的旧 exec 轮次不能凭空切成 app-server。
+
+#### 2026-10-11：用户确认上线，已安全部署
+
+- 上线前确认生产进程只有 Node 父子、无 agent/工具子进程；本次启动日志中的网页轮次
+  都已结束，没有待执行的内存 wakeup。再次类型检查与 96 项完整回归通过。
+- 先构建到隔离 release 目录，再通过同文件系统 rename 切换 `dist/`，保留上一版前端
+  于 `/private/tmp/cc-webui-steering-release-5j74g604/previous-dist`；未动数据库/会话/全局
+  CLI 配置，也没有提交或推送源码。生产 launchd PID **95009 → 84439**。
+- 启动日志确认 Claude **2.1.296** / Codex **0.162.1**，Codex 明确打印
+  `web=app-server/stdio, engine=exec --experimental-json`；两个飞书 bot 正常连接，
+  项目记忆仍启用。真实 CLI 的隔离 inherited-review 插话验证亦通过，未调用真实模型。
+- 发布前公网已 502，本机正常；查到现有 app-sync FRP 在早间 DNS 故障后重连卡住，
+  日志约 2 小时未推进。用户另行明确同意重启共享隧道后，仅 kickstart
+  `com.xuqiang.app-sync`，PID **72015 → 84732**；不改配置、不动独立 visitor，
+  不重启律枢/OnlyOffice 等应用。隧道重新登录并注册 cc-webui，公网恢复 **HTTP 200**。
+- 本机与公网 HTML/主 JS/CSS 均与 release 一致；两端 steer 端点未登录仍 **401**。
+  没有伪造管理员 cookie 或在生产创建模型轮次。旧浏览器标签页需要刷新才能用新前端。
+
+### 2026-10-12：续聊 hydration 弃用提示修复与一次慢轮次诊断
+
+- Codex 0.162.1 `thread/resume` 未设置 `excludeTurns` 时发出 Full-history hydration
+  弃用提示。executor 并不消费返回的 `thread.turns`，显示历史仍由既有 session-store
+  读取。因此仅在 resume 加 `excludeTurns: true`，不改 thread/start，不传自造 history，
+  不删除/压缩用户会话，也不过滤未知警告来假装修好。
+- 单测要求所有 resume 都携带该字段，假 CLI 缺字段才发警告，验证从源头不再触发。
+  `scripts/verify-codex-steering.py --inherited-review --resume-check` 用实际 installed
+  CLI + 实际 executor 验证：同一 thread 的续聊模型请求仍含初始输入和插话 sentinel，
+  返回 RESUMED_CONTEXT_OK，且没有 hydration 警告。Auto-review/非 Fast/实时插话不变，
+  临时 HOME 和 loopback fixture，无真实模型调用；类型检查与 96 项完整回归通过。
+- 用户截图对应服务端 request **92480092**。只读核对 cc-webui DB、目标 native rollout
+  的公开事件/用量以及 Codex `logs_2.sqlite` 的基础设施诊断，未读取 raw reasoning。
+  warning 在 **0.27s**，thread.started 在 **0.83s**，turn.started 在 **0.87s**：
+  历史 hydration 并没有占掉截图中的几分钟。
+- 模型连接在 **08:56:33 UTC**（约第 90 秒）记录
+  `websocket closed by server before response.completed`，CLI 自动重试 **1/5**，
+  **215ms** 后重试，08:56:34 重新连接成功。不能仅凭这条日志区分 OpenAI 服务端
+  与中间网络的具体责任，不能归因为用户浏览器 SSE 或已经证实的 Wi-Fi 故障。
+- 该轮是 `gpt-6.1-sol` / **xhigh**，成功完成的两个采样请求输入分别 **166284 / 171659**
+  tokens（绝大部分缓存命中），最终 turn_token_usage 的 reasoning_output_tokens 为
+  **7907**。不能把中途 token_count 的旧 last_token_usage 再累加来虚增本轮用量。
+  第一条可见正文 delta 约 **574.6s**，整轮 **649.22s（10 分 49 秒）** 完成。
+  唯一工具调用 exec → bash.run 总时长约 **1896ms**，不是工具/文档渲染卡了数分钟。
+  主要等待处在模型推理阶段，另有一次上游断流重试；大上下文与 xhigh 是延迟风险，
+  不能把长上下文缓存命中请求的全部耗时都单独归因于历史体积。
+- 展示侧另有可观察性缺口：executor 对 `error.willRetry=true` 当前不发 UI 帧；
+  该轮 reasoning 的公开 summary 为空，界面只能显示活动词。故“长推理/上游重连”看起来
+  像静止，但原生事件持续产生，最终成功。后续若补重连状态，必须使用真实原生信息，
+  不伪造重试次数/等待时间，不暴露 raw reasoning；本次未顺手更换模型、降低档位、开 Fast。
+- 生产当时还有另一轮 Codex 活跃，用户确认仅在全部轮次/工具自然结束后加载修复。
+  `/private/tmp/cc-hydration-safe-restart.py` 为单次、有期限的 idle guard；不改前端构建、
+  数据库或隧道配置，若持续忙或验证后的源码变化则不重启。该轮自然完成后，guard
+  连续确认空闲再重启，PID **84439 → 62471**；本机/公网均 **HTTP 200**，前端 index
+  哈希前后一致，Claude 2.1.296 / Codex 0.162.1。修复已加载，不追溯删除旧轮的 warning。
+
+#### 同日：补上原生重连 / 重试提示
+
+- `error.willRetry=true` 不再丢弃。`server/executors/codex-retry.ts` 跟踪当前 native turn，
+  仅转发公开 message/additionalDetails 和可用 HTTP 状态为 `codex_retry` 控制帧。
+  CLI 原生消息含 `Reconnecting... 1/5` 时原样显示；协议没给结构化次数/等待时间，
+  就不自行推测或套 Claude 的 0/0、0 秒重试文案。其他不可重试错误保持原失败路径。
+- 同一 turn 新模型 item、公开 summary 或回答 delta 表明重新收到响应时清提示；
+  旧 partial item 完成、用户插话 echo、工具 stdout 和控制/RPC 消息都不算恢复。
+  end/abort/failure 清状态；服务端总会记录 model_retry 的阶段与实际 elapsed。
+- `shared/codex-retry.ts` 是纯状态协议，前端使用现有 retry 槽位和新的 CodexRetryHint，
+  原因用 React 纯文本转义、长详情可展开。重试时暂停 Codex 思考动画，但 pending row
+  保持挂载；原生工具继续执行时不假装停掉工具时钟。Claude RetryHint 和思考完全不改。
+- refresh/attach 回放同一控制帧，跨会话/轮次迟到的 recovery 不会清新轮提示；done/
+  error/no-inflight 清活动状态。控制帧不写成助手聊天气泡，历史重开不显示“正在重试”。
+- 新增 tracker、前端状态和 SSR 渲染测试，覆盖原生原因/HTTP、没有假计数/倒计时、
+  转义、旧帧不算恢复、取消/最终失败、attach/授权/历史、Claude 兼容和 pending row
+  不卸载。类型检查、**99 项完整回归**、隔离 Vite 构建通过。
+- `verify-codex-steering.py --retry-check --resume-check --inherited-review` 主动截断一次
+  localhost SSE response；真实 CLI 0.162.1 自己发原生 error/自动重试，driver 输出
+  retrying → resumed，随后工具/同轮插话、旧上下文恢复均通过。0 次真实模型调用、
+  1 次合成工具调用；全局 config 哈希不变，没有碰模型/effort/Fast/审批策略。
+- 隔离浏览器确认：重试时显示原生 `Reconnecting... 1/5` 和可展开原因，刷新且删除
+  本地 ActiveTurn 后仍显示，收到模型新响应后消失，整轮结束无过期提示或假错误气泡。
+  构建验收使用 `/private/tmp/cc-webui-retry-build`。
+- 空闲 guard 连续核对无运行轮次/工具/待执行 wakeup 后，通过同文件系统 rename 发布
+  前端并重启后端，PID **62471 → 69904**；本机与公网 **HTTP 200**，公网主 JS/CSS
+  与 release 一致，steer 未登录仍 401。Claude 2.1.296 / Codex 0.162.1，不动数据库、
+  全局 config、共享 FRP 或模型配置，未在生产创建验证用模型轮次。上一版前端保留于
+  `/private/tmp/cc-webui-retry-release-wzbn16tz/previous-dist`，旧标签页需刷新。

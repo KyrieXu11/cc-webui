@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { SteerSend } from "./types.ts";
 
 // 中途插话（steer）的端到端：**那一行有没有真的写进 CLI 的 stdin**。
 //
@@ -44,7 +45,7 @@ process.env.CC_WEBUI_CLAUDE_BIN = bin;
 try {
   const { claudeExecutor } = await import("./claude-executor.ts");
 
-  let handle: ((t: string) => boolean) | null = null;
+  let handle: SteerSend | null = null;
   // 经一层函数去读：直接读 `handle` 的话 tsc 按控制流把它收窄成 `null`
   // （赋值发生在它看不进去的回调里），后面 `handle("…")` 就成了 never。
   const steer = () => handle;
@@ -74,7 +75,7 @@ try {
       // 这一轮还在跑 —— 这正是插话的窗口。
       const send = steer();
       assert.ok(send, "CLI 起来之后必须交出插话句柄");
-      assert.equal(send!("第二条"), true, "管子开着时插话必须写得进去");
+      assert.equal(await send!("第二条"), true, "管子开着时插话必须写得进去");
     }
   }
 
@@ -84,7 +85,7 @@ try {
     "插进去的那一行必须原样到达 CLI 的 stdin（而且是在同一轮里）"
   );
   assert.equal(revoked, true, "这一轮结束时必须把句柄收回（onSteer(null)）");
-  assert.equal(steer()!("第三条"), false, "管子关了之后再插必须如实返回 false");
+  assert.equal(await steer()!("第三条"), false, "管子关了之后再插必须如实返回 false");
 
   console.log("claude-steer.test.ts: all assertions passed");
 } finally {

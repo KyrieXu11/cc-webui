@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   listSessions,
   deleteSession as deleteSessionApi,
@@ -7,6 +7,7 @@ import {
 import { getInflightSessions } from "../lib/api";
 import { tildify } from "../lib/fs";
 import { providerLabel, type AgentProvider } from "../lib/settings";
+import { collapsedProjectSessions, createSessionListLoader, SESSION_LIST_POLL_MS } from "../lib/project-sessions";
 import { useAuth } from "../AuthGate";
 import ShareSessionDialog from "./ShareSessionDialog";
 import LiquidSelection from "./LiquidSelection";
@@ -14,6 +15,7 @@ import LiquidSelection from "./LiquidSelection";
 const INFLIGHT_POLL_MS = 3000;
 const PAGE_SIZE = 15;
 const MAX_SESSIONS = 200;
+const EXPANDED_STORAGE_KEY = "ccwebui.sessions_expanded";
 
 interface Props {
   cwd: string;
@@ -83,8 +85,21 @@ export default function ProjectSidebar({
   const [error, setError] = useState(false);
   const [inflight, setInflight] = useState<Set<string>>(() => new Set());
   const [sharing, setSharing] = useState<SessionSummary | null>(null);
+  const [expanded, setExpanded] = useState(() => {
+    try { return localStorage.getItem(EXPANDED_STORAGE_KEY) === "true"; }
+    catch { return false; }
+  });
+  const collapsedSessions = collapsedProjectSessions(sessions, currentProvider, currentSessionId);
+  const visibleSessions = expanded ? sessions : collapsedSessions;
+  const canCollapse = collapsedSessions.length < sessions.length;
+  const listId = useId();
   const loaderRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const disclosureRef = useRef<HTMLButtonElement>(null);
+  const requestRef = useRef<ReturnType<typeof createSessionListLoader> | null>(null);
   const selectionRail = useRef<HTMLDivElement>(null);
+  const listingRef = useRef(listing);
+  listingRef.current = listing;
   const { isAdmin } = useAuth();
 
   // Poll for which sessions have an active SDK turn. Powers the pulsing dot
@@ -108,21 +123,45 @@ export default function ProjectSidebar({
   }, [currentProvider]);
 
   useEffect(() => {
-    const controller = new AbortController();
     setLoading(true);
     setError(false);
-    listSessions(limit, cwd, currentProvider, { compact: true, signal: controller.signal })
-      .then((xs) => {
-        if (controller.signal.aborted) return;
-        setListing({ scope, rows: xs });
-      })
-      .catch(() => { if (!controller.signal.aborted) setError(true); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+    const loader = createSessionListLoader({
+      read: (signal) => listSessions(limit, cwd, currentProvider, { compact: true, signal }),
+      onRows: (rows) => { setListing({ scope, rows }); setError(false); },
+      onError: () => setError(true),
+      onSettled: () => setLoading(false),
+    });
+    requestRef.current = loader;
+    // Background refreshes retain rows, the expanded window and scroll position.
+    // Native CLI sessions (including other tabs) may appear after a turn starts.
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void loader.refresh();
+    };
+    void loader.refresh();
+    const timer = setInterval(refreshVisible, SESSION_LIST_POLL_MS);
+    document.addEventListener("visibilitychange", refreshVisible);
+    window.addEventListener("focus", refreshVisible);
+    return () => {
+      loader.dispose();
+      if (requestRef.current === loader) requestRef.current = null;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.removeEventListener("focus", refreshVisible);
+    };
   }, [cwd, currentProvider, scope, limit, refreshKey, reload]);
 
+  // A newly assigned native id should appear before the first reply finishes.
+  // Merely selecting an existing row must not re-fetch or reset the list.
   useEffect(() => {
-    if (loading || error || sessions.length < limit || limit >= MAX_SESSIONS) return;
+    const current = listingRef.current;
+    if (currentSessionId && current.scope === scope &&
+      !current.rows.some((s) => s.sessionId === currentSessionId && s.provider === currentProvider)) {
+      setReload((n) => n + 1);
+    }
+  }, [currentSessionId, currentProvider, scope]);
+
+  useEffect(() => {
+    if (!expanded || loading || error || sessions.length < limit || limit >= MAX_SESSIONS) return;
     const el = loaderRef.current;
     if (!el) return;
     const io = new IntersectionObserver(
@@ -135,7 +174,17 @@ export default function ProjectSidebar({
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [sessions.length, scope, limit, loading, error]);
+  }, [sessions.length, scope, limit, loading, error, expanded]);
+
+  const toggleExpanded = () => {
+    const next = !expanded;
+    setExpanded(next);
+    try { localStorage.setItem(EXPANDED_STORAGE_KEY, String(next)); } catch { /* storage may be disabled */ }
+    if (!next) {
+      scrollRef.current?.scrollTo({ top: 0 });
+      disclosureRef.current?.focus({ preventScroll: true });
+    }
+  };
 
   // 删成功才从列表里拿掉。乐观地先抹掉再说，会让「其实没删掉」一直到下次刷新才暴露。
   const remove = async (s: SessionSummary, e: React.MouseEvent) => {
@@ -146,9 +195,12 @@ export default function ProjectSidebar({
       alert(err instanceof Error ? err.message : "删除失败");
       return;
     }
+    // Abort a read begun before deletion, so its response cannot revive the row.
+    requestRef.current?.dispose();
     setListing((current) => ({ ...current,
       rows: current.rows.filter((x) => x.sessionId !== s.sessionId || x.provider !== s.provider),
     }));
+    setReload((n) => n + 1);
     onDeleted?.(s);
   };
 
@@ -186,7 +238,24 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-x-hidden overflow-y-auto py-2 px-2">
+      <div className="shrink-0 min-h-11 max-md:min-h-14 flex items-center justify-between gap-2 px-4 pt-2 pb-1">
+        <span className="text-[11px] font-medium text-muted">最近对话</span>
+        {canCollapse && <button
+          ref={disclosureRef}
+          onClick={toggleExpanded}
+          className="conversation-disclosure"
+          aria-expanded={expanded}
+          aria-controls={listId}
+          aria-label={expanded ? "收起更早对话" : "展开更早对话"}
+          title={expanded ? "仅保留最近 5 条和当前对话" : "查看更早对话"}
+        >
+          {expanded ? "收起" : "展开更多"}
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d={expanded ? "m3 7.5 3-3 3 3" : "m3 4.5 3 3 3-3"} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>}
+      </div>
+      <div id={listId} ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto py-2 px-2">
         {(loading || listing.scope !== scope && !error) && sessions.length === 0 ? (
           <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
         ) : sessions.length === 0 && !error ? (
@@ -199,9 +268,9 @@ export default function ProjectSidebar({
             <LiquidSelection
               container={selectionRail}
               activeKey={currentSessionId ? `${currentProvider}:${currentSessionId}` : null}
-              layoutKey={sessions.map(s => `${s.provider}:${s.sessionId}`).join("|")}
+              layoutKey={visibleSessions.map(s => `${s.provider}:${s.sessionId}`).join("|")}
             />
-            {sessions.map((s) => {
+            {visibleSessions.map((s) => {
               const active =
                 s.sessionId === currentSessionId && s.provider === currentProvider;
               return (
@@ -301,7 +370,7 @@ export default function ProjectSidebar({
               );
             })}
             </div>
-            {(sessions.length >= limit && limit < MAX_SESSIONS || loading) && (
+            {expanded && (sessions.length >= limit && limit < MAX_SESSIONS || loading) && (
               <div
                 ref={loaderRef}
                 className="flex items-center justify-center py-3 text-[11px] text-subtle font-mono gap-1.5"
@@ -310,6 +379,12 @@ export default function ProjectSidebar({
                 {loading ? "加载中…" : "继续向下查看更早对话"}
               </div>
             )}
+            {expanded && canCollapse && <button
+              onClick={toggleExpanded}
+              className="conversation-disclosure mx-auto my-2"
+              aria-expanded={expanded}
+              aria-controls={listId}
+            >仅显示最近对话</button>}
           </>
         )}
         {error && <div role="status" className="px-4 py-3 text-[12px] text-muted">

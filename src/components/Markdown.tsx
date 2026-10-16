@@ -2,19 +2,27 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkAutolink from "../lib/cjk-autolink";
 import remarkCjkMemoryStrong from "../lib/cjk-memory-strong";
+import remarkMessageFiles from "../lib/remark-message-files";
+import { openInDock } from "../lib/dock-bridge";
 
 interface Props {
   text: string;
   /** Read-only compatibility for punctuation-adjacent bold in older memories. */
   memoryCompat?: boolean;
+  /** Opt-in local file actions for Codex webpage replies only. */
+  fileCwd?: string;
 }
 
 // 唯一的 markdown 渲染器：聊天正文（流式，每个 delta 重渲染一次）和 .md 文件
 // 预览共用同一套排版，避免两处 components 映射漂移。
-export default function Markdown({ text, memoryCompat = false }: Props) {
+export default function Markdown({ text, memoryCompat = false, fileCwd }: Props) {
   return (
     <ReactMarkdown
-      remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkAutolink, ...(memoryCompat ? [remarkCjkMemoryStrong] : [])]}
+      remarkPlugins={[
+        [remarkGfm, { singleTilde: false }], remarkCjkAutolink,
+        ...(memoryCompat ? [remarkCjkMemoryStrong] : []),
+        ...(fileCwd ? [[remarkMessageFiles, fileCwd] as [typeof remarkMessageFiles, string]] : []),
+      ]}
       components={{
         p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
         h1: ({ children }) => (
@@ -52,16 +60,30 @@ export default function Markdown({ text, memoryCompat = false }: Props) {
           <strong className="font-semibold text-fg">{children}</strong>
         ),
         em: ({ children }) => <em className="italic text-fg">{children}</em>,
-        a: ({ href, children }) => (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue underline decoration-blue/40 underline-offset-2 hover:decoration-blue transition-colors break-all"
-          >
-            {children}
-          </a>
-        ),
+        a: ({ href, children, node }) => {
+          const path = node?.properties["data-message-file-path"];
+          if (fileCwd && typeof path === "string") return (
+            <button
+              type="button"
+              data-message-file-path={path}
+              title={`在右侧打开 ${path}`}
+              onClick={() => openInDock({ path, name: path.slice(path.lastIndexOf("/") + 1) })}
+              className="text-blue underline decoration-blue/40 underline-offset-2 hover:decoration-blue transition-colors break-all cursor-pointer text-left"
+            >
+              {children}
+            </button>
+          );
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue underline decoration-blue/40 underline-offset-2 hover:decoration-blue transition-colors break-all"
+            >
+              {children}
+            </a>
+          );
+        },
         hr: () => <hr className="my-5 border-t border-line" />,
         blockquote: ({ children }) => (
           <blockquote className="my-3 pl-3 border-l-2 border-line-strong text-muted">

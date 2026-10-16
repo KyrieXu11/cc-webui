@@ -588,7 +588,7 @@ export const claudeExecutor: Executor = {
       // stdin stays open: the control protocol answers on it mid-turn — and
       // that same open pipe is what makes mid-turn steering possible. The CLI
       // queues whatever arrives on it, so one extra line is the whole feature.
-      opts.onSteer?.((text) => {
+      opts.onSteer?.((text, messageId) => {
         if (!text.trim()) return false;
         if (child.stdin.destroyed || !child.stdin.writable) return false;
         // Images deliberately dropped: a steer is a text nudge, and the caller
@@ -598,6 +598,10 @@ export const claudeExecutor: Executor = {
             buildPromptMessage({ ...opts, prompt: text, images: undefined }),
           ),
         );
+        if (messageId) {
+          const accepted = opts.onSteerAccepted?.(messageId);
+          if (accepted) push({ kind: "raw", payload: accepted });
+        }
         return true;
       });
     } else {

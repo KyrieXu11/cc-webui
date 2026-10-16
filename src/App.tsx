@@ -8,7 +8,8 @@ import { MIN_MAIN_WIDTH, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_LEFT_
 import FilePreviewWindow from "./components/FilePreviewWindow";
 import Header from "./components/Header";
 import Composer from "./components/Composer";
-import MessageList from "./components/MessageList";
+import MessageList, { type RetryInfo } from "./components/MessageList";
+import { isCodexRetryFrame, applyCodexRetryFrame } from "../shared/codex-retry";
 import HomeView from "./components/HomeView";
 import OpenProjectDialog from "./components/OpenProjectDialog";
 import SkillsPicker from "./components/SkillsPicker";
@@ -57,6 +58,8 @@ import { sendPermission } from "./lib/permission";
 import { useAuth } from "./AuthGate";
 import { useIsNarrow } from "./lib/useIsNarrow";
 import { usePaneMotion } from "./lib/usePaneMotion";
+import { toolExpansionIds } from "./lib/tool-timeline";
+import { SteerCoordinator } from "./lib/steering";
 
 const INITIAL_VISIBLE = 200;
 const LOAD_MORE_STEP = 200;
@@ -71,6 +74,9 @@ type QueuedMessage = {
   /** 见 Composer 里同名字段：`stopped` 冻整队，`failed` 只标这一条。 */
   paused?: "stopped" | "failed";
   note?: string;
+  sending?: boolean;
+  fallback?: boolean;
+  readyAfter?: number;
 };
 
 type ActiveTurn = {
@@ -238,12 +244,16 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [attachedStreaming, setAttachedStreaming] = useState(false);
   const [activeTurn, setActiveTurn] = useState<ActiveTurn | null>(null);
+  const activeTurnRef = useRef(activeTurn);
+  activeTurnRef.current = activeTurn;
   // 界面上正在流的那一轮**实际**用的 effort（服务端 turn_meta 帧），给思考状态行用。
   // ⚠️ 不能拿 settings.effort 顶：看别人的轮次时那是看的人自己的设置（她 xhigh、
   // 你这边显示 max）。只有正在往界面写的那条流能设它，每条流开始时先清掉。
   const [turnEffort, setTurnEffort] = useState<string | undefined>(undefined);
   const [turnStartedAt, setTurnStartedAt] = useState<number | undefined>(undefined);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const providerRef = useRef(settings.agentProvider);
+  providerRef.current = settings.agentProvider;
   const [systemPref, setSystemPref] = useState<Theme>(systemTheme);
   // 窄屏：两个侧栏从常驻列变成抽屉（方案 B）。
   const narrow = useIsNarrow();
@@ -267,23 +277,66 @@ export default function App() {
     setDockOpen(true);
   }, []);
   const [composerValue, setComposerValue] = useState("");
-  // 排队：上一轮还在跑时按下的消息，等它结束后**逐条**自动发出去。
+  // 待发送：忙时先尝试原生追加，只有不能追加的内容才逐条排到下一轮。
   //
   // ⚠️ **只属于当前这个对话，切走就清掉**（openProject / openSession / goHome /
   //    openGroup / handleNewChat 各清一次）。别改成「跟着会话存起来」——这一格里
   //    同一个 cwd 下好几个会话是常态，一条排队消息落错会话就是 2026-09-10 那个
   //    串台 bug 的翻版，而这次是**主动**往别人的会话里发东西。
   // ⚠️ 不落 localStorage：刷新即清，和输入框里的草稿同级（决策 15 一个道理）。
-  const [queued, setQueued] = useState<QueuedMessage[]>([]);
+  const [queued, setQueuedState] = useState<QueuedMessage[]>([]);
   // 排空那一下发生在 effect 里，读 state 会读到上一帧的；和 viewRef 同一个套路。
   const queuedRef = useRef<QueuedMessage[]>([]);
-  queuedRef.current = queued;
-  const [retryInfo, setRetryInfo] = useState<{
-    attempt: number;
-    maxRetries: number;
-    retryDelayMs: number;
-    errorStatus: number | null;
-  } | null>(null);
+  const setQueued = (update: QueuedMessage[] | ((current: QueuedMessage[]) => QueuedMessage[])) => {
+    const next = typeof update === "function" ? update(queuedRef.current) : update;
+    queuedRef.current = next;
+    setQueuedState(next);
+  };
+  const steerCoordinator = useRef(new SteerCoordinator());
+  const [steerReady, setSteerReady] = useState(false);
+  const [steerTarget, setSteerTarget] = useState<string | null>(null);
+  const [steerAllowed, setSteerAllowed] = useState(false);
+  const steerReadyRevision = useRef(0);
+  const acceptedSteers = useRef(new Set<string>());
+  const viewGeneration = useRef(0);
+  const queueDispatching = useRef<string | null>(null);
+  const clearQueued = () => {
+    viewGeneration.current++;
+    steerCoordinator.current.reset();
+    acceptedSteers.current.clear();
+    queueDispatching.current = null;
+    queuedRef.current = [];
+    setQueued([]);
+    setSteerReady(false);
+    setSteerTarget(null);
+    setSteerAllowed(false);
+    setRetryInfo(null);
+  };
+  const handleSteerFrame = (msg: any) => {
+    if (msg?.type === "steer_target" && msg.provider === providerRef.current) {
+      setSteerTarget(typeof msg.clientTurnId === "string" ? msg.clientTurnId : null);
+      setSteerAllowed(msg.canSteer === true);
+      return true;
+    }
+    if (msg?.type === "steer_available") {
+      if (msg.available === true) steerReadyRevision.current++;
+      setSteerReady(msg.available === true);
+      return true;
+    }
+    if (msg?.type === "steer_user" && typeof msg.id === "string") {
+      const id = msg.id.replace(/^u-steer-/, "");
+      acceptedSteers.current.add(id);
+      // SSE is itself confirmation, even if the HTTP ACK is subsequently lost.
+      setQueued(q => q.filter(m => m.id !== id));
+    }
+    return false;
+  };
+  const [retryInfo, setRetryInfo] = useState<RetryInfo | null>(null);
+  const handleRetryFrame = (msg: unknown) => {
+    if (!isCodexRetryFrame(msg)) return false;
+    if (providerRef.current === "codex") setRetryInfo(cur => applyCodexRetryFrame(cur, msg));
+    return true;
+  };
   const [slashCommands, setSlashCommands] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
   const [skillsPickerOpen, setSkillsPickerOpen] = useState(false);
@@ -325,8 +378,9 @@ export default function App() {
     setActiveTurn(turn);
   };
 
-  const updateActiveTurnSession = (id: string) => {
+  const updateActiveTurnSession = (id: string, clientTurnId?: string) => {
     setActiveTurn((cur) => {
+      if (clientTurnId && cur?.clientTurnId !== clientTurnId) return cur;
       if (!cur || cur.sessionId === id) return cur;
       const next = { ...cur, sessionId: id };
       saveActiveTurn(next);
@@ -624,7 +678,11 @@ export default function App() {
     // 重放会先送来这一轮的 turn_meta；在那之前别留着上一轮的。
     setTurnEffort(undefined);
     setTurnStartedAt(undefined);
+    setSteerReady(false);
+    setSteerTarget(null);
+    setSteerAllowed(false);
     setAttachedStreaming(true);
+    setRetryInfo(null);
     const finishAttach = (reason: "done" | "error" | "no-inflight", message?: string) => {
       if (closed) return;
       setAttachedStreaming(false);
@@ -649,6 +707,9 @@ export default function App() {
     const unsub = connectAttach(
       { sessionId: attachSessionId, clientTurnId, agentProvider: attachProvider },
       (msg) => {
+        if (closed) return;
+        if (handleRetryFrame(msg)) return;
+        if (handleSteerFrame(msg)) return;
         if (msg?.type === "turn_meta") {
           setTurnEffort(typeof msg.effort === "string" ? msg.effort : undefined);
           setTurnStartedAt(typeof msg.startedAt === "number" ? msg.startedAt : undefined);
@@ -687,7 +748,9 @@ export default function App() {
             setSkills(msg.skills);
           }
         }
-        setRetryInfo((cur) => (cur ? null : cur));
+        // Only an explicit native progress/terminal frame clears Codex retry;
+        // old item completions or steering echoes do not prove reconnection.
+        setRetryInfo((cur) => cur?.kind === "codex" ? cur : null);
         setAllEvents((prev) =>
           applySDKMessage(
             ensureActiveTurnUserEvent(prev, liveTurn, projectCwd, attachProvider),
@@ -723,7 +786,7 @@ export default function App() {
         const tag = target?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
         e.preventDefault();
-        const stepIds = allEvents.filter((x) => x.type === "step").map((x) => x.id);
+        const stepIds = toolExpansionIds(allEvents);
         setExpandedSteps((prev) =>
           prev.size > 0 ? new Set() : new Set(stepIds)
         );
@@ -796,7 +859,7 @@ export default function App() {
   const openProject = (cwd: string) => {
     clearActiveTurnState();
     // 排队只属于刚才那个对话，别带到下一个去。
-    setQueued([]);
+    clearQueued();
     setProjectCwd(cwd);
     setSidebarOpen(true);
     setDialogOpen(false);
@@ -813,7 +876,7 @@ export default function App() {
     }
     clearActiveTurnState();
     // 排队只属于刚才那个对话，别带到下一个去。
-    setQueued([]);
+    clearQueued();
     setProjectCwd(s.cwd);
     setSessionId(s.sessionId);
     setSettings((cur) => {
@@ -844,7 +907,7 @@ export default function App() {
   const goHome = () => {
     clearActiveTurnState();
     // 排队只属于刚才那个对话，别带到下一个去。
-    setQueued([]);
+    clearQueued();
     setProjectCwd("");
     setSidebarOpen(false);
     setAllEvents([]);
@@ -856,7 +919,7 @@ export default function App() {
   const openGroup = (gid: string) => {
     clearActiveTurnState();
     // 排队只属于刚才那个对话，别带到下一个去。
-    setQueued([]);
+    clearQueued();
     setProjectCwd("");
     setSidebarOpen(true);
     setAllEvents([]);
@@ -905,6 +968,8 @@ export default function App() {
     setSettings((s) => ({ ...s, model, effort: clampEffort(s.effort, model) }));
 
   const updateProvider = (agentProvider: AgentProvider) => {
+    clearQueued();
+    providerRef.current = agentProvider;
     clearActiveTurnState();
     setAllEvents([]);
     setVisibleCount(INITIAL_VISIBLE);
@@ -941,6 +1006,7 @@ export default function App() {
 
   const handleSend = async (text: string, images?: ImageAttachment[]) => {
     if (!allowedProviders.includes(settings.agentProvider)) return;
+    const generation = viewGeneration.current;
     const clientTurnId = createClientTurnId();
     setActiveTurnState({
       clientTurnId,
@@ -959,15 +1025,20 @@ export default function App() {
     setAllEvents((prev) => [...prev, userEvt]);
     setVisibleCount((c) => Math.max(c, INITIAL_VISIBLE));
     setIsStreaming(true);
+    setRetryInfo(null);
+    setSteerReady(false);
+    setSteerTarget(null);
+    setSteerAllowed(false);
     setTurnEffort(undefined);
     setTurnStartedAt(undefined);
 
     // 这个 turn 归属的会话。新会话时先是 null，等 CLI 吐出 session_id 再落定。
     const turnCwd = projectCwd;
+    const turnProvider = settings.agentProvider;
     let turnSession = sessionId;
     // 界面是不是还停在这个 turn 上。
     const stillViewing = () =>
-      viewRef.current.cwd === turnCwd && viewRef.current.sessionId === turnSession;
+      generation === viewGeneration.current && providerRef.current === turnProvider && viewRef.current.cwd === turnCwd && viewRef.current.sessionId === turnSession;
     // 一旦用户切走过一次，这个流就**永久交棒给 attach**，不再往界面写。
     // 不这么做的话，切回来时中间那段（切走期间的事件）会缺一块——而 attach
     // 一上来就重放整个 buffer，交给它才是一条不少的那条路。
@@ -994,7 +1065,7 @@ export default function App() {
           const id = msg.session_id ?? msg.thread_id;
           const wasViewing = stillViewing();
           turnSession = id;
-          updateActiveTurnSession(id);
+          updateActiveTurnSession(id, clientTurnId);
           if (wasViewing && !handedOff) {
             viewRef.current = { cwd: turnCwd, sessionId: id };
             setSessionId(id);
@@ -1008,10 +1079,12 @@ export default function App() {
           if (!handedOff) {
             handedOff = true;
             // 交棒：让 attach 效应能接管（它以 streamingHere 为门槛）。
-            setIsStreaming(false);
+            if (!activeTurnRef.current || activeTurnRef.current.clientTurnId === clientTurnId) setIsStreaming(false);
           }
           continue;
         }
+        if (handleRetryFrame(msg)) continue;
+        if (handleSteerFrame(msg)) continue;
         if (msg?.type === "turn_meta") {
           setTurnEffort(typeof msg.effort === "string" ? msg.effort : undefined);
           setTurnStartedAt(typeof msg.startedAt === "number" ? msg.startedAt : undefined);
@@ -1046,7 +1119,7 @@ export default function App() {
             setSkills(msg.skills);
           }
         }
-        setRetryInfo((cur) => (cur ? null : cur));
+        setRetryInfo((cur) => cur?.kind === "codex" ? cur : null);
         setAllEvents((prev) =>
           applySDKMessage(prev, msg, (id) => {
             setSessionId(id);
@@ -1074,8 +1147,10 @@ export default function App() {
         },
       ]);
     } finally {
-      setIsStreaming(false);
-      setRetryInfo(null);
+      if (!activeTurnRef.current || activeTurnRef.current.clientTurnId === clientTurnId) {
+        setIsStreaming(false);
+        setRetryInfo(null);
+      }
       clearActiveTurnState(clientTurnId);
       // A turn just finished — sidebar may be stale (the just-created session
       // wasn't on disk yet when ProjectSidebar fetched on session-id flip).
@@ -1087,7 +1162,7 @@ export default function App() {
     if (!allowedProviders.includes(settings.agentProvider)) updateProvider(allowedProviders[0] ?? "claude");
     clearActiveTurnState();
     // 排队只属于刚才那个对话，别带到下一个去。
-    setQueued([]);
+    clearQueued();
     setAllEvents([]);
     setVisibleCount(INITIAL_VISIBLE);
     setSessionId(null);
@@ -1105,6 +1180,8 @@ export default function App() {
 
   const inProject = !!projectCwd;
   const busy = streamingHere || attachedStreaming;
+  const steerTurnId = steerTarget ?? liveTurn?.clientTurnId;
+  const canSteer = busy && steerAllowed && !!steerTurnId && allowedProviders.includes(settings.agentProvider);
 
   // Composer 永远调这个。**「现在发还是排队」只在这一处判**，Composer 那边不分叉。
   const submitOrQueue = (text: string, images?: ImageAttachment[]) => {
@@ -1118,6 +1195,7 @@ export default function App() {
       id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       text,
       images,
+      ...(images?.length ? { fallback: true, note: "带图的等本轮结束后发送" } : {}),
     };
     setQueued((q) => [...q, item]);
     // ⚠️ **排队之后立刻试着塞进正在跑的这一轮**，不是干等它结束。这是 Claude Code
@@ -1126,19 +1204,17 @@ export default function App() {
     //      absorbed_mid_turn 576 · delivered_to_agent 6 · 无原因 255
     //    —— `absorbed_mid_turn`（被当前这一轮吸收）才是主路径。用户 2026-09-20 的
     //    原话「排队没有立刻发出吗？」问的就是这件事。
-    //    插不进去（Codex / 带图 / 这轮刚结束）时它原样留在队列里，等排空逻辑按顺序发。
-    if (canSteerNow(item)) void absorb(item, false);
+    //    Codex 用 app-server turn/steer；带图或当前轮结束时才留待下一轮。
+    if (canSteerNow(item)) void absorb(item);
   };
 
   const patchQueued = (id: string, patch: Partial<QueuedMessage>) =>
     setQueued((q) => q.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 
   // 这一刻能不能把话塞进正在跑的那一轮。
-  // Codex 没有这条路（`codex exec` 的 stdin 不是控制协议），带图的也没有（那条路只收文本）。
+  // 两端都走原生追加。此入口暂只支持文字，图片留待下一轮。
   const canSteerNow = (item: QueuedMessage) =>
-    busy &&
-    settings.agentProvider === "claude" &&
-    !!liveTurn &&
+    canSteer &&
     !item.images?.length;
 
   /**
@@ -1147,31 +1223,52 @@ export default function App() {
    * ⚠️ 带 clientTurnId 是**乐观锁**：用户是冲着他看见的那一轮发的，等请求到服务端时
    *    那轮可能已经结束、下一轮已开跑 —— 插进另一轮就是答非所问。对不上号回 409。
    * ⚠️ **409 不是故障**：那条原样留在队列里，这一轮结束后由排空逻辑按顺序发出。
-   *    所以这里既不弹错、也不标 failed，只在**用户手点**的时候留一句说明。
+   *    所以这里既不弹错、也不标 failed，只留一句等待说明。
    */
-  const absorb = async (item: QueuedMessage, manual: boolean) => {
+  const absorb = async (item: QueuedMessage) => {
+    const attemptedRevision = steerReadyRevision.current;
+    const target = { sessionId, clientTurnId: steerTurnId,
+      agentProvider: settings.agentProvider, text: item.text, messageId: item.id };
+    const task = steerCoordinator.current.submit(item.id, () => {
+      const current = queuedRef.current.find(q => q.id === item.id);
+      // A serialized addition can still be waiting behind another ACK when
+      // the user pauses the queue. Do not send it after that pause.
+      if (!current || current.paused === "stopped") return Promise.resolve({ ok: false, retryable: true, message: "队列已暂停" });
+      return steerChat(target);
+    });
+    if (!task) return;
+    patchQueued(item.id, { sending: true, paused: undefined, note: "正在追加…" });
     try {
-      const r = await steerChat({
-        sessionId,
-        clientTurnId: liveTurn?.clientTurnId,
-        text: item.text,
-      });
+      const completed = await task;
+      if (completed.stale) return;
+      const r = completed.value!;
       if (!r.ok) {
-        if (manual) patchQueued(item.id, { note: "这一轮刚结束，会按顺序发出" });
+        patchQueued(item.id, { sending: false, fallback: !r.retryable,
+          readyAfter: attemptedRevision,
+          note: r.retryable ? "等待当前轮接收追加…" : "当前轮已结束，会按顺序发出" });
         return;
       }
-      // 送到了才进对话流 ——「进对话的时刻 ＝ 真正送出去的时刻」。CLI 会把这条写进它
-      // 自己的 jsonl，所以刷新之后由历史回放接管；这里补的只是本轮界面上那只气泡。
-      setAllEvents((prev) => [
-        ...prev,
-        { id: `u-steer-${item.id}`, type: "user", text: item.text },
-      ]);
+      // The server's steer_user frame is canonical for every SSE subscriber;
+      // don't append a second optimistic bubble after the HTTP acknowledgement.
       setQueued((q) => q.filter((m) => m.id !== item.id));
     } catch (err) {
       console.error("steer failed:", err);
-      patchQueued(item.id, { paused: "failed", note: undefined });
+      // A switched view or already-confirmed SSE frame must not be modified.
+      if (acceptedSteers.current.has(item.id) || !queuedRef.current.some(m => m.id === item.id)) return;
+      patchQueued(item.id, { sending: false, paused: "failed", note: "未能确认送达，请核对对话后重试" });
     }
   };
+
+  // A submit during CLI startup must be retried when the native handle becomes
+  // available, not silently left waiting for an entire long-running turn.
+  useEffect(() => {
+    if (!busy || !steerReady) return;
+    for (const item of queued) {
+      if (!item.paused && !item.fallback && !item.sending &&
+          (item.readyAfter === undefined || steerReadyRevision.current > item.readyAfter) && canSteerNow(item)) void absorb(item);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steerReady, steerAllowed, steerTurnId, busy, queued]);
 
   // 那条上的「发送」：在跑就插进这一轮，没在跑就是普通发送。
   const sendQueued = (id: string) => {
@@ -1188,7 +1285,7 @@ export default function App() {
       });
       return;
     }
-    void absorb(item, true);
+    void absorb(item);
   };
 
   // 解冻整队（横幅那颗「继续」，以及用户在空闲时直接发下一条）。
@@ -1197,36 +1294,37 @@ export default function App() {
     setQueued((q) =>
       q.some((m) => m.paused === "stopped")
         ? q.map((m) =>
-            m.paused === "stopped" ? { ...m, paused: undefined, note: undefined } : m
+            m.paused === "stopped" ? { ...m, paused: undefined, note: undefined, readyAfter: undefined, fallback: false } : m
           )
         : q
     );
 
   // 这一轮结束 ⇒ 放出队首那条。
   //
-  // ⚠️ **挂在 busy 的 true→false 沿上，而不是 handleSend 的 finally 里**：turn 结束
+  // ⚠️ **由 busy 和队列状态共同驱动，而不是只放在 handleSend 的 finally 里**：turn 结束
   //    有两条路（自己发起的那条流跑完 / attach 那条收到 done），finally 只覆盖前一条，
   //    刷新后接着看的那种就永远排不出去。
   // ⚠️ **手动「停止」之后照样发。** 停止停的是模型这一轮的活，排队那条是用户自己写下
   //    的话；而且现场十有八九就是「看它跑歪了 → 先打断 → 换个说法」，那条正是要发的。
   // ⚠️ 不要把发送写进 setQueued 的 updater 里：那是纯函数，StrictMode 下会跑两遍，
   //    等于同一条消息发两次。
-  const wasBusy = useRef(false);
   useEffect(() => {
-    const prev = wasBusy.current;
-    wasBusy.current = busy;
-    if (!prev || busy) return;
+    if (busy || queueDispatching.current) return;
     if (!inProject || currentGroupId || loadingSession) return;
     const q = queuedRef.current;
     // 冻着就整队不动，等用户发话（横幅那颗「继续」，或者他直接发下一条）。
     // 判据是「有没有任何一条被暂停」而不是只看队首：`failed` 那条留在原地等重试，
     // 越过它去发后面的，用户看到的就是自己说的话被调了顺序。
-    if (q.length === 0 || q.some((m) => m.paused)) return;
+    if (q.length === 0 || q.some((m) => m.paused || m.sending || steerCoordinator.current.has(m.id))) return;
     const next = q[0];
+    queueDispatching.current = next.id;
     setQueued((cur) => cur.slice(1));
-    void handleSend(next.text, next.images);
+    void handleSend(next.text, next.images).finally(() => {
+      if (queueDispatching.current === next.id) queueDispatching.current = null;
+      setQueued(q => [...q]);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, inProject, currentGroupId, loadingSession]);
+  }, [busy, queued, inProject, currentGroupId, loadingSession]);
 
   // 「停止」。**待发送不清空、只冻住**（照律枢）：按停止多半是嫌它跑太久或方向不对，
   // 那几句话本身还是要说的，程序不该替用户扔掉；但也不能当没看见他按了停止，紧接着
@@ -1559,6 +1657,7 @@ export default function App() {
                           onPreviewImage={previewAttachedImage}
                           effort={turnEffort}
                           provider={settings.agentProvider}
+                          cwd={projectCwd}
                           isRunning={streamingHere || (attachedStreaming && turnStartedAt !== undefined)}
                           turnStartedAt={turnStartedAt ?? liveTurn?.startedAt}
                         />
@@ -1587,9 +1686,7 @@ export default function App() {
                     }
                     onSendQueued={(id) => void sendQueued(id)}
                     onResumeQueue={resumeQueue}
-                    canSteer={
-                      busy && settings.agentProvider === "claude" && !!liveTurn
-                    }
+                    canSteer={canSteer}
                     provider={settings.agentProvider}
                     model={settings.model}
                     onModelChange={updateModel}

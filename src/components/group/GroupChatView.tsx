@@ -15,6 +15,7 @@ import {
 import { sendPermission } from "../../lib/permission";
 import { applySDKMessage } from "../../lib/processor";
 import { tildify } from "../../lib/fs";
+import { toolExpansionIds } from "../../lib/tool-timeline";
 import type {
   ChatEvent,
   GroupAgentId,
@@ -121,15 +122,9 @@ export default function GroupChatView({ gid, home, onBack }: Props) {
         e.preventDefault();
         const ids = new Set<string>();
         for (const buf of Object.values(liveByAgent)) {
-          for (const ev of buf ?? []) {
-            if (ev.type === "step" || ev.type === "thinking") ids.add(ev.id);
-          }
+          for (const id of toolExpansionIds(buf ?? [])) ids.add(id);
         }
-        for (const m of messages) {
-          if (m.event.type === "step" || m.event.type === "thinking") {
-            ids.add(m.event.id);
-          }
-        }
+        for (const id of toolExpansionIds(messages.map(m => m.event))) ids.add(id);
         setExpandedSteps((prev) => (prev.size > 0 ? new Set() : ids));
       }
     };

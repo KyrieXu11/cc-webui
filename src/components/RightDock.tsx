@@ -58,6 +58,8 @@ export default function RightDock({
 }: Props) {
   const [docs, setDocs] = useState<DockFile[]>([]);
   const [active, setActive] = useState<string | null>(null);
+  // Re-selecting the same document also reveals it after its folder was closed.
+  const [revealVersion, setRevealVersion] = useState(0);
   // 「最大化」：文档栏临时占满整个**窗口**。它自己**刻意不碰 Fullscreen API**——那个
   // 的 Esc 会被浏览器吞掉，而 Esc 是 ONLYOFFICE 退出放映的唯一按键（见 server/app.ts
   // 里那条 Permissions-Policy）。这里只是 CSS 的 `fixed inset-0`，Esc 照常传进去。
@@ -91,6 +93,7 @@ export default function RightDock({
           cur.some((t) => t.path === f.path) ? cur : [...cur, f]
         );
         setActive(f.path);
+        setRevealVersion(n => n + 1);
         onRequestOpen();
       }),
     [onRequestOpen]
@@ -221,6 +224,9 @@ export default function RightDock({
               sessionId={sessionId}
               onPreviewFile={onPreviewFile}
               reserveRight={!hasDoc}
+              activeFile={active}
+              revealVersion={revealVersion}
+              visible={open && motion.present && !maxed && !presenting}
             />
           ) : (
             <div className="p-4 text-[12px] text-subtle">还没有打开项目。</div>
@@ -267,7 +273,7 @@ export default function RightDock({
                   }`}
                 >
                   <button
-                    onClick={() => setActive(t.path)}
+                    onClick={() => { setActive(t.path); setRevealVersion(n => n + 1); }}
                     className="truncate"
                     title={t.path}
                   >

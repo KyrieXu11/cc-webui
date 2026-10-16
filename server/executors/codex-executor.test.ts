@@ -12,7 +12,9 @@ const {
   mcpTokenEnvVar,
   mcpConfigOverrides,
   buildConfigOverrides,
+  codexApprovalOverrides,
   buildCodexArgs,
+  codexExecutor,
   spillImages,
   CodexImageError,
   threadIdFrom,
@@ -50,6 +52,10 @@ try {
   assert.equal(mapSandbox("default"), "workspace-write");
   assert.equal(mapSandbox("acceptEdits"), "workspace-write");
   assert.equal(mapSandbox(undefined), "workspace-write");
+  assert.deepEqual(codexApprovalOverrides("auto"), ['approval_policy="on-request"', 'approvals_reviewer="auto_review"']);
+  for (const mode of [undefined, "default", "acceptEdits", "plan", "bypassPermissions"]) {
+    assert.deepEqual(codexApprovalOverrides(mode), ['approval_policy="never"', 'approvals_reviewer="user"']);
+  }
 
   assert.equal(mapEffort("low"), "low");
   assert.equal(mapEffort("xhigh"), "xhigh");
@@ -97,7 +103,12 @@ try {
 
   const overrides = buildConfigOverrides(base({ effort: "high" }));
   assert.ok(overrides.includes('approval_policy="never"'));
+  assert.ok(overrides.includes('approvals_reviewer="user"'));
   assert.ok(overrides.includes('model_reasoning_effort="high"'));
+  assert.ok(overrides.includes('service_tier="default"'), "always override global Fast/priority service tier with standard");
+  assert.ok(overrides.includes("features.fast_mode=false"), "the CLI Fast mode capability is also disabled locally");
+  assert.equal(buildConfigOverrides(base()).filter(s => s.startsWith("service_tier=")).length, 1);
+  assert.ok(buildConfigOverrides(base()).includes('service_tier="default"'), "missing optional model/effort cannot restore the global Fast tier");
   assert.deepEqual(CODEX_ARTIFACT_PLUGIN_OVERRIDES, [
     'plugins.presentations@openai-primary-runtime.enabled=false',
     'plugins.pdf@openai-primary-runtime.enabled=false',
@@ -105,6 +116,13 @@ try {
   for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) assert.ok(overrides.includes(rule));
   assert.ok(!overrides.includes("features.plugins=false"), "do not disable unrelated plugins");
   assert.ok(!overrides.some(rule => rule.includes("spreadsheets@")), "only disable the requested PPT/PDF plugins");
+  const automatic = buildConfigOverrides(base({ mode: "auto", effort: "xhigh" }));
+  assert.ok(automatic.includes('approval_policy="on-request"'));
+  assert.ok(automatic.includes('approvals_reviewer="auto_review"'));
+  assert.ok(!automatic.includes('approval_policy="never"'));
+  assert.ok(automatic.includes('service_tier="default"') && automatic.includes("features.fast_mode=false"), "automatic review must not restore Fast mode");
+  assert.ok(!automatic.some(rule => rule.startsWith("mcp_servers.playwright.")), "do not create a missing Playwright server or override its tools with blanket approve");
+  assert.ok(!automatic.some(rule => rule.startsWith("apps.")), "do not blanket approve unrelated apps/connectors");
 
   // ── argv ──────────────────────────────────────────────────────────────────
 
@@ -124,6 +142,9 @@ try {
   for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) {
     assert.equal(fresh[fresh.indexOf(rule) - 1], "--config", "fresh processes receive per-invocation config, not a global write");
   }
+  for (const rule of ['service_tier="default"', "features.fast_mode=false"]) {
+    assert.equal(fresh[fresh.indexOf(rule) - 1], "--config", "new sessions explicitly disable Fast mode");
+  }
 
   // Omitting --model lets ~/.codex/config.toml's own `model` win, which is the
   // behavior the SDK had.
@@ -135,6 +156,10 @@ try {
   const rIdx = resumed.indexOf("resume");
   assert.ok(rIdx > 0);
   assert.equal(resumed[rIdx + 1], "01a0-thread");
+  for (const rule of ['service_tier="default"', "features.fast_mode=false"]) {
+    assert.equal(resumed[resumed.indexOf(rule) - 1], "--config");
+    assert.ok(resumed.indexOf(rule) < rIdx, "the standard-tier override precedes resume and also governs old Fast sessions");
+  }
   for (const rule of CODEX_ARTIFACT_PLUGIN_OVERRIDES) {
     assert.equal(resumed[resumed.indexOf(rule) - 1], "--config");
     assert.ok(resumed.indexOf(rule) < rIdx, "resumed processes also disable plugins before the resume subcommand");
@@ -156,6 +181,60 @@ try {
     assert.equal(tail[i], "--image", "after the first --image, only --image pairs");
   }
   assert.equal(withImgs.at(-1), "/tmp/b.png");
+  for (const resume of [undefined, "auto-resume-test"]) {
+    const actual = buildCodexArgs(base({ mode: "auto", resume }));
+    assert.equal(actual[actual.indexOf("--sandbox") + 1], "workspace-write");
+    for (const rule of codexApprovalOverrides("auto")) {
+      assert.equal(actual[actual.indexOf(rule) - 1], "--config");
+      if (resume) assert.ok(actual.indexOf(rule) < actual.indexOf("resume"));
+    }
+    assert.ok(!actual.includes("--approve-for-me"), "explicit config avoids that preset overriding Plan/custom sandbox semantics");
+    assert.ok(!actual.includes("--dangerously-bypass-approvals-and-sandbox"));
+  }
+
+  // Exercise the actual spawn path too; an argv builder assertion alone
+  // cannot catch a future executor accidentally omitting these overrides.
+  const tierTmp = await fs.mkdtemp(path.join(os.tmpdir(), "codex-standard-tier-"));
+  const tierConfig = path.join(tierTmp, "config.toml");
+  const tierCapture = path.join(tierTmp, "args.json");
+  const tierFake = path.join(tierTmp, "fake.cjs");
+  const globalFast = 'model="gpt-6.1-sol"\nservice_tier="fast"\n';
+  await fs.writeFile(tierConfig, globalFast);
+  await fs.writeFile(tierFake, `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.TIER_CAPTURE, JSON.stringify(process.argv.slice(2)));
+process.stdin.resume();
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({type:'thread.started',thread_id:'tier-test-thread'}));
+  console.log(JSON.stringify({type:'turn.completed'}));
+});
+`);
+  await fs.chmod(tierFake, 0o755);
+  try {
+    process.env.CC_WEBUI_CODEX_BIN = tierFake;
+    for (const [mode, resume] of [["auto", undefined], ["auto", "tier-test-thread"], ["plan", undefined]] as const) {
+      const frames = [];
+      for await (const frame of codexExecutor.exec(base({ cwd: tierTmp, resume, mode,
+        effort: "xhigh", model: "gpt-6.1-sol", timeoutMs: 5000,
+        extraEnv: { CODEX_HOME: tierTmp, TIER_CAPTURE: tierCapture } }))) frames.push(frame);
+      assert.equal(frames.at(-1)?.kind, "ended");
+      const ended = frames.at(-1)!;
+      assert.equal(ended.kind === "ended" ? ended.result.status : "missing", "completed");
+      const actual = JSON.parse(await fs.readFile(tierCapture, "utf8")) as string[];
+      for (const rule of ['service_tier="default"', "features.fast_mode=false"]) {
+        assert.equal(actual[actual.indexOf(rule) - 1], "--config");
+        if (resume) assert.ok(actual.indexOf(rule) < actual.indexOf("resume"));
+      }
+      assert.ok(actual.includes('model_reasoning_effort="xhigh"'), "standard tier does not lower reasoning effort");
+      for (const rule of codexApprovalOverrides(mode)) assert.ok(actual.includes(rule), "actual spawned fresh/resume processes carry the reviewer policy");
+      assert.equal(actual[actual.indexOf("--sandbox") + 1], mode === "plan" ? "read-only" : "workspace-write");
+      assert.equal(await fs.readFile(tierConfig, "utf8"), globalFast, "per-spawn policy never edits global Fast settings");
+    }
+  } finally {
+    if (savedBin === undefined) delete process.env.CC_WEBUI_CODEX_BIN;
+    else process.env.CC_WEBUI_CODEX_BIN = savedBin;
+    await fs.rm(tierTmp, { recursive: true, force: true });
+  }
 
   // ── images ────────────────────────────────────────────────────────────────
 

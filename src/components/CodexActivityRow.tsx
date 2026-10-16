@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { pickThinkingWord } from "../lib/thinking-words";
 import { codexActivityLabel } from "../lib/turn-activity";
+import { inTimelineSlot, type TimelineStatusProps } from "./TimelineStatusSlot";
 
 // Codex 独立的阶段反馈：可见文案只保留动态词，阶段语义留在 aria-label/title。
 // 只有外部明确的 reasoning 信号才标「思考中」。
 // 没有计时或 token 猜测；不改 Claude ThinkingRow 的时钟和活动检测。
 export default function CodexActivityRow({
-  phase = "processing", active = true, effort,
-}: { phase?: "processing" | "reasoning"; active?: boolean; effort?: string }) {
+  phase = "processing", active = true, effort, statusSlot, statusMetaSlot, onStatusClick,
+}: { phase?: "processing" | "reasoning"; active?: boolean; effort?: string } & TimelineStatusProps) {
   const [word, setWord] = useState(() => pickThinkingWord());
   useEffect(() => {
     if (!active) return;
@@ -16,6 +17,14 @@ export default function CodexActivityRow({
   }, [active]);
 
   const reasoning = phase === "reasoning";
+  if (statusSlot) return <>
+    {inTimelineSlot(<span className="timeline-status-word" aria-label={active ? reasoning ? "Codex 思考中" : "Codex 处理中" : undefined}
+      title={reasoning ? "明确 reasoning 事件；未提供可靠的独立思考时长" : "CLI 未提供当前阶段，不代表已确认正在思考"}>
+      <span aria-hidden className={`timeline-status-spark ${active ? "sparkle-spin" : ""}`}>✻</span>
+      <span>{codexActivityLabel(active, word, phase)}</span>
+    </span>, statusSlot, onStatusClick)}
+    {statusMetaSlot && reasoning && active && effort && inTimelineSlot(<span className="timeline-status-meta">推理档位：{effort}</span>, statusMetaSlot, onStatusClick)}
+  </>;
   return (
     <div className="relative flex items-center py-[6px] gap-3 w-full text-left"
       aria-label={active ? reasoning ? "Codex 思考中" : "Codex 处理中" : undefined}

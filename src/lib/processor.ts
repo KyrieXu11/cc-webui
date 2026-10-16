@@ -68,6 +68,25 @@ export function applySDKMessage(
 
   if (!msg || typeof msg !== "object") return events;
 
+  if (msg.type === "steer_user" && typeof msg.id === "string" && typeof msg.text === "string") {
+    if (events.some(e => e.id === msg.id)) return events;
+    return [...events, { id: msg.id, type: "user", text: msg.text }];
+  }
+
+  if (msg.type === "codex_delta" && typeof msg.turn_id === "string" && typeof msg.item_id === "string" && typeof msg.delta === "string") {
+    // Store actual deltas in the server buffer, not every growing prefix:
+    // cumulative snapshots make a long answer/output consume quadratic space.
+    const itemId = `${msg.turn_id}-${msg.item_id}`;
+    if (msg.item_type === "agent_message") {
+      const id = `a-codex-${itemId}`;
+      const previous = events.find(e => e.id === id);
+      return upsertTextEvent(events, { id, type: "assistant", text: (previous?.type === "assistant" ? previous.text : "") + msg.delta });
+    }
+    if (msg.item_type === "command_execution") return events.map(e => e.id === `s-codex-${itemId}` && e.type === "step"
+      ? { ...e, output: (typeof e.output === "string" ? e.output : "") + msg.delta } : e);
+    return events;
+  }
+
   if (msg.type === "turn_user" && msg.provider === "codex" &&
       typeof msg.prompt === "string" && Number.isFinite(msg.startedAt)) {
     // Replace the current-turn suffix, then let the buffer replay rebuild it.
@@ -108,7 +127,7 @@ export function applySDKMessage(
       msg.type === "item.completed") &&
     msg.item
   ) {
-    return applyCodexItem(events, msg.item, msg.type);
+    return applyCodexItem(events, msg.item, msg.type, typeof msg.turn_id === "string" ? msg.turn_id : undefined);
   }
 
   if (msg.type === "system" && msg.subtype === "init") {
@@ -412,15 +431,15 @@ export function applySDKMessage(
   return events;
 }
 
-function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEvent[] {
+function applyCodexItem(events: ChatEvent[], item: any, phase: string, nativeTurnId?: string): ChatEvent[] {
   // exec restarts item_N numbering on every turn, including resumed threads.
   // Scope IDs to the user boundary or later replies overwrite earlier turns.
   const userIndex = findLastEventIndex(events, "user");
-  const itemId = userIndex >= 0 ? `${events[userIndex].id}-${item.id}` : item.id;
+  const itemId = nativeTurnId ? `${nativeTurnId}-${item.id}` : userIndex >= 0 ? `${events[userIndex].id}-${item.id}` : item.id;
   // A tool or answer starting is a phase boundary, even when that answer has
   // no text yet. Do not keep an earlier reasoning item animated indefinitely.
   if (phase === "item.started" && item.type !== "reasoning") {
-    events = events.map((ev, i) => i > userIndex && ev.type === "thinking" && ev.status === "pending"
+    events = events.map((ev, i) => (nativeTurnId ? ev.id.startsWith(`t-codex-${nativeTurnId}-`) : i > userIndex) && ev.type === "thinking" && ev.status === "pending"
       ? { ...ev, status: "ok" } : ev);
   }
   const status = item.error || item.result?.isError === true || item.result?.is_error === true
@@ -507,7 +526,7 @@ function applyCodexItem(events: ChatEvent[], item: any, phase: string): ChatEven
         {
           id: `e-codex-${itemId ?? Date.now()}`,
           type: "assistant",
-          text: `[错误] ${item.message ?? "Codex error"}`,
+          text: `${item.notice ? "[环境提示]" : "[错误]"} ${item.message ?? "Codex error"}`,
         },
       ];
     default:

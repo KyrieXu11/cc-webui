@@ -14,6 +14,7 @@ type ImagePart = { name?: string; mediaType: string; data: string };
 export type QueuedMessage = {
   id: string;
   text: string;
+  images?: ImagePart[];
   /**
    * 两种暂停，**别合并**——处置完全不同（照律枢，它也是分开的两个）：
    *   `stopped` 用户按了停止 ⇒ **整个队列**冻住，顶上出横幅 +「继续」；
@@ -22,6 +23,8 @@ export type QueuedMessage = {
   paused?: "stopped" | "failed";
   /** 一句就地说明（如「这一轮刚结束，会按顺序发出」）。不是错误。 */
   note?: string;
+  sending?: boolean;
+  fallback?: boolean;
 };
 
 interface Props {
@@ -33,7 +36,7 @@ interface Props {
   /** 从文件树里拖进来的文件：把相对路径插进输入框（不是上传）。 */
   onInsertFile?: (absPath: string, relPath: string) => void;
   onCancel?: () => void;
-  /** 当前这个会话正在跑。**不再等于「不能输入」**，只等于「发出去的会先排队」。 */
+  /** 当前这个会话正在跑。文字尝试实时追加，不能追加的内容才留待下一轮。 */
   disabled?: boolean;
   /** 已排队的消息，按先后顺序。 */
   queued?: QueuedMessage[];
@@ -43,9 +46,7 @@ interface Props {
   /** 横幅上的「继续」：解冻被停止冻住的整个队列。 */
   onResumeQueue?: () => void;
   /**
-   * 这一刻能不能插话。busy 且 provider=claude 才为真 —— Codex 那侧
-   * `codex exec` 的 stdin 不是控制协议，插不进去，那就**如实收起按钮**，
-   * 而不是给一颗点了没反应的。
+   * 当前轮能否定位并尝试原生插话。Claude stdin / Codex turn/steer。
    */
   canSteer?: boolean;
   provider: AgentProvider;
@@ -209,6 +210,7 @@ export default function Composer({
   };
 
   const canSend = !uploading && (value.trim() || attachments.length > 0);
+  const realtime = !!canSteer && !attachments.some(a => a.imageData && a.mime?.startsWith("image/"));
 
   const frozen = queued.some((q) => q.paused === "stopped");
 
@@ -252,24 +254,24 @@ export default function Composer({
                 {q.note && (
                   <span className="shrink-0 text-[11px] text-subtle">{q.note}</span>
                 )}
-                {/* 「发送」＝不等这一轮跑完，现在就塞进正在跑的那一轮（走 claude 命令行
-                    自己的排队）。没人在跑时它就是普通发送。Codex 插不进去 ⇒ 收起按钮，
-                    而不是给一颗点了没反应的。 */}
-                {(!disabled || canSteer) && (
+                {/* 原生追加只支持此处的文字入口；带图的等待下一轮。 */}
+                {(!disabled || canSteer && !q.images?.length) && (
                   <button
                     onClick={() => onSendQueued?.(q.id)}
+                    disabled={q.sending}
                     title={
                       disabled ? "不等这一轮跑完，现在就发进去" : "现在发出去"
                     }
                     className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[12px] text-subtle hover:bg-fg/5 hover:text-fg"
                   >
                     <ArrowUpIcon />
-                    {q.paused === "failed" ? "重试" : "发送"}
+                    {q.sending ? "追加中…" : q.paused === "failed" ? "重试" : "发送"}
                   </button>
                 )}
                 <button
                   onClick={() => onUnqueue?.(q.id)}
-                  title="删除这条待发送"
+                  disabled={q.sending}
+                  title={q.sending ? "正在追加，不能撤回" : "删除这条待发送"}
                   aria-label="删除这条待发送"
                   className="flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded text-subtle hover:bg-fg/5 hover:text-red"
                 >
@@ -424,10 +426,10 @@ export default function Composer({
               : narrow
                 // 手机上既没有 ⇧ 也没有独立的 ↵，这行提示只是占地方。
                 ? disabled
-                  ? "输入下一条…（会排队）"
+                  ? realtime ? "补充说明…（实时追加）" : "输入下一条…（会排队）"
                   : "输入追问或补充说明…"
                 : disabled
-                  ? "输入下一条…    ↵ 排队，这轮结束后自动发出 · ⇧↵ 换行"
+                  ? realtime ? "补充说明…    ↵ 实时追加 · ⇧↵ 换行" : "输入下一条…    ↵ 排队，这轮结束后自动发出 · ⇧↵ 换行"
                   : "输入追问或补充说明…    ↵ 发送 · ⇧↵ 换行"
           }
           rows={1}
@@ -481,8 +483,8 @@ export default function Composer({
             <button
               onClick={submit}
               disabled={!canSend}
-              aria-label={disabled ? "排队发送" : "发送"}
-              title={disabled ? "排队：这一轮结束后自动发出" : undefined}
+              aria-label={disabled ? realtime ? "实时追加" : "排队发送" : "发送"}
+              title={disabled ? realtime ? "追加到当前轮，不等整轮结束" : "排队：这一轮结束后自动发出" : undefined}
               className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed ${
                 disabled
                   ? "border border-blue/60 text-blue hover:bg-blue/10"

@@ -2,18 +2,14 @@ import type { ChatEvent } from "../lib/types";
 import EditDiff from "./EditDiff";
 import ApplyPatchDiff, { PatchStats } from "./ApplyPatchDiff";
 import ThinkingRow from "./ThinkingRow";
+import ThinkingBlock from "./ThinkingBlock";
 import CodexActivityRow from "./CodexActivityRow";
-import { useEffect, useState } from "react";
+import { summarizeToolTimeline, visibleTimelineRows, mountedTimelineRows, timelinePhase, type TimelineRow } from "../lib/tool-timeline";
+import { useCallback, useEffect, useId, useState } from "react";
+
+export type { TimelineRow } from "../lib/tool-timeline";
 
 type StepEvent = Extract<ChatEvent, { type: "step" }>;
-type ThinkingEvent = Extract<ChatEvent, { type: "thinking" }>;
-
-// The timeline interleaves tool calls with encrypted-thinking status rows —
-// exactly the order the model produced them (thinking, then the tool batch it
-// decided on). Keeping thinking INSIDE the group is what keeps the connector
-// line continuous; when these rows were separate blocks, every one of them cut
-// the line in two and left a blank gap.
-export type TimelineRow = StepEvent | ThinkingEvent | { id: string; type: "activity" };
 
 function ToolElapsed({ reported = 0 }: { reported?: number }) {
   const [elapsed, setElapsed] = useState(reported);
@@ -110,6 +106,7 @@ const Chevron = ({ open }: { open: boolean }) => (
     height="9"
     viewBox="0 0 9 9"
     fill="none"
+    aria-hidden
     className={`text-subtle transition-transform ${open ? "rotate-90" : ""}`}
   >
     <path
@@ -189,7 +186,16 @@ interface Props {
   effort?: string;
   liveToolIds?: Set<string>;
   liveThinkingIds?: Set<string>;
+  executingIds?: Set<string>;
+  thinkingCandidateId?: string;
+  activePermissionIds?: Set<string>;
 }
+
+// The timeline interleaves tool calls with encrypted-thinking status rows —
+// exactly the order the model produced them (thinking, then the tool batch it
+// decided on). Keeping thinking INSIDE the group is what keeps the connector
+// line continuous; when these rows were separate blocks, every one of them cut
+// the line in two and left a blank gap.
 
 export default function StepTimeline({
   rows,
@@ -200,74 +206,156 @@ export default function StepTimeline({
   effort,
   liveToolIds,
   liveThinkingIds,
+  executingIds,
+  thinkingCandidateId,
+  activePermissionIds,
 }: Props) {
+  const panelId = useId();
+  const [statusSlot, setStatusSlot] = useState<HTMLSpanElement | null>(null);
+  const [statusMetaSlot, setStatusMetaSlot] = useState<HTMLSpanElement | null>(null);
+  const [observedThinkingIds, setObservedThinkingIds] = useState(new Set<string>());
+  const onThinkingActivity = useCallback((id: string, active: boolean) => {
+    setObservedThinkingIds(prev => {
+      if (prev.has(id) === active) return prev;
+      const next = new Set(prev);
+      if (active) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
+  const summary = summarizeToolTimeline(rows, awaitingPermission);
+  // A standalone Codex activity has no history to disclose, but still belongs
+  // inside the same visual shell as recorded thinking/tools.
+  const activityOnly = !summary.collapsible && rows.some(row => row.type === "activity");
+  const framed = summary.collapsible || activityOnly;
+  const groupKey = summary.key;
+  const expanded = !summary.collapsible || groupKey === undefined || expandedIds.has(groupKey);
+  const visibleRows = visibleTimelineRows(rows, expanded);
+  const mountedRows = mountedTimelineRows(rows, expanded);
+  const phase = timelinePhase(rows, { executingIds, awaitingPermission: activePermissionIds, liveThinkingIds, thinkingCandidateId, observedThinkingIds });
+  const label = { tools: "工具调用", reasoning: "思考中", processing: "执行中", approval: "待审批", idle: "执行记录" }[phase.phase];
+  const liveThoughtTitle = phase.phase === "reasoning" && !expanded;
+  const runningTool = phase.phase === "tools" ? rows.find(row => row.type === "step" && executingIds?.has(row.id)) : undefined;
   return (
     <div
-      className="relative pl-1 msg-enter"
+      className={`tool-timeline msg-enter ${framed ? "tool-timeline-frame" : ""}`}
+      data-timeline-phase={phase.phase}
+      data-activity-only={activityOnly || undefined}
       style={{ animationDelay: `${delay}ms` }}
     >
-      {rows.length > 1 && (
-        <div className="absolute left-[11px] top-[13px] bottom-[13px] w-px bg-fg/10" />
+      {summary.collapsible && groupKey !== undefined && (
+        <button
+          type="button"
+          data-tool-summary
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => onToggle(groupKey)}
+          className="tool-timeline-toggle"
+          data-timeline-phase={phase.phase}
+          title={phase.phase === "processing" ? "模型仍在处理，CLI 未提供明确的当前阶段；不代表已确认正在思考" : "展开或收起思考和工具记录；审批卡独立显示，原思考计时不变"}
+        >
+          <span className="tool-timeline-chevron">
+            {phase.phase === "tools" ? <svg className="tool-timeline-running" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+              <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+              <path d="M12.5 7A5.5 5.5 0 0 0 7 1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg> : <Chevron open={expanded} />}
+          </span>
+          <span className="tool-timeline-heading" data-live-title={liveThoughtTitle}>
+            {!liveThoughtTitle && <span className="tool-timeline-label">{phase.phase === "reasoning" ? "执行记录" : label}</span>}
+            <span ref={setStatusSlot} className="tool-timeline-status" />
+          </span>
+          <span ref={setStatusMetaSlot} className="tool-timeline-metrics">
+            {runningTool?.type === "step" && <span className="timeline-status-meta">{runningTool.tool} 调用中，等待工具返回…</span>}
+          </span>
+          <span className="tool-timeline-counts">
+            {summary.total > 0 && <span className="tool-timeline-count">工具 {summary.total} 次</span>}
+            {summary.thinking > 0 && <span className="tool-timeline-count">思考 {summary.thinking} 段</span>}
+            {summary.completed > 0 && <span className="tool-timeline-count">已完成 {summary.completed}</span>}
+            {summary.pending > 0 && <span className="tool-timeline-count">待完成 {summary.pending}</span>}
+            {summary.awaiting > 0 && <span className="tool-timeline-count text-orange">待审批 {summary.awaiting}</span>}
+          </span>
+          <span className="tool-timeline-action">
+            <span>{expanded ? "收起" : <>展开<span className="tool-timeline-action-detail">详情</span></>}</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden
+              className={`tool-timeline-action-chevron ${expanded ? "rotate-180" : ""}`}>
+              <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        </button>
       )}
-      <div className="flex flex-col">
-        {rows.map((row) => {
-          if (row.type === "activity") return <CodexActivityRow key={row.id} />;
-          if (row.type === "thinking") {
-            if (liveThinkingIds !== undefined) {
-              return <CodexActivityRow key={row.id} phase="reasoning" active={liveThinkingIds.has(row.id)} effort={effort} />;
+      <div id={panelId} className={`relative ${summary.collapsible ? "tool-timeline-content" : activityOnly ? "tool-timeline-activity" : "pl-1"}`} data-expanded={expanded}>
+        {visibleRows.length > 1 && (
+          <div className="absolute w-px bg-fg/10" style={{ left: summary.collapsible ? 19 : 11, top: summary.collapsible ? 21 : 13, bottom: summary.collapsible ? 23 : 13 }} />
+        )}
+        <div className="flex flex-col">
+          {mountedRows.map((row) => {
+            const slot = !expanded && phase.rowId === row.id ? statusSlot : null;
+            const metaSlot = slot ? statusMetaSlot : null;
+            const onStatusClick = () => { if (groupKey !== undefined) onToggle(groupKey); };
+            if (row.type === "activity") return <div key={row.id} data-timeline-row={row.id} hidden={!expanded}><CodexActivityRow statusSlot={slot} statusMetaSlot={metaSlot} onStatusClick={onStatusClick} /></div>;
+            if (row.type === "thinking") {
+              const statusProps = { statusSlot: slot, statusMetaSlot: metaSlot, activityId: row.id, onActivityChange: onThinkingActivity, onStatusClick };
+              return <div key={row.id} data-timeline-row={row.id} hidden={!expanded}>
+                {row.text.trim() ? <ThinkingBlock
+                  text={row.text}
+                  expanded={expandedIds.has(row.id)}
+                  live={liveThinkingIds === undefined ? undefined : liveThinkingIds.has(row.id)}
+                  onToggle={() => onToggle(row.id)}
+                  {...statusProps}
+                /> : liveThinkingIds !== undefined ?
+                  <CodexActivityRow phase="reasoning" active={liveThinkingIds.has(row.id)} effort={effort} statusSlot={slot} statusMetaSlot={metaSlot} onStatusClick={onStatusClick} /> :
+                  <ThinkingRow tokens={row.tokens ?? 0} effort={effort} {...statusProps} />}
+              </div>;
             }
+            const s = row;
+            const open = expandedIds.has(s.id);
             return (
-              <ThinkingRow
-                key={row.id}
-                tokens={row.tokens ?? 0}
-                effort={effort}
-              />
+              <div key={s.id} data-tool-step={s.id} hidden={!expanded}>
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={open ? `${panelId}-${s.id}` : undefined}
+                  onClick={() => onToggle(s.id)}
+                  className="relative flex items-center py-[6px] gap-3 w-full text-left group hover:bg-fg/[0.02] rounded-sm transition-colors"
+                >
+                  <div className="relative z-10 shrink-0 bg-surface">
+                    <CheckIcon
+                      status={s.status}
+                      waiting={awaitingPermission?.has(s.id) || (liveToolIds !== undefined && !liveToolIds.has(s.id))}
+                    />
+                  </div>
+                  <div className="flex items-baseline gap-2 text-[13px] min-w-0 flex-1">
+                    <span className="font-mono text-fg">{s.tool}</span>
+                    {s.arg && (
+                      <span className="font-mono text-subtle truncate">
+                        {s.arg}
+                      </span>
+                    )}
+                    {s.tool === "ApplyPatch" && <PatchStats changes={s.input?.changes} />}
+                    {/* 慢工具的已等待时长。本地工具最长能等 5.5 分钟（扫码登录
+                        要等人拿手机），没有这个数字的话 UI 停在「进行中」和
+                        「卡死了」看起来一模一样。 */}
+                    {s.status === "pending" && s.elapsedSeconds !== undefined && (
+                      <span className="font-mono text-subtle shrink-0 tabular-nums">
+                        {s.elapsedSeconds >= 60
+                          ? `${Math.floor(s.elapsedSeconds / 60)}m${s.elapsedSeconds % 60}s`
+                          : `${s.elapsedSeconds}s`}
+                      </span>
+                    )}
+                    {s.status === "pending" && s.elapsedSeconds === undefined && liveToolIds?.has(s.id) && <ToolElapsed />}
+                  </div>
+                  <div className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity pr-1">
+                    <Chevron open={open} />
+                  </div>
+                </button>
+                {open && (
+                  <div id={`${panelId}-${s.id}`}>
+                    <StepDetails tool={s.tool} input={s.input} output={s.output} status={s.status} />
+                  </div>
+                )}
+              </div>
             );
-          }
-          const s = row;
-          const open = expandedIds.has(s.id);
-          return (
-            <div key={s.id}>
-              <button
-                onClick={() => onToggle(s.id)}
-                className="relative flex items-center py-[6px] gap-3 w-full text-left group hover:bg-fg/[0.02] rounded-sm transition-colors"
-              >
-                <div className="relative z-10 shrink-0 bg-surface">
-                  <CheckIcon
-                    status={s.status}
-                    waiting={awaitingPermission?.has(s.id) || (liveToolIds !== undefined && !liveToolIds.has(s.id))}
-                  />
-                </div>
-                <div className="flex items-baseline gap-2 text-[13px] min-w-0 flex-1">
-                  <span className="font-mono text-fg">{s.tool}</span>
-                  {s.arg && (
-                    <span className="font-mono text-subtle truncate">
-                      {s.arg}
-                    </span>
-                  )}
-                  {s.tool === "ApplyPatch" && <PatchStats changes={s.input?.changes} />}
-                  {/* 慢工具的已等待时长。本地工具最长能等 5.5 分钟（扫码登录
-                      要等人拿手机），没有这个数字的话 UI 停在「进行中」和
-                      「卡死了」看起来一模一样。 */}
-                  {s.status === "pending" && s.elapsedSeconds !== undefined && (
-                    <span className="font-mono text-subtle shrink-0 tabular-nums">
-                      {s.elapsedSeconds >= 60
-                        ? `${Math.floor(s.elapsedSeconds / 60)}m${s.elapsedSeconds % 60}s`
-                        : `${s.elapsedSeconds}s`}
-                    </span>
-                  )}
-                  {s.status === "pending" && s.elapsedSeconds === undefined && liveToolIds?.has(s.id) && <ToolElapsed />}
-                </div>
-                <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
-                  <Chevron open={open} />
-                </div>
-              </button>
-              {open && (
-                <StepDetails tool={s.tool} input={s.input} output={s.output} status={s.status} />
-              )}
-            </div>
-          );
-        })}
+          })}
+        </div>
       </div>
     </div>
   );

@@ -57,23 +57,20 @@ export const CODEX_JSON_FLAG = "--experimental-json";
 
 export type CodexSandbox = "read-only" | "workspace-write" | "danger-full-access";
 
-// ⚠️ cc-webui's `mode` only reaches Codex as a **sandbox**, never as approvals.
-//
-// This is not laziness: `codex exec` has no approval channel at all. `-a/--ask-
-// for-approval` exists solely on the interactive TUI, and the
-// `--experimental-json` event set has no approval request in it (checked
-// against the SDK's own `ThreadEvent` union: thread.started / turn.* / item.* /
-// error — nothing else). Anything other than `approval_policy="never"` would
-// therefore either hang the turn or auto-reject the tool, with no way for a
-// permission card to answer.
-//
-// So `default` cannot mean "ask" here, and the UI saying otherwise is a
-// docs/UI problem (AGENTS.md already lists it), not something this layer can
-// fix. Making it *look* fixed by sending "on-request" would be strictly worse.
+// exec still has no host/manual approval channel. CLI 0.162.0 DOES have an
+// internal automatic reviewer, however: Auto uses on-request + auto_review.
+// Never set on-request alone (that would ask a user exec cannot talk to).
+// Other modes keep their prior never policy; Plan remains strictly read-only.
 export function mapSandbox(mode: string | undefined): CodexSandbox {
   if (mode === "plan") return "read-only";
   if (mode === "bypassPermissions") return "danger-full-access";
   return "workspace-write";
+}
+
+export function codexApprovalOverrides(mode: string | undefined): string[] {
+  return mode === "auto"
+    ? ['approval_policy="on-request"', 'approvals_reviewer="auto_review"']
+    : ['approval_policy="never"', 'approvals_reviewer="user"'];
 }
 
 // The runtime model catalog now advertises max/ultra too. Preserve those
@@ -116,11 +113,10 @@ export function mcpConfigOverrides(servers: McpServerSpec[]): string[] {
         `mcp_servers.${s.name}.bearer_token_env_var=${tomlString(mcpTokenEnvVar(s.name))}`,
       );
     }
-    // ⚠️ Not the same knob as `autoAllow`, which is about cc-webui's own
-    // permission cards. With `approval_policy="never"` and no approval channel,
-    // a non-"approve" default here does not produce a prompt — it produces a
-    // *rejected* tool call. So every server we hand Codex gets it, exactly as
-    // the SDK-era createCodexMcpConfig did for bash and lark.
+    // App-owned capability gateways (bash/memory/lark) retain their existing
+    // authorization path. Do NOT apply this to inherited native MCP servers:
+    // e.g. Playwright's eligible prompts must reach Auto-review, not blanket
+    // approval. Only explicitly assembled per-turn gateways are in this list.
     out.push(`mcp_servers.${s.name}.default_tools_approval_mode="approve"`);
   }
   return out;
@@ -130,9 +126,15 @@ export function buildConfigOverrides(opts: ExecOptions): string[] {
   return [
     ...mcpConfigOverrides(opts.mcpServers ?? []),
     ...CODEX_ARTIFACT_PLUGIN_OVERRIDES,
+    // cc-webui must not inherit the user's global fast/priority/ultrafast
+    // tier. "default" selects the CLI's standard mode (0.161.0 omits the
+    // wire service_tier instead of sending priority). An absent config value
+    // would still inherit global Fast settings. The feature flag alone is
+    // only a UI capability switch. Apply both on EVERY spawn, including resume.
+    'service_tier="default"',
+    "features.fast_mode=false",
     ...(opts.disableNativeMemory ? ["features.memories=false", "memories.use_memories=false", "memories.generate_memories=false"] : []),
-    // See mapSandbox: the only survivable value on `codex exec`.
-    `approval_policy="never"`,
+    ...codexApprovalOverrides(opts.mode),
     `model_reasoning_effort=${tomlString(mapEffort(opts.effort))}`,
   ];
 }

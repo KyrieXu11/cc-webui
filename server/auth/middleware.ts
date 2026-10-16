@@ -108,7 +108,7 @@ export function authMiddleware(): MiddlewareHandler {
     }
     if (!user) return next(); // public route, anonymous caller
 
-    const provider = target.path === "/api/codex/chat" ? "codex"
+    const provider = ["/api/codex/chat", "/api/codex/chat/steer"].includes(target.path) ? "codex"
       : ["/api/chat", "/api/chat/steer"].includes(target.path) ? "claude" : null;
     if (provider && !getAllowedProviders(user).includes(provider)) {
       return c.json({ error: "provider_not_allowed", detail: "管理员尚未为此账号开放该 AI" }, 403);

@@ -160,6 +160,10 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
     auth: "user",
     owns: { from: "body", key: "sessionId", kind: "codex", optional: true, access: "reader" },
   },
+  "POST /api/codex/chat/steer": {
+    auth: "user",
+    owns: { from: "body", key: "sessionId", kind: "codex", optional: true, access: "reader" },
+  },
   "GET /api/codex/chat/inflight": { auth: "user", handlerScoped: true },
   "GET /api/codex/chat/attach": {
     auth: "user",

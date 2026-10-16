@@ -17,12 +17,17 @@ export async function readFile(
   return { content: data.content, truncated: !!data.truncated };
 }
 
-export async function listTree(absPath: string): Promise<TreeEntry[]> {
+export class DirectoryReadError extends Error {
+  constructor(public status: number) { super(`目录读取失败（HTTP ${status}）`); }
+}
+
+export async function listTree(absPath: string, options: { signal?: AbortSignal } = {}): Promise<TreeEntry[]> {
   const qs = new URLSearchParams({ path: absPath });
-  const res = await fetch(`/api/fs/tree?${qs.toString()}`);
-  if (!res.ok) return [];
+  const res = await fetch(`/api/fs/tree?${qs.toString()}`, { signal: options.signal, cache: "no-store" });
+  if (!res.ok) throw new DirectoryReadError(res.status);
   const { entries } = await res.json();
-  return entries ?? [];
+  if (!Array.isArray(entries)) throw new Error("目录响应格式错误");
+  return entries;
 }
 
 export async function scanProjects(options: { refresh?: boolean; signal?: AbortSignal } = {}): Promise<{

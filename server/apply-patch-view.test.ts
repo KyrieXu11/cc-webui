@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import StepTimeline from "../src/components/StepTimeline.tsx";
 import ApplyPatchDiff from "../src/components/ApplyPatchDiff.tsx";
 import { sessionMessagesToEvents } from "../src/lib/processor.ts";
+import { toolExpansionIds } from "../src/lib/tool-timeline.ts";
 import type { ChatEvent } from "../src/lib/types.ts";
 
 const changes = [{ file: "/project/README.md", type: "update", unified_diff: "@@ -393,1 +393,2 @@\n-old text\n+new text\n+<script>no executable HTML</script>" }];
@@ -12,7 +13,7 @@ const events = sessionMessagesToEvents([{ provider: "codex", prompt: "edit", sta
 ] }]);
 const steps = events.filter((e): e is Extract<ChatEvent, { type: "step" }> => e.type === "step");
 assert.equal(steps[0].tool, "ApplyPatch");
-const html = renderToStaticMarkup(createElement(StepTimeline, { rows: steps, expandedIds: new Set([steps[0].id]), onToggle() {} }));
+const html = renderToStaticMarkup(createElement(StepTimeline, { rows: steps, expandedIds: new Set(toolExpansionIds(steps)), onToggle() {} }));
 assert.match(html, /data-patch-diff/);
 assert.match(html, /README\.md/);
 assert.match(html, /data-diff-kind="del"/);
@@ -29,7 +30,9 @@ const large = renderToStaticMarkup(createElement(ApplyPatchDiff, { changes: [{ f
 assert.equal((large.match(/data-diff-kind="add"/g) ?? []).length, 600);
 assert.match(large, /显示全部 601 行/);
 // Claude's existing Edit tool must retain its own renderer, not be rerouted.
-const claude = renderToStaticMarkup(createElement(StepTimeline, { rows: [{ type: "step", id: "c", tool: "Edit", status: "ok", input: { file_path: "a.ts", old_string: "before", new_string: "after" } }], expandedIds: new Set(["c"]), onToggle() {} }));
+const claudeSteps: Extract<ChatEvent, { type: "step" }>[] = [{ type: "step", id: "c", tool: "Edit", status: "ok", input: { file_path: "a.ts", old_string: "before", new_string: "after" } }];
+const claude = renderToStaticMarkup(createElement(StepTimeline, { rows: claudeSteps, expandedIds: new Set(toolExpansionIds(claudeSteps)), onToggle() {} }));
 assert.doesNotMatch(claude, /data-patch-diff/);
+assert.match(claude, /加载 diff/, "SSR mounts the existing effect-driven EditDiff renderer, not an empty collapsed group");
 assert.doesNotMatch(claude, /old_string/, "Claude Edit still uses EditDiff, not the generic JSON view");
 console.log("ApplyPatch timeline renders readable, escaped per-file diffs instead of JSON-only details");

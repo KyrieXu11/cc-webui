@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { listTree, type TreeEntry } from "../lib/fs";
+import type { TreeEntry } from "../lib/fs";
+import { useDirectoryEntries } from "../lib/useDirectoryEntries";
 import {
   createFolder,
   deleteFiles,
@@ -16,10 +17,14 @@ import {
   uploadToDir,
 } from "../lib/files";
 import { openInDock } from "../lib/dock-bridge";
+import { fileTreeTarget } from "../lib/tree-reveal";
 import {
   hasDraggedFiles,
   readDraggedFiles,
   writeDraggedFiles,
+  canMoveInto,
+  movableDraggedFiles,
+  relocatedDraggedPath,
   type DraggedFile,
 } from "../lib/file-drag";
 
@@ -49,8 +54,7 @@ import {
 //   · 悬停的 @   → 把相对路径插进对话框（原来的「单击插入」，给 agent 指路用）
 //   · 点文件夹   → 除了展开/收起，还把它设成**上传落点**（标题栏那颗「上传」的目标）
 //
-// 刷新是整棵树重挂（`key={seq}`）：每个 DirRow 各自懒加载 children，逐个 refetch 既要
-// 跨组件通信又容易漏掉没展开的那些，重挂一次干净，而这棵树本来就是懒的。
+// 刷新仅递增 revision：保留目录行与滚动容器，已展开目录后台更新；收起目录下次展开才读取。
 
 interface Props {
   cwd: string;
@@ -65,6 +69,10 @@ interface Props {
    * 只有当这一栏就是右侧格最上面那条（＝没有文档打开、树占满整格）时才需要。
    */
   reserveRight?: boolean;
+  /** Active dock document, independent of batch picks and the upload target. */
+  activeFile?: string | null;
+  revealVersion?: number;
+  visible?: boolean;
 }
 
 // 多选里的一项。`dir` 决定它能做什么：删 = 只删空的（服务端 rmdir），
@@ -72,6 +80,13 @@ interface Props {
 type Picked = { name: string; dir: boolean };
 
 type Ctx = {
+  revision: number;
+  currentFilePath: string | null;
+  revealVersion: number;
+  visible: boolean;
+  revealFileRow: (element: HTMLElement) => void;
+  openedDirs: Set<string>;
+  setDirectoryOpen: (path: string, open: boolean) => void;
   selecting: boolean;
   picked: Map<string, Picked>;
   toggle: (path: string, name: string, dir?: boolean) => void;
@@ -103,10 +118,15 @@ export default function FileExplorer({
   sessionId,
   embedded,
   reserveRight,
+  activeFile,
+  revealVersion = 0,
+  visible = true,
 }: Props) {
-  const [rootEntries, setRootEntries] = useState<TreeEntry[] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [seq, setSeq] = useState(0);
+  const [openedDirs, setOpenedDirs] = useState(() => new Set<string>());
+  const currentCwd = useRef(cwd);
+  currentCwd.current = cwd;
+  const { entries: rootEntries, loading, error: rootError } = useDirectoryEntries(cwd, seq);
   const [picked, setPicked] = useState<Map<string, Picked>>(() => new Map());
   const [uploadDir, setUploadDir] = useState(cwd);
   const [busy, setBusy] = useState<string | null>(null);
@@ -118,6 +138,8 @@ export default function FileExplorer({
   // 拖到树的空白处＝移回根目录时的高亮。
   const [rootOver, setRootOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const treeScroll = useRef<HTMLDivElement>(null);
+  const target = fileTreeTarget(cwd, activeFile);
 
   // Esc 退出多选。绑在 window 上：焦点可能在树里的任何一个按钮上。
   useEffect(() => {
@@ -133,23 +155,37 @@ export default function FileExplorer({
 
   useEffect(() => {
     setUploadDir(cwd);
+    setOpenedDirs(new Set());
     setPicked(new Map());
     setSelecting(false);
+    setBusy(null);
+    setErr(null);
   }, [cwd]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setRootEntries(null);
-    listTree(cwd)
-      .then((xs) => !cancelled && setRootEntries(xs))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [cwd, seq]);
-
   const refresh = useCallback(() => setSeq((n) => n + 1), []);
+  useEffect(() => {
+    const next = fileTreeTarget(cwd, activeFile);
+    if (!next) return;
+    setOpenedDirs(previous => new Set([...previous, ...next.directories]));
+    // An agent may have just added the file to an already-loaded directory.
+    // Use the existing background refresh; do not remount/clear the tree.
+    refresh();
+  }, [cwd, activeFile, revealVersion, refresh]);
+
+  const revealFileRow = useCallback((element: HTMLElement) => {
+    const container = treeScroll.current;
+    if (!container || !container.clientHeight) return;
+    const row = element.getBoundingClientRect(), viewport = container.getBoundingClientRect();
+    // Scroll only the tree, not the conversation/document or outer page.
+    if (row.top < viewport.top) container.scrollTop -= viewport.top - row.top;
+    else if (row.bottom > viewport.bottom) container.scrollTop += row.bottom - viewport.bottom;
+  }, []);
+  const setDirectoryOpen = (path: string, open: boolean) => setOpenedDirs(previous => {
+    if (previous.has(path) === open) return previous;
+    const next = new Set(previous);
+    if (open) next.add(path); else next.delete(path);
+    return next;
+  });
 
   const toRel = (abs: string) =>
     abs.startsWith(cwd + "/") ? abs.slice(cwd.length + 1) : abs;
@@ -180,32 +216,29 @@ export default function FileExplorer({
   const dropInto = (dir: string, files: DraggedFile[]) => {
     // 只搬「搬过去有意义」的那些：整批里混进一两个本来就在目标目录的，
     // 不该让整个动作变成一屏红字。
-    const paths = files
-      .filter(
-        (f) =>
-          parentOf(f.path) !== dir &&
-          dir !== f.path &&
-          !dir.startsWith(f.path + "/")
-      )
-      .map((f) => f.path);
+    const paths = movableDraggedFiles(files, dir).map(f => f.path);
     if (paths.length === 0) return;
     void (async () => {
       setBusy("移动中…");
-      const r = await moveFiles(paths, dir);
-      setBusy(null);
-      setErr(
-        r.failed.length
-          ? `${r.failed.length} 个没移动：` +
-              r.failed
-                .map((f) => `${f.path.split("/").pop()}（${f.error}）`)
-                .join("；")
-          : null
-      );
-      if (r.moved.length > 0) {
-        setPicked(new Map());
-        setSelecting(false);
-        refresh();
-      }
+      try {
+        const r = await moveFiles(paths, dir);
+        if (currentCwd.current !== cwd) return;
+        setErr(
+          r.failed.length
+            ? `${r.failed.length} 个没移动：` + r.failed.map(f => `${f.path.split("/").pop()}（${f.error}）`).join("；")
+            : null
+        );
+        if (r.moved.length > 0) {
+          setUploadDir(current => relocatedDraggedPath(current, r.moved));
+          // 旧节点在后台刷新完成前仍保持展开；新路径继承整棵子树的展开偏好。
+          setOpenedDirs(current => new Set([...current, ...[...current].map(path => relocatedDraggedPath(path, r.moved)), dir]));
+          setPicked(new Map());
+          setSelecting(false);
+          refresh();
+        }
+      } catch (error) {
+        if (currentCwd.current === cwd) setErr(`移动请求失败，请刷新目录确认结果（${error instanceof Error ? error.message : "网络错误"}）`);
+      } finally { if (currentCwd.current === cwd) setBusy(null); }
     })();
   };
 
@@ -232,6 +265,13 @@ export default function FileExplorer({
   };
 
   const ctx: Ctx = {
+    revision: seq,
+    currentFilePath: target?.path ?? null,
+    revealVersion,
+    visible,
+    revealFileRow,
+    openedDirs,
+    setDirectoryOpen,
     selecting,
     picked,
     toggle,
@@ -307,7 +347,7 @@ export default function FileExplorer({
   // 表头要放下四颗按钮。
   let headerLabel = "";
   if (busy) headerLabel = busy;
-  else if (loading) headerLabel = "读取中…";
+  else if (loading && rootEntries === null) headerLabel = "读取中…";
   else if (!selecting) headerLabel = uploadDir === cwd ? "根目录" : toRel(uploadDir);
 
   return (
@@ -397,8 +437,9 @@ export default function FileExplorer({
             </button>
             <button
               onClick={refresh}
+              aria-busy={loading}
               className="font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors"
-              title="重新读取目录"
+              title="重新读取目录，保留展开状态"
             >
               刷新
             </button>
@@ -442,9 +483,9 @@ export default function FileExplorer({
         </div>
       )}
 
-      {err && (
+      {(err || rootError) && (
         <div className="px-3 py-2 text-[11.5px] text-red border-b border-line break-words shrink-0">
-          {err}
+          {err || rootError}
         </div>
       )}
 
@@ -452,7 +493,9 @@ export default function FileExplorer({
         {/* 空白处也是落点＝移回根目录。没有它的话，从子目录里搬出来这件事
             压根没有手势可做（根目录不是树里的一行）。 */}
         <div
-          key={seq}
+          key={cwd}
+          ref={treeScroll}
+          data-file-tree-scroll
           onDragOver={(e) => {
             if (!hasDraggedFiles(e.dataTransfer) || !canDropInto(cwd)) return;
             e.preventDefault();
@@ -475,8 +518,8 @@ export default function FileExplorer({
             rootOver ? "bg-blue/10 ring-1 ring-inset ring-blue/40" : ""
           }`}
         >
-          {loading ? (
-            <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
+          {rootEntries === null ? (
+            <div className="px-4 py-3 text-[12px] text-subtle">{rootError ? "读取失败，点击刷新重试" : "加载中…"}</div>
           ) : !rootEntries || rootEntries.length === 0 ? (
             <div className="px-4 py-3 text-[12px] text-subtle">空目录</div>
           ) : (
@@ -536,20 +579,10 @@ export default function FileExplorer({
 // 同一个文档里同时只可能有一次拖拽，所以模块级变量就够了。
 let dragging: DraggedFile[] = [];
 
-function parentOf(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i <= 0 ? "/" : p.slice(0, i);
-}
-
 /** 这批东西放进 dir 有意义吗（不是原地、也不是塞进自己肚子里）。 */
 export function canDropInto(dir: string): boolean {
   if (dragging.length === 0) return false;
-  return dragging.some(
-    (f) =>
-      parentOf(f.path) !== dir &&
-      dir !== f.path &&
-      !dir.startsWith(f.path + "/")
-  );
+  return dragging.some(f => canMoveInto(f.path, dir));
 }
 
 /* 行内改名。做成输入框而不是又一个弹窗：改名是「就地微调」，
@@ -615,6 +648,10 @@ function Row({ entry, depth }: { entry: TreeEntry; depth: number }) {
 
 function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
   const {
+    revision,
+    openedDirs,
+    setDirectoryOpen,
+    startDrag,
     uploadDir,
     setUploadDir,
     dropInto,
@@ -626,9 +663,8 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
     beginSelect,
   } = useTree();
   const checked = picked.has(entry.path);
-  const [open, setOpen] = useState(false);
-  const [children, setChildren] = useState<TreeEntry[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const open = openedDirs.has(entry.path);
+  const { entries: children, loading, error } = useDirectoryEntries(entry.path, revision, open);
   const [over, setOver] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const isTarget = uploadDir === entry.path;
@@ -643,47 +679,35 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
   };
   useEffect(() => clearDwell, []);
 
-  const toggle = async () => {
+  const toggle = () => {
     // 点文件夹同时把它设成上传落点：这是「上传到本文件夹」唯一需要的手势。
     setUploadDir(entry.path);
-    if (!open && !children) {
-      setLoading(true);
-      try {
-        setChildren(await listTree(entry.path));
-      } finally {
-        setLoading(false);
-      }
-    }
-    setOpen((o) => !o);
+    setDirectoryOpen(entry.path, !open);
   };
 
-  const open_ = async () => {
-    if (!children) {
-      setLoading(true);
-      try {
-        setChildren(await listTree(entry.path));
-      } finally {
-        setLoading(false);
-      }
-    }
-    setOpen(true);
-  };
+  const open_ = () => setDirectoryOpen(entry.path, true);
 
   return (
     <>
       {/* 落点和拖拽高亮长在**外层 div** 上，不是那颗展开按钮上：右边还要放一颗
           重命名按钮，而 <button> 里不能再套 <button>。顺带落点也变大了一点。 */}
       <div
+        draggable={!renaming}
+        onDragStart={e => startDrag(e, entry.path, entry.name)}
+        onDragEnd={() => { dragging = []; setRootOver(false); clearDwell(); }}
+        data-tree-directory={entry.path}
         onDragOver={(e) => {
-          if (!hasDraggedFiles(e.dataTransfer) || !canDropInto(entry.path)) return;
+          if (!hasDraggedFiles(e.dataTransfer)) return;
+          // 无效文件夹落点也要吞掉事件，不能冒到根落点后意外移到根目录。
+          e.stopPropagation();
+          setRootOver(false);
+          if (!canDropInto(entry.path)) { e.dataTransfer.dropEffect = "none"; setOver(false); clearDwell(); return; }
           // preventDefault 才等于「这里可以放」。不写的话浏览器一律当不可放，
           // 光标是禁止符号，drop 事件也永远不来。
           e.preventDefault();
           // ⚠️ 这两行缺一不可：stopPropagation 挡住外层那个「放到根目录」的落点，
           // 但**它同时也让外层再也收不到 dragover 去自己熄灯**——外层的 dragleave
           // 在指针移进子元素时不算离开，于是两处会同时亮。所以主动叫它灭。
-          e.stopPropagation();
-          setRootOver(false);
           e.dataTransfer.dropEffect = "move";
           setOver(true);
           if (!open && dwell.current === null) {
@@ -745,8 +769,9 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
           <>
             <button
               onClick={toggle}
+              aria-expanded={open}
               className="flex-1 min-w-0 flex items-center gap-1.5 py-0 text-left"
-              title={`${entry.path}\n（点一下：展开 / 设为上传落点 · 可以把文件拖进来 · 右键：多选，空文件夹可以删）`}
+              title={`${entry.path}\n（点一下：展开 / 设为上传落点 · 拖动整个文件夹到另一个文件夹 · 右键：多选，空文件夹可以删）`}
             >
               <Chevron open={open} />
               <FolderIcon />
@@ -763,7 +788,7 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
           </>
         )}
       </div>
-      {open && loading && (
+      {open && loading && children === null && (
         <div
           className="text-[11px] text-subtle font-mono py-0.5"
           style={{ paddingLeft: 8 + (depth + 1) * 12 + 20 }}
@@ -771,6 +796,7 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
           …
         </div>
       )}
+      {open && error && <div className="text-[11px] text-red py-1 pr-2 break-words" style={{ paddingLeft: 8 + (depth + 1) * 12 + 20 }}>{error}；点击刷新重试</div>}
       {open &&
         children?.map((c) => <Row key={c.path} entry={c} depth={depth + 1} />)}
     </>
@@ -778,13 +804,19 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
 }
 
 function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
-  const { selecting, picked, toggle, beginSelect, preview, startDrag, renameEntry } =
+  const { selecting, picked, toggle, beginSelect, preview, startDrag, renameEntry, currentFilePath, revealVersion, visible, revealFileRow } =
     useTree();
   const checked = picked.has(entry.path);
+  const current = entry.path === currentFilePath;
+  const row = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
+  useEffect(() => {
+    if (current && visible && row.current) revealFileRow(row.current);
+  }, [current, visible, revealVersion, revealFileRow]);
 
   return (
     <div
+      ref={row}
       // ⚠️ 改名时必须关掉 draggable：draggable 元素里的 input 选不了文字——
       // 按住拖选会被浏览器解释成开始拖拽，光标一动整行就飞起来了。
       draggable={!renaming}
@@ -792,7 +824,9 @@ function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
       onDragEnd={() => {
         dragging = [];
       }}
-      data-active={checked}
+      data-tree-file={entry.path}
+      data-current={current}
+      data-active={checked || (!selecting && current)}
       className="navigation-row group w-full flex items-center gap-1.5 py-1 pr-1.5 transition-colors"
       style={{ paddingLeft: 8 + depth * 12 }}
       // 右键＝进多选并选中这一行；已在多选态里再右键就是加选/取消。
@@ -826,6 +860,7 @@ function FileRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
       ) : (
         <>
           <button
+            aria-current={current ? "true" : undefined}
             onClick={(e) =>
               e.metaKey || e.ctrlKey
                 ? preview(entry.path)

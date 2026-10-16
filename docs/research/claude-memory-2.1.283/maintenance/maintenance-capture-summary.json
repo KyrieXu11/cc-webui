@@ -1,0 +1,600 @@
+{
+  "version": "2.1.283",
+  "binary_sha256": "d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e",
+  "scope": "Isolated native CLI against fake loopback API; deterministic synthetic model replies",
+  "network": "Child sandbox permits outbound localhost only; negative curl nonzero",
+  "filesystem": "Child cannot read or write real user home except reading the verified Claude binary",
+  "production_modified": false,
+  "real_model_called": false,
+  "cases": [
+    {
+      "case": "baseline_off",
+      "exit_code": 0,
+      "elapsed_seconds": 0.3,
+      "counts": {
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-001.json"
+      ]
+    },
+    {
+      "case": "extract_on",
+      "exit_code": 0,
+      "elapsed_seconds": 0.27,
+      "counts": {
+        "main": 1,
+        "extract": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-002.json",
+        "request-003.json"
+      ]
+    },
+    {
+      "case": "headless_gate_off",
+      "exit_code": 0,
+      "elapsed_seconds": 0.26,
+      "counts": {
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-004.json"
+      ]
+    },
+    {
+      "case": "cadence_two",
+      "exit_code": 0,
+      "elapsed_seconds": 0.28,
+      "counts": {
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-005.json"
+      ]
+    },
+    {
+      "case": "no_user_prose",
+      "exit_code": 0,
+      "elapsed_seconds": 0.27,
+      "counts": {
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-006.json"
+      ]
+    },
+    {
+      "case": "native_disabled",
+      "exit_code": 0,
+      "elapsed_seconds": 0.26,
+      "counts": {
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-007.json"
+      ]
+    },
+    {
+      "case": "direct_write",
+      "exit_code": 0,
+      "elapsed_seconds": 0.29,
+      "counts": {
+        "main": 2
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": true,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-008.json",
+        "request-009.json"
+      ]
+    },
+    {
+      "case": "failed_direct_edit",
+      "exit_code": 0,
+      "elapsed_seconds": 0.29,
+      "counts": {
+        "main": 2
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-010.json",
+        "request-011.json"
+      ]
+    },
+    {
+      "case": "extract_write_guard",
+      "exit_code": 0,
+      "elapsed_seconds": 0.27,
+      "counts": {
+        "main": 1,
+        "extract": 2
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-012.json",
+        "request-013.json",
+        "request-014.json"
+      ]
+    },
+    {
+      "case": "extract_update_existing",
+      "exit_code": 0,
+      "elapsed_seconds": 0.29,
+      "counts": {
+        "main": 1,
+        "extract": 3
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": true,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-015.json",
+        "request-016.json",
+        "request-017.json",
+        "request-018.json"
+      ]
+    },
+    {
+      "case": "dream_print_sdk",
+      "exit_code": 0,
+      "elapsed_seconds": 2.05,
+      "counts": {
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 172802.05,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-020.json"
+      ]
+    },
+    {
+      "case": "extract_turn_limit",
+      "exit_code": 0,
+      "elapsed_seconds": 0.31,
+      "counts": {
+        "main": 1,
+        "extract": 5
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-021.json",
+        "request-022.json",
+        "request-023.json",
+        "request-024.json",
+        "request-025.json",
+        "request-026.json"
+      ]
+    },
+    {
+      "case": "dream_forced_desktop",
+      "exit_code": 0,
+      "elapsed_seconds": 2.05,
+      "counts": {
+        "title": 1,
+        "main": 1,
+        "dream": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 1.27,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-029.json",
+        "request-030.json",
+        "request-031.json"
+      ]
+    },
+    {
+      "case": "dream_time_gate",
+      "exit_code": 0,
+      "elapsed_seconds": 2.04,
+      "counts": {
+        "title": 1,
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 2.04,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-034.json",
+        "request-035.json"
+      ]
+    },
+    {
+      "case": "dream_sessions_gate",
+      "exit_code": 0,
+      "elapsed_seconds": 2.05,
+      "counts": {
+        "title": 1,
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 172802.05,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-038.json",
+        "request-039.json"
+      ]
+    },
+    {
+      "case": "dream_live_lock",
+      "exit_code": 0,
+      "elapsed_seconds": 2.04,
+      "counts": {
+        "title": 1,
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 62.04,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-042.json",
+        "request-043.json"
+      ]
+    },
+    {
+      "case": "dream_write_guard",
+      "exit_code": 0,
+      "elapsed_seconds": 2.05,
+      "counts": {
+        "title": 1,
+        "main": 1,
+        "dream": 2
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 1.28,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-046.json",
+        "request-047.json",
+        "request-048.json",
+        "request-049.json"
+      ]
+    },
+    {
+      "case": "dream_update_existing",
+      "exit_code": 0,
+      "elapsed_seconds": 2.06,
+      "counts": {
+        "title": 1,
+        "main": 1,
+        "dream": 3
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": true,
+      "lock_exists": true,
+      "lock_age_seconds_after": 1.27,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-052.json",
+        "request-053.json",
+        "request-054.json",
+        "request-055.json",
+        "request-056.json"
+      ]
+    },
+    {
+      "case": "dream_turn_limit",
+      "exit_code": 0,
+      "elapsed_seconds": 2.05,
+      "counts": {
+        "title": 1,
+        "main": 1,
+        "dream": 50
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 1.29,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-059.json",
+        "request-060.json",
+        "request-061.json",
+        "request-062.json",
+        "request-063.json",
+        "request-064.json",
+        "request-065.json",
+        "request-066.json",
+        "request-067.json",
+        "request-068.json",
+        "request-069.json",
+        "request-070.json",
+        "request-071.json",
+        "request-072.json",
+        "request-073.json",
+        "request-074.json",
+        "request-075.json",
+        "request-076.json",
+        "request-077.json",
+        "request-078.json",
+        "request-079.json",
+        "request-080.json",
+        "request-081.json",
+        "request-082.json",
+        "request-083.json",
+        "request-084.json",
+        "request-085.json",
+        "request-086.json",
+        "request-087.json",
+        "request-088.json",
+        "request-089.json",
+        "request-090.json",
+        "request-091.json",
+        "request-092.json",
+        "request-093.json",
+        "request-094.json",
+        "request-095.json",
+        "request-096.json",
+        "request-097.json",
+        "request-098.json",
+        "request-099.json",
+        "request-100.json",
+        "request-101.json",
+        "request-102.json",
+        "request-103.json",
+        "request-104.json",
+        "request-105.json",
+        "request-106.json",
+        "request-107.json",
+        "request-108.json",
+        "request-109.json",
+        "request-110.json"
+      ]
+    },
+    {
+      "case": "dream_setting_off",
+      "exit_code": 0,
+      "elapsed_seconds": 2.06,
+      "counts": {
+        "title": 1,
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 172802.06,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-113.json",
+        "request-114.json"
+      ]
+    },
+    {
+      "case": "dream_unavailable",
+      "exit_code": 0,
+      "elapsed_seconds": 2.04,
+      "counts": {
+        "title": 1,
+        "main": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 172802.04,
+      "background_tool_names_match_main": null,
+      "background_system_text_matches_main": null,
+      "request_files": [
+        "request-117.json",
+        "request-118.json"
+      ]
+    },
+    {
+      "case": "dream_available_opt_in",
+      "exit_code": 0,
+      "elapsed_seconds": 2.05,
+      "counts": {
+        "title": 1,
+        "main": 1,
+        "dream": 1
+      },
+      "outside_written": false,
+      "stale_notice_seen": false,
+      "main_body_changed": false,
+      "background_body_changed": false,
+      "lock_exists": true,
+      "lock_age_seconds_after": 1.27,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-121.json",
+        "request-122.json",
+        "request-123.json"
+      ]
+    },
+    {
+      "case": "extract_stale_notice",
+      "exit_code": 0,
+      "elapsed_seconds": 2.85,
+      "counts": {
+        "main": 3,
+        "extract": 4
+      },
+      "outside_written": false,
+      "stale_notice_seen": true,
+      "main_body_changed": false,
+      "background_body_changed": true,
+      "lock_exists": false,
+      "lock_age_seconds_after": null,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-124.json",
+        "request-125.json",
+        "request-126.json",
+        "request-127.json",
+        "request-128.json",
+        "request-129.json",
+        "request-130.json"
+      ]
+    },
+    {
+      "case": "dream_stale_notice",
+      "exit_code": 0,
+      "elapsed_seconds": 2.85,
+      "counts": {
+        "title": 2,
+        "main": 3,
+        "dream": 3
+      },
+      "outside_written": false,
+      "stale_notice_seen": true,
+      "main_body_changed": false,
+      "background_body_changed": true,
+      "lock_exists": true,
+      "lock_age_seconds_after": 1.52,
+      "background_tool_names_match_main": true,
+      "background_system_text_matches_main": true,
+      "request_files": [
+        "request-133.json",
+        "request-134.json",
+        "request-135.json",
+        "request-136.json",
+        "request-137.json",
+        "request-138.json",
+        "request-139.json",
+        "request-140.json"
+      ]
+    }
+  ],
+  "verified_date": "2026-10-10",
+  "verified_cases": 24,
+  "raw_api_request_count_including_seed_and_title": 140,
+  "autodream_probe_conditions": "Synthetic cached gates and claude-desktop entrypoint; not a normal sdk-cli rollout test",
+  "normalization": "Only synthetic memory/transcript paths, ISO timestamps and session UUIDs in the memory-specific user prompts are replaced",
+  "fixtures": [
+    {
+      "file": "background-extraction-request.txt",
+      "case": "extract_on",
+      "sha256": "4b68552526b4e65d9c97e68e5a8e3b0d709d8873a604ee2cc6db0c85f8fc6d8f"
+    },
+    {
+      "file": "autodream-request.txt",
+      "case": "dream_forced_desktop",
+      "sha256": "1c432ea75fcaea216ee9c81047957e9181533da45f8acee5637fe3b2c52e2774"
+    }
+  ],
+  "limits": "Verifies native scheduling, request construction, tools and update notification; deterministic fake replies do not measure real model recall or merge quality"
+}

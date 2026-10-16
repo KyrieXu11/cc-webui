@@ -23,21 +23,26 @@ const capture = path.join(tmp, "captures.jsonl");
 const fake = path.join(tmp, "cli.cjs");
 await fs.writeFile(fake, `#!/usr/bin/env node
 const fs = require('node:fs');
-const codex = process.argv.includes('exec');
+const codex = process.argv.includes('app-server');
+let resumed=false;
 const out = o => process.stdout.write(JSON.stringify(o)+'\\n');
 const finish = prompt => {
-  fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify({codex, prompt, args:process.argv.slice(2), nativeDisabled:process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY})+'\\n');
+  fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify({codex, resumed, prompt, args:process.argv.slice(2), nativeDisabled:process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY})+'\\n');
   if(codex) {
-    out({type:'thread.started',thread_id:'22222222-2222-4222-8222-222222222222'});
-    out({type:'item.completed',item:{id:'a',type:'agent_message',text:'ok'}});
-    out({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}});
+    out({method:'item/completed',params:{threadId:'22222222-2222-4222-8222-222222222222',turnId:'turn-1',item:{id:'a',type:'agentMessage',text:'ok'}}});
+    out({method:'turn/completed',params:{threadId:'22222222-2222-4222-8222-222222222222',turn:{id:'turn-1',status:'completed'}}});
   } else {
     out({type:'system',subtype:'init',session_id:'11111111-1111-4111-8111-111111111111',model:'opus'});
     out({type:'assistant',message:{id:'a',role:'assistant',content:[{type:'text',text:'ok'}]}});
     out({type:'result',subtype:'success',session_id:'11111111-1111-4111-8111-111111111111'});
   }
 };
-if(codex) { let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>finish(s)); }
+if(codex) { require('node:readline').createInterface({input:process.stdin}).on('line',s=>{
+  const r=JSON.parse(s);
+  if(r.method==='initialize')out({id:r.id,result:{}});
+  if(r.method==='thread/start'||r.method==='thread/resume'){resumed=r.method==='thread/resume';out({id:r.id,result:{thread:{id:'22222222-2222-4222-8222-222222222222'}}});}
+  if(r.method==='turn/start'){out({id:r.id,result:{turn:{id:'turn-1',status:'inProgress'}}});finish(r.params.input[0].text);}
+}); }
 else { let done=false;require('node:readline').createInterface({input:process.stdin}).on('line',s=>{if(!done){done=true;finish(JSON.parse(s).message.content[0].text)}}); }
 `);
 await fs.chmod(fake, 0o755);
@@ -183,7 +188,7 @@ try {
   await send("codex", "auto", "22222222-2222-4222-8222-222222222222");
   const resumed = (await fs.readFile(capture, "utf8")).trim().split("\n").slice(-2).map(s => JSON.parse(s));
   for (const r of resumed) {
-    assert.ok(r.args.includes(r.codex ? "resume" : "--resume"), "test actually resumes a native session");
+    assert.ok(r.codex ? r.resumed : r.args.includes("--resume"), "test actually resumes a native session");
     assert.ok(r.codex ? r.prompt.includes(WEB_OUTPUT_RULES) : r.args.some((a: string) => a.includes(WEB_OUTPUT_RULES)), "native resume receives current web output rules too");
   }
   for (const r of (await fs.readFile(capture, "utf8")).trim().split("\n").map(s => JSON.parse(s))) {

@@ -141,7 +141,9 @@ export type McpServerSpec = {
  * `--input-format stream-json`（权限确认那一路早在用），往那根管子多写一行就行。
  * 这条路和它的全部教训抄自律枢 `service/steer.go`。
  */
-export type SteerSend = (text: string) => boolean;
+// Claude accepts by writing stdin; Codex app-server must await turn/steer's ACK.
+export type SteerSend = (text: string, messageId?: string) => boolean | Promise<boolean>;
+export type SteeredUserFrame = { type: "steer_user"; id: string; text: string; provider: ExecutorId };
 
 export type ExecOptions = {
   prompt: string;
@@ -204,11 +206,13 @@ export type ExecOptions = {
    * 交出 / 收回插话句柄：子进程起来、stdin 可写之后给出 `send`，这一轮不再接受输入
    * 时给 `null`。
    *
-   * ⚠️ **只有 claude 这一侧有。** `codex exec` 的 stdin 不是控制协议，写进去不会被
-   * 当成新消息 —— codex-executor 刻意不调这个回调，调用方拿不到句柄自然就回
-   * 「插不进去」。
+   * Claude 写 stdin；网页 Codex app-server 等待 turn/steer 的确认。
+   * 群聊/飞书的 codex exec 仍不提供这个句柄。
    */
   onSteer?: (send: SteerSend | null) => void;
+  // Build the accepted input at the ACK boundary. The executor enqueues this
+  // alongside native events, preserving their order (never bypass its queue).
+  onSteerAccepted?: (messageId: string) => SteeredUserFrame | void;
 };
 
 // ─── The contract ───────────────────────────────────────────────────────────

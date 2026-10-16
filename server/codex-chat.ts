@@ -6,10 +6,16 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendCodexTurn } from "./session-store.ts";
 import { prepareProjectMemory } from "./project-memory/runtime.ts";
-import { codexExecutor } from "./executors/codex-executor.ts";
+import { codexAppServerExecutor } from "./executors/codex-app-server.ts";
 import { WEB_OUTPUT_RULES } from "./web-output-rules.ts";
 import { CODEX_ARTIFACT_PLUGIN_PROMPT } from "./codex-plugin-policy.ts";
-import type { ExecResult } from "./executors/types.ts";
+import type { ExecResult, SteerSend } from "./executors/types.ts";
+import { memorySnapshot } from "./project-memory/prompt.ts";
+import type { MemoryCapability } from "./project-memory/runtime.ts";
+import { wrapMemoryPrompt } from "../shared/project-memory-envelope.ts";
+import { assertCanOpen } from "./auth/paths.ts";
+import { getAllowedPaths } from "./auth/users.ts";
+import { SteeringRequests, SteerConflict, pickSteerTurn, validSteerInput } from "./steering.ts";
 import { getMcpRouteUrl } from "./codex-mcp-config.ts";
 import {
   registerMcpSessionContext,
@@ -52,6 +58,12 @@ interface InFlightCodexChat {
   errorMsg?: string;
   cancelRequested: boolean;
   abort: AbortController;
+  ownerId?: string;
+  cwd: string;
+  permissionMode?: string;
+  projectMemory?: MemoryCapability;
+  steer?: SteerSend | null;
+  steering: SteeringRequests;
 }
 
 const activeCodexChats = new Map<string, InFlightCodexChat>();
@@ -88,7 +100,8 @@ function removeEntryIfSelf(entry: InFlightCodexChat): void {
 
 async function attachStreamToEntry(
   stream: SSEStreamingApi,
-  entry: InFlightCodexChat
+  entry: InFlightCodexChat,
+  callerId: string | undefined
 ): Promise<void> {
   const subId = Math.random().toString(36).slice(2, 7);
   const tag = `[codex sub ${entry.reqId}/${subId}]`;
@@ -143,6 +156,11 @@ async function attachStreamToEntry(
         break;
       }
     }
+    // Personalized capability is not buffered/fanned out to shared readers.
+    if (!closed) await stream.writeSSE({ event: "steer_target", data: JSON.stringify({
+      type: "steer_target", provider: "codex", clientTurnId: entry.clientTurnId,
+      canSteer: !!callerId && callerId === entry.ownerId && entry.status === "running",
+    }) });
     while (!closed || queue.length > 0) {
       if (queue.length === 0) {
         if (closed) break;
@@ -207,10 +225,10 @@ codexChat.post("/chat", async (c) => {
   const startedAt = Date.now();
   const threadId: string | undefined =
     typeof body.sessionId === "string" ? body.sessionId : undefined;
-  const clientTurnId: string | undefined =
+  const clientTurnId: string =
     typeof body.clientTurnId === "string" && body.clientTurnId
       ? body.clientTurnId
-      : undefined;
+      : randomUUID();
   const cwd = expandHome(body.cwd || process.env.CC_WEBUI_CWD);
   const model: string | undefined =
     typeof body.model === "string" ? body.model : undefined;
@@ -258,6 +276,9 @@ codexChat.post("/chat", async (c) => {
       ` prompt=${JSON.stringify(prompt.slice(0, 80))}`
   );
 
+  const ownerId = currentUser(c)?.id;
+  const turnEvents: unknown[] = [];
+  const acceptedSteers = new Set<string>();
   const entry: InFlightCodexChat = {
     reqId,
     clientTurnId,
@@ -267,14 +288,16 @@ codexChat.post("/chat", async (c) => {
     status: "running",
     cancelRequested: false,
     abort: new AbortController(),
+    ownerId, cwd: cwd ?? process.cwd(), permissionMode,
+    steering: new SteeringRequests(),
   };
   if (threadId) activeCodexChats.set(threadId, entry);
-  const ownerId = currentUser(c)?.id;
   if (clientTurnId) activeCodexChatsByClientTurn.set(clientTurnId, entry);
 
   const fanout = fanoutFactory(entry);
   fanout("turn_meta", JSON.stringify({ type: "turn_meta", effort: effort ?? null, startedAt, provider: "codex" }));
-  // Codex exec never echoes the user request. A viewer attaching from another
+  // Publish our raw request once; app-server's native user items are ignored.
+  // A viewer attaching from another
   // tab/account has no browser-local ActiveTurn, and the current turn isn't in
   // our persisted history yet. Replay the raw request BEFORE any CLI output.
   fanout("turn_user", JSON.stringify({
@@ -286,10 +309,10 @@ codexChat.post("/chat", async (c) => {
     let unsubscribeForeground: (() => void) | undefined;
     const mcpToken = randomUUID();
     let taskSessionId = threadId ?? clientTurnId ?? `codex-turn-${reqId}`;
-    const turnEvents: unknown[] = [];
     try {
       assertProviderAllowed(ownerId, "codex", permissionMode);
       const memory = await prepareProjectMemory(ownerId, cwd ?? process.cwd(), "codex", permissionMode);
+      entry.projectMemory = memory?.capability;
       registerMcpSessionContext({
         token: mcpToken,
         sessionId: taskSessionId,
@@ -313,10 +336,18 @@ codexChat.post("/chat", async (c) => {
         }
       });
 
-      // CLI-driven now (was @openai/codex-sdk, which spawned the very same
-      // `codex exec --experimental-json` — just a version-pinned bundled copy
-      // of it). See server/executors/codex-executor.ts.
-      const frames = codexExecutor.exec({
+      // Web-only app-server: groups/Feishu keep their existing exec driver.
+      const frames = codexAppServerExecutor.exec({
+        onSteerAccepted: id => {
+          const text = entry.steering.text(id);
+          if (text === undefined || acceptedSteers.has(id)) return;
+          acceptedSteers.add(id);
+          return { type: "steer_user", id: `u-steer-${id}`, provider: "codex", text };
+        },
+        onSteer: send => {
+          entry.steer = send;
+          fanout("steer_available", JSON.stringify({ type: "steer_available", available: !!send, provider: "codex", clientTurnId }));
+        },
         prompt: memory ? memory.wrap(prompt, CODEX_RUNTIME_PROMPT + memory.rules) : composePrompt(prompt),
         disableNativeMemory: !!memory,
         images: validImages(rawImages),
@@ -346,10 +377,12 @@ codexChat.post("/chat", async (c) => {
           ended = frame.result;
           break;
         }
-        if (entry.cancelRequested) break;
-        // `payload` is the CLI's own JSONL frame, verbatim — the same shape the
-        // SDK yielded, which is why everything below is unchanged.
+        // The executor owns interruption and drains frames already received;
+        // an acknowledged steer must not vanish when cancellation races it.
+        // app-server notifications are normalized to the legacy UI frame
+        // shape by the executor; the SSE/persistence path stays shared.
         const ev = frame.payload as any;
+        if (ev.type === "codex_retry") console.log(`[codex ${reqId}] model_retry ${ev.status} @${elapsed()}`);
         // Drop only known non-fatal CLI notices; retain genuine errors and
         // unknown config/security warnings (also filtered during UI replay).
         if (isCodexNonFatalNotice(ev)) continue;
@@ -401,6 +434,10 @@ codexChat.post("/chat", async (c) => {
         entry.errorMsg = message;
       }
     } finally {
+      entry.steer = null;
+      // A turn/steer ACK can race with turn/completed. Let accepted input
+      // publish before persistence and the terminal SSE frame.
+      await entry.steering.settled();
       // Persist BEFORE emitting the terminal event so any client that refetches
       // the session list on `done` (e.g. ProjectSidebar's refreshKey) sees the
       // newly-saved session. Also keeps `error` ordering consistent.
@@ -434,8 +471,38 @@ codexChat.post("/chat", async (c) => {
   );
 
   return streamSSEUnbuffered(c, async (stream) => {
-    await attachStreamToEntry(stream, entry);
+    await attachStreamToEntry(stream, entry, currentUser(c)?.id);
   });
+});
+
+codexChat.post("/chat/steer", async c => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!validSteerInput(body)) return c.json({ error: "invalid steer input" }, 400);
+  const entry = pickSteerTurn(body, id => activeCodexChats.get(id), id => activeCodexChatsByClientTurn.get(id));
+  const unavailable = (reason: string, retryable = false) => c.json({ error: "steer_unavailable", reason, retryable,
+    message: retryable ? "当前轮正在准备接收追加" : "当前轮不再接受追加，会按顺序发出" }, 409);
+  if (!entry || entry.status !== "running" || entry.cancelRequested) return unavailable("turn_ended");
+  if (entry.ownerId !== currentUser(c)?.id) return unavailable("different_actor");
+  try {
+    assertProviderAllowed(entry.ownerId, "codex", entry.permissionMode);
+    await assertCanOpen(entry.cwd, getAllowedPaths(entry.ownerId!));
+  } catch { return c.json({ error: "当前账号的 AI 或项目访问权限已改变" }, 403); }
+  if (!entry.steer) return unavailable("not_ready", true);
+  try {
+    const ok = await entry.steering.run(body.messageId, body.text, async () => {
+      let text = body.text;
+      if (entry.projectMemory) text = wrapMemoryPrompt(await memorySnapshot(entry.projectMemory.scope), text);
+      if (!entry.steer || entry.cancelRequested) return false;
+      if (!await entry.steer(text, body.messageId)) return false;
+      return true;
+    });
+    return ok ? c.json({ ok: true }) : unavailable("turn_ended");
+  } catch (error) {
+    if (error instanceof SteerConflict) return c.json({ error: error.message }, 400);
+    // Unknown outcome is not a 409: never send the same text again as a new
+    // turn when the native ACK may have been lost after acceptance.
+    return c.json({ error: "追加消息未能确认送达，请检查当前对话后重试" }, 503);
+  }
 });
 
 codexChat.post("/chat/cancel", async (c) => {
@@ -478,7 +545,7 @@ codexChat.get("/chat/attach", (c) => {
       await stream.writeSSE({ event: "no-inflight", data: "" });
       return;
     }
-    await attachStreamToEntry(stream, entry);
+    await attachStreamToEntry(stream, entry, currentUser(c)?.id);
   });
 });
 

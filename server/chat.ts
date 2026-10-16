@@ -19,6 +19,10 @@ import { relabelSessionFiles } from "./session-files.ts";
 import { prepareProjectMemory, MEMORY_TOOLS, type MemoryCapability } from "./project-memory/runtime.ts";
 import { memorySnapshot } from "./project-memory/prompt.ts";
 import { wrapMemoryPrompt } from "../shared/project-memory-envelope.ts";
+import { SteeringRequests, SteerConflict, pickSteerTurn, validSteerInput } from "./steering.ts";
+import type { SteerSend } from "./executors/types.ts";
+import { assertCanOpen } from "./auth/paths.ts";
+import { getAllowedPaths } from "./auth/users.ts";
 import { assertProviderAllowed } from "./auth/users.ts";
 import { claudeExecutor } from "./executors/claude-executor.ts";
 import { WEB_OUTPUT_RULES } from "./web-output-rules.ts";
@@ -181,7 +185,11 @@ interface InFlightChat {
   // 中途插话的句柄：executor 在 CLI 起来、stdin 可写之后塞进来，这一轮不再接受
   // 输入时置回 null（见 ExecOptions.onSteer）。POST /chat/steer 是唯一的消费者。
   projectMemory?: MemoryCapability;
-  steer?: ((text: string) => boolean) | null;
+  steer?: SteerSend | null;
+  ownerId?: string;
+  cwd?: string;
+  permissionMode?: PermissionMode;
+  steering?: SteeringRequests;
 }
 
 function permissionBehavior(
@@ -310,7 +318,8 @@ function scheduleWakeup(
 // has fully drained.
 async function attachStreamToEntry(
   stream: SSEStreamingApi,
-  entry: InFlightChat
+  entry: InFlightChat,
+  callerId: string | undefined
 ): Promise<void> {
   const subId = Math.random().toString(36).slice(2, 7);
   const tag = `[sub ${entry.reqId}/${subId}]`;
@@ -377,6 +386,13 @@ async function attachStreamToEntry(
         break;
       }
     }
+    // Connection-local capability: a shared viewer may read the stream but
+    // must not inherit the running actor's tools. Also lets the same account
+    // steer from a fresh tab without browser-local ActiveTurn state.
+    if (!closed) await stream.writeSSE({ event: "steer_target", data: JSON.stringify({
+      type: "steer_target", provider: "claude", clientTurnId: entry.clientTurnId,
+      canSteer: !!callerId && callerId === entry.ownerId && entry.status === "running",
+    }) });
     // Drain live queue until closed. Keep draining even after close as long
     // as there are queued items (done/error usually arrives right before
     // close and we want the client to see it).
@@ -449,16 +465,20 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
 
   const entry: InFlightChat = {
     reqId,
-    clientTurnId: opts.clientTurnId,
+    clientTurnId: opts.clientTurnId ?? randomUUID(),
     messages: [],
     subscribers: new Set(),
     status: "running",
     sessionId: opts.sessionId,
     cancelRequested: false,
     source: opts.source,
+    ownerId: opts.ownerId,
+    cwd: opts.cwd ?? process.cwd(),
+    permissionMode: opts.permissionMode,
+    steering: new SteeringRequests(),
   };
   if (opts.sessionId) activeChats.set(opts.sessionId, entry);
-  if (opts.clientTurnId) activeChatsByClientTurn.set(opts.clientTurnId, entry);
+  activeChatsByClientTurn.set(entry.clientTurnId!, entry);
 
   let currentSessionId = opts.sessionId;
   const allowance = getOrCreateAllowance(currentSessionId);
@@ -471,6 +491,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
     entry.messages.push(item);
     for (const sub of entry.subscribers) sub.write(event, data);
   };
+  const acceptedSteers = new Set<string>();
 
   // 这一轮**实际**用的 effort，给思考状态行那句「· xhigh effort」用。
   //
@@ -547,11 +568,19 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       entry.cancelIterator = async () => {
         abort.abort();
       };
+      if (entry.cancelRequested) abort.abort();
 
       const frames = claudeExecutor.exec({
+        onSteerAccepted: id => {
+          const text = entry.steering?.text(id);
+          if (text === undefined || acceptedSteers.has(id)) return;
+          acceptedSteers.add(id);
+          return { type: "steer_user", id: `u-steer-${id}`, provider: "claude", text };
+        },
         // 插话句柄。**只存不调**——写进去的那一下由 POST /chat/steer 触发。
         onSteer: (send) => {
           entry.steer = send;
+          fanout("steer_available", JSON.stringify({ type: "steer_available", available: !!send, provider: "claude", clientTurnId: entry.clientTurnId }));
         },
         prompt: memory ? memory.wrap(opts.prompt) : opts.prompt,
         disableNativeMemory: !!memory,
@@ -727,7 +756,8 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
           ended = frame.result;
           break;
         }
-        if (entry.cancelRequested) break;
+        // Drain already-received input acknowledgements when cancel races a
+        // stdin write. The executor/AbortSignal owns process interruption.
         // `payload` is the CLI's own stream-json frame — byte-for-byte what the
         // SDK used to yield, which is why everything below is unchanged.
         const msg = frame.payload;
@@ -857,6 +887,7 @@ function runChatTurn(opts: TurnOptions): InFlightChat {
       entry.errorMsg = message;
       fanout("error", JSON.stringify({ message }));
     } finally {
+      await entry.steering?.settled();
       // Drop the per-turn MCP context: the token stops authenticating, and the
       // HTTP routes' per-request servers have nothing left to resolve.
       if (mcpTokenToRelease) unregisterMcpSessionContext(mcpTokenToRelease);
@@ -1002,7 +1033,7 @@ chat.post("/chat", async (c) => {
   });
 
   return streamSSEUnbuffered(c, async (stream) => {
-    await attachStreamToEntry(stream, entry);
+    await attachStreamToEntry(stream, entry, currentUser(c)?.id);
   });
 });
 
@@ -1058,17 +1089,20 @@ chat.post("/chat/cancel", async (c) => {
 // `server/internal/service/steer.go`。
 //
 // ⚠️ **`clientTurnId` 是乐观锁。** 用户是冲着他**看见的那一轮**点的发送，等他点下去
-//    时那轮可能已经结束、下一轮已经开跑 —— 插进另一轮就是答非所问。所以 pickInFlight
-//    给的那条必须同时对得上 sessionId 和 clientTurnId（它本来就是这个语义）。
+//    时那轮可能已经结束、下一轮已经开跑 —— 插进另一轮就是答非所问。所以 pickSteerTurn
+//    必须同时对得上 sessionId 和 clientTurnId，不能回退到这个会话的新轮次。
 // ⚠️ **插不进去不是故障。** 三种情形（这一轮刚结束 / 还没起 CLI / 不走 stdin 协议）
 //    合流成同一个 409 `steer_unavailable`，前端对它只说「这一轮刚结束，它会按顺序
 //    发出」，那条留在排队里等下一轮。**措辞不许报成错。**
 // ⚠️ **不落任何库、不进 transcript。** 消息经 CLI 自己的 stdin 进去，CLI 会把它写进
 //    `~/.claude/projects/` 的 jsonl —— 那就是本仓唯一的真相。我们再记一份必然漂。
-//    界面上那条气泡由前端本地补（`applySDKMessage` 对 user 帧只认 tool_result）。
+//    界面气泡由 stdin 成功写入后排入同一事件队列的 steer_user 帧回放；不另写一份历史。
 
 chat.post("/chat/steer", async (c) => {
   const body = await c.req.json().catch(() => ({}));
+  // Older open tabs did not supply an idempotency key.
+  if (body && typeof body === "object" && body.messageId === undefined) body.messageId = randomUUID();
+  if (!validSteerInput(body)) return c.json({ error: "invalid steer input" }, 400);
   const sessionId: string | undefined =
     typeof body.sessionId === "string" ? body.sessionId : undefined;
   const clientTurnId: string | undefined =
@@ -1076,12 +1110,12 @@ chat.post("/chat/steer", async (c) => {
   const text = typeof body.text === "string" ? body.text : "";
   if (!text.trim()) return c.json({ error: "text required" }, 400);
 
-  const entry = pickInFlight(
+  const entry = pickSteerTurn(
     { sessionId, clientTurnId },
     (k) => activeChats.get(k),
     (k) => activeChatsByClientTurn.get(k)
   );
-  const unavailable = (why: string) => {
+  const unavailable = (why: string, retryable = false) => {
     // 线上只看得到一个 409 的话，永远不知道该往哪边查 —— 码合流、日志分开。
     console.log(
       `[chat] steer 未送达 session=${sessionId ?? "-"} turn=${clientTurnId ?? "-"} 原因=${why}`
@@ -1089,6 +1123,8 @@ chat.post("/chat/steer", async (c) => {
     return c.json(
       {
         error: "steer_unavailable",
+        reason: why,
+        retryable,
         message: "这一轮已经结束或不接受追加，稍后会按顺序发出",
       },
       409
@@ -1096,14 +1132,24 @@ chat.post("/chat/steer", async (c) => {
   };
   if (!entry) return unavailable("no_entry");
   if (entry.status !== "running") return unavailable(`already_${entry.status}`);
-  if (!entry.steer) return unavailable("no_handle");
-  if (entry.projectMemory && entry.projectMemory.scope.actorId !== currentUser(c)?.id) return unavailable("different_actor");
-  let steerText = text;
-  try { if (entry.projectMemory) steerText = wrapMemoryPrompt(await memorySnapshot(entry.projectMemory.scope), text); }
-  catch { return unavailable("memory_unavailable"); }
-  if (!entry.steer(steerText)) return unavailable("pipe_closed");
-  console.log(`[chat ${entry.reqId}] steer 已送达（${text.length} 字）`);
-  return c.json({ ok: true });
+  if (entry.cancelRequested) return unavailable("turn_ended");
+  if (entry.ownerId !== currentUser(c)?.id) return unavailable("different_actor");
+  try {
+    assertProviderAllowed(entry.ownerId, "claude", entry.permissionMode);
+    if (entry.cwd) await assertCanOpen(entry.cwd, getAllowedPaths(entry.ownerId!));
+  } catch { return c.json({ error: "当前账号的 AI 或项目访问权限已改变" }, 403); }
+  if (!entry.steer) return unavailable("no_handle", true);
+  try {
+    const ok = await entry.steering!.run(body.messageId, text, async () => {
+      const steerText = entry.projectMemory ? wrapMemoryPrompt(await memorySnapshot(entry.projectMemory.scope), text) : text;
+      if (!entry.steer || entry.cancelRequested || !await entry.steer(steerText, body.messageId)) return false;
+      return true;
+    });
+    return ok ? c.json({ ok: true }) : unavailable("pipe_closed");
+  } catch (error) {
+    if (error instanceof SteerConflict) return c.json({ error: error.message }, 400);
+    return c.json({ error: "追加消息未能确认送达，请检查当前对话后重试" }, 503);
+  }
 });
 
 // ============================================================
@@ -1184,7 +1230,7 @@ chat.get("/chat/attach", (c) => {
       await stream.writeSSE({ event: "no-inflight", data: "" });
       return;
     }
-    await attachStreamToEntry(stream, entry);
+    await attachStreamToEntry(stream, entry, currentUser(c)?.id);
   });
 });
 

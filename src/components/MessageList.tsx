@@ -4,25 +4,21 @@ import AssistantText from "./AssistantText";
 import StepTimeline, { type TimelineRow } from "./StepTimeline";
 import PermissionCard from "./PermissionCard";
 import SummaryCard from "./SummaryCard";
-import ThinkingBlock from "./ThinkingBlock";
 import PendingHint from "./PendingHint";
 import RetryHint from "./RetryHint";
+import CodexRetryHint from "./CodexRetryHint";
+import type { RetryInfo } from "../../shared/codex-retry";
 import TurnStatus from "./TurnStatus";
-import { liveThinkingIds, liveToolIds, showCodexActivity } from "../lib/turn-activity";
+import { currentTurnEvents, liveThinkingIds, liveToolIds, showCodexActivity } from "../lib/turn-activity";
 
-export type RetryInfo = {
-  attempt: number;
-  maxRetries: number;
-  retryDelayMs: number;
-  errorStatus: number | null;
-};
+export type { RetryInfo } from "../../shared/codex-retry";
 
 type Block =
   | { kind: "timeline"; id: string; rows: TimelineRow[] }
   | {
       kind: "single";
       id: string;
-      event: Exclude<ChatEvent, { type: "step" }>;
+      event: Exclude<ChatEvent, { type: "step" | "thinking" }>;
     };
 
 // An event that renders nothing must never reach `blocks`: as its own block it
@@ -33,14 +29,6 @@ function rendersNothing(ev: ChatEvent, activeThinking?: Set<string>): boolean {
   if (ev.type === "assistant") return !ev.text.trim();
   if (ev.type === "thinking") return !ev.text.trim() && !(ev.tokens ?? 0) && !activeThinking?.has(ev.id);
   return false;
-}
-
-// Thinking with no prose is a status row inside the timeline; thinking WITH
-// prose (sonnet-4-6 and older still return it) stays an expandable block.
-function isThinkingStatus(
-  ev: ChatEvent
-): ev is Extract<ChatEvent, { type: "thinking" }> {
-  return ev.type === "thinking" && !ev.text.trim();
 }
 
 interface Props {
@@ -64,6 +52,8 @@ interface Props {
   // the CLI does ("thinking with max effort").
   effort?: string;
   provider?: "claude" | "codex";
+  /** Current webpage project; omitted by the separate group-chat renderer. */
+  cwd?: string;
   isRunning?: boolean;
   turnStartedAt?: number;
 }
@@ -79,18 +69,21 @@ export default function MessageList({
   compact,
   effort,
   provider,
+  cwd,
   isRunning,
   turnStartedAt,
 }: Props) {
   const codex = provider === "codex";
-  const activeThinking = codex ? liveThinkingIds(events, !!isRunning && !retryInfo) : undefined;
+  const retainedThinking = codex ? liveThinkingIds(events, !!isRunning) : undefined;
+  const activeThinking = codex && retryInfo ? new Set<string>() : retainedThinking;
   const blocks: Block[] = [];
   // Step ids that still have an unresolved permission card: those steps are
   // "awaiting approval", not actually executing yet.
   const awaitingPermission = new Set<string>();
   for (const ev of events) {
-    if (rendersNothing(ev, activeThinking)) continue;
-    if (ev.type === "step" || isThinkingStatus(ev)) {
+    // Pause the status while retrying, but keep pending thinking mounted.
+    if (rendersNothing(ev, retainedThinking)) continue;
+    if (ev.type === "step" || ev.type === "thinking") {
       const last = blocks[blocks.length - 1];
       if (last && last.kind === "timeline") last.rows.push(ev);
       else blocks.push({ kind: "timeline", id: `g-${ev.id}`, rows: [ev] });
@@ -98,6 +91,7 @@ export default function MessageList({
       if (
         ev.type === "permission" &&
         ev.resolved === undefined &&
+        !ev.stale &&
         ev.toolUseId
       ) {
         awaitingPermission.add(`s-${ev.toolUseId}`);
@@ -106,7 +100,14 @@ export default function MessageList({
     }
   }
 
-  const activeTools = codex ? liveToolIds(events, !!isRunning) : undefined;
+  const executingIds = liveToolIds(events, !!isRunning && (!retryInfo || codex));
+  const activeTools = codex ? executingIds : undefined;
+  const turn = currentTurnEvents(events);
+  const latest = turn.at(-1);
+  const thinkingCandidateId = !codex && isRunning && !retryInfo && latest?.type === "thinking" ? latest.id : undefined;
+  const activePermissionIds = new Set<string>(isRunning && !retryInfo ? turn.flatMap(ev =>
+    ev.type === "permission" && ev.resolved === undefined && !ev.stale && ev.toolUseId ? [`s-${ev.toolUseId}`] : []
+  ) : []);
   if (codex && !retryInfo && showCodexActivity(events, !!isRunning)) {
     const row: TimelineRow = { id: "live-codex-activity", type: "activity" };
     const last = blocks[blocks.length - 1];
@@ -129,6 +130,9 @@ export default function MessageList({
               effort={effort}
               liveToolIds={activeTools}
               liveThinkingIds={activeThinking}
+              executingIds={executingIds}
+              thinkingCandidateId={thinkingCandidateId}
+              activePermissionIds={activePermissionIds}
             />
           );
         }
@@ -145,17 +149,7 @@ export default function MessageList({
               />
             );
           case "assistant":
-            return <AssistantText key={ev.id} text={ev.text} delay={0} />;
-          case "thinking":
-            return (
-              <ThinkingBlock
-                key={ev.id}
-                text={ev.text}
-                expanded={expandedSteps.has(ev.id)}
-                live={activeThinking === undefined ? undefined : activeThinking.has(ev.id)}
-                onToggle={() => onToggleStep(ev.id)}
-              />
-            );
+            return <AssistantText key={ev.id} text={ev.text} delay={0} fileCwd={codex ? cwd : undefined} />;
           case "permission":
             return (
               <PermissionCard
@@ -186,7 +180,9 @@ export default function MessageList({
             );
         }
       })}
-      {retryInfo ? (
+      {retryInfo?.kind === "codex" ? (
+        <CodexRetryHint info={retryInfo} />
+      ) : retryInfo ? (
         <RetryHint
           attempt={retryInfo.attempt}
           maxRetries={retryInfo.maxRetries}

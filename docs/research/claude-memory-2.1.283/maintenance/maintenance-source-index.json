@@ -1,0 +1,44 @@
+{
+  "version": "2.1.283",
+  "binary_sha256": "d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e",
+  "source": "Existing local Bun extraction dated 2026-10-03; files parsed, never executed",
+  "file_hash_encoding": "SHA-256 of extracted module file UTF-8 bytes",
+  "modules": [
+    {
+      "file": "0684-chunk-rx5pzg1g.js.txt",
+      "utf8_sha256": "14f6c16b03548b5d467d8a204956892509e25cf1677e2af36c590eb3fea8e5bf"
+    },
+    {
+      "file": "0573-chunk-td7fxg34.js.txt",
+      "utf8_sha256": "4c49f80a475c1521c1f8e15956813b21453fc7ac03580ea7b779402cd48c9b1e"
+    },
+    {
+      "file": "0563-chunk-525qs7wc.js.txt",
+      "utf8_sha256": "7fb130d80784bf30d21d2691ae815c95ce2f2ac7b686c8f4b753fbf2ba9de810"
+    },
+    {
+      "file": "0564-chunk-0wcm1gj1.js.txt",
+      "utf8_sha256": "1bebcf781546bdb248d736fc6c7114d7bd5f9ba8a81eb214377de6adcaebfc7b"
+    },
+    {
+      "file": "0536-chunk-9hyxppty.js.txt",
+      "utf8_sha256": "d21d9729c0afece26087adb76b7f0a6848d912ba349414fefc91c821f40b3915"
+    },
+    {
+      "file": "0365-chunk-wyjbafrm.js.txt",
+      "utf8_sha256": "d768dbd60e9a07343bfb239ca0dbd56ce06b575e0ee046112bf8b51b5f5ede4b"
+    },
+    {
+      "file": "0131-chunk-1vt3h958.js.txt",
+      "utf8_sha256": "ade90e81091c34d7177008d4f54a584b5f7b57cf438a861c424d0ebcb25ea00a"
+    },
+    {
+      "file": "0255-chunk-hzevqd7x.js.txt",
+      "utf8_sha256": "a3e9d9bbe60a885672e879c8562c54885f26598ec100cdd5a8d72d1678a6a059"
+    },
+    {
+      "file": "1284-chunk-r4xrzyvn.js.txt",
+      "utf8_sha256": "86ac2e24ca71815caf67af250b38a4d7583d5a9159497b20f16627d6198f15d8"
+    }
+  ]
+}

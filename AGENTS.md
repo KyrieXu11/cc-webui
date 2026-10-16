@@ -132,6 +132,11 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   `server/fs.ts`；不要为了提速无限并发 readdir/stat，那些挂起的系统调用取消不了。
 - **项目最近对话先取 15 条，向下滚动再增量拉到最多 200 条**：`ProjectSidebar` 用 `compact=1`
   只收 256 字首问摘录；点选对话不重拉/闪空整个列表，换 cwd/provider 会取消旧请求。
+  默认只展示最近 5 条（已加载的当前对话额外保留），「展开更多 / 收起」偏好存
+  `ccwebui.sessions_expanded`；折叠时禁止触发隐藏分页，展开仍复用原来的 15 → 200 窗口。
+  列表可见时每 10 秒同步，focus / 切回标签立即同步，新 native id 分配后也会补拉。
+  `project-sessions.ts` 合流重叠请求、取消旧作用域，后台更新/失败保留行和滚动位置；
+  删除成功先中止旧读取，防止迟到响应复活已删行。流动选中层按实际可见行重测。
   搜索仍取完整窗口/首问，不能复用截断后的结果。`session-summary-cache.ts` 只缓存原始 metadata，
   按 inode/size/mtime/ctime 失效，最多 1024 条 / 32MiB；授权/共享每次重查。**可见性先于 limit**，
   不然全机新对话会把成员的旧对话挤出她自己的页面。Codex 逐行读取、每次扫描并发最多 4 个文件，不整库 readFile。
@@ -146,6 +151,12 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   `dragging` 里，`canDropInto` 读它。⚠️ 文件夹行的 `onDragOver` 里 `stopPropagation`
   和 `setRootOver(false)` **缺一不可**：只 stop 会让外层那个「放到根目录」的落点熄不掉
   （指针移进子元素不算 dragleave），两处一起亮。
+  2026-10-09 整文件夹行也可拖动；自身/后代/原父目录落点拒绝，无效目录落点不能冒到根目录。
+  多选父子项移动时去重（移动父目录已包含子项），软链/规范化与白名单仍由现有移动 API 判定。
+  刷新不得 `key={seq}` 重挂或清空旧列表：`useDirectoryEntries` 通过 revision 后台更新已展开目录，
+  最多 4 请求；收起目录下次展开才重读。网络错误保留旧列表并提示，401/403/404 清掉失效数据，
+  切 cwd/关闭/旧轮请求取消且忽略迟到响应。展开偏好按路径保存；移动后新路径及子树继承，
+  目标目录展开，上传落点跟着迁移；上传/新建/移动也走同一个无感刷新，不重置文档编辑器。
 - `UserBubble.tsx` — 非图片附件是以「附件：- 路径  (名字)」写进正文发给 agent 的（它要靠路径去读），
   气泡里由 `lib/attachments.ts` 认出那段、渲染成文件名卡片（悬停看路径）；服务端的标题兜底
   （`claude-sessions.ts` 的 `summarize`）用同一个函数剥掉它。⚠️ 改 Composer 那边的格式要三处一起改。
@@ -189,6 +200,11 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 - Codex `ApplyPatch` 的 `input.changes` 在 `StepTimeline` 接 `ApplyPatchDiff` / `patch-diff.ts`：
   文件/双行号/红绿差异/+− 统计。缺 diff 要明说，不读今日文件冒充历史修改；失败差异
   不代表已应用。Claude Edit/Write/NotebookEdit 保持 `EditDiff`；thinking 展示独立不动。
+- thinking 与工具统一为可折叠时间线，**工具 → 输出 → thinking → 工具的事件顺序不能重排**；
+  正文/审批卡仍独立留在原位置。折叠摘要只显示本段当前阶段，展开后 thinking 在原位置，
+  不把历史思考集中放顶上。`TimelineStatusSlot` 复用原思考组件的单一时钟/动态词，不另造
+  Codex reasoning 时长；思考与未完成工具保持挂载并 hidden，历史工具不挂载。组 key 取
+  首事件 ID，流式追加不重置展开状态；Ctrl+O 同时展开组和思考/工具详情。过期审批不标为活动阶段。
 - `components/files/TextEditor.tsx` — CodeMirror 包装。语言在 `LANG` 那张表里
   （**加语言就加表，别堆 if**：上一版三个 if + `return null`，打开 .py 完全没高亮）。
   语法配色在 `files/highlight.ts`，颜色是 `var(--syn-*)` CSS 变量（index.css 里明暗
@@ -198,23 +214,37 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 ## 三个子系统
 
 ### 1 & 2. 单聊 Claude / Codex
-- **中途插话（`POST /api/chat/steer`）**：把一条消息塞进**正在跑的**那一轮，不等它结束。
+- **中途插话（Claude `POST /api/chat/steer` / Codex `POST /api/codex/chat/steer`）**：把文字塞进**正在跑的**那一轮，不等它结束。
   底下不是自造的插队机制——跑的就是 claude 命令行、**它自己带排队**，起进程时就带了
   `--input-format stream-json`（权限确认那一路早在用），往那根已经开着的 stdin 多写一行就行
   （句柄由 `ExecOptions.onSteer` 在 CLI 起来后交出、关管子时收回）。这条路和它的教训抄自
   律枢 `server/internal/service/steer.go`。⚠️ `clientTurnId` 是**乐观锁**（插进另一轮＝答非所问）；
   ⚠️ 三种「插不进去」合流成同一个 409 `steer_unavailable`，**日志里分开记**，且对用户
-  **不许报成错**（那条留在排队里等下一轮）；⚠️ **Codex 没有这条路**（`codex exec` 的 stdin
-  不是控制协议）。`server/executors/claude-steer.test.ts` 起一个假 CLI 钉住「那一行真的写进去了」
+  **不许报成错**（那条留在排队里等下一轮）；⚠️ Codex **网页单聊**改用本地 stdio
+  app-server 的 `turn/steer` + native `expectedTurnId`，必须等 ACK；群聊/飞书仍用 exec，不能插话。
+  `server/steering.ts` 强制 session/turn 同时匹配、messageId 幂等、同一运行 actor 才能追加；
+  连接级 `steer_target` 让同账号新标签页可插话，共享阅读者不可继承运行者的工具能力。
+  启动未就绪等待 readiness 再试，轮次结束才回退下一轮；送达未知不能自动重发。
+  `server/executors/claude-steer.test.ts` 起一个假 CLI 钉住「那一行真的写进去了」
   和「结束时句柄被收回」——别删，现有 executor 测试全是纯函数，覆盖不到进程那一侧。
 - Claude：`chat.ts` → `executors/claude-executor.ts`（spawn `claude -p --output-format stream-json`），
   用 **native session resume**（`--resume <id>`）续会话；`bash` MCP 替换被 `disallowedTools` 禁掉的
   内置 `Bash/BashOutput/KillBash`。它走 HTTP `/api/mcp`（回环一跳，注册表还是同一个进程里的同一批对象）。
-- Codex：`codex-chat.ts` → `executors/codex-executor.ts`（spawn `codex exec --experimental-json`），
+- Codex 网页单聊：`codex-chat.ts` → `executors/codex-app-server.ts`（每轮 spawn
+  `codex app-server --listen stdio://`，不是公共/共享服务）；`codex-app-events.ts` 把 native
+  delta/item 通知映射到既有 UI 帧，native turn/item id 不随中途用户气泡改变。
+  会话引擎的 `groups/codex-runner.ts` 仍用 `executors/codex-executor.ts`（`codex exec`）。
   同样走 **HTTP** `/api/mcp` 的 bash MCP（`mcp-bash-route.ts`）——MCP server 以 `-c mcp_servers.*`
   覆盖的形式进 argv，**bearer token 只走环境变量**（argv 是 `ps` 可见的）。
   ⚠️ Codex 默认挂 `bash`，启用项目记忆时另挂 `memory`：**没有** Claude 那条 `schedule`（所以 Codex 单聊没有 wakeup），
   更没有桌面客户端的 `local-*`（决策 19）。
+- **Codex Auto-review（0.162.0，2026-10-09）**：仅 Auto 模式成对设置
+  `approval_policy="on-request"` + `approvals_reviewer="auto_review"`，由 CLI 内部审查
+  Playwright 等原生 MCP 的可审查请求，不弹用户卡、不全局 approve；拒绝/审查失败不放行。
+  其他模式仍 never，Plan 仍 read-only；不要用 `--approve-for-me` 预设覆盖沙箱，也不能
+  单独开 on-request。不更改 bash/memory 自定义网关、账号授权、非 Fast 或 Claude。
+  真实 CLI 本地合成允许/拒绝/失败验证用 `scripts/verify-codex-auto-review.py`；
+  自动审查不是所有操作的通用防护，管理策略/工具要求和既有网关边界仍须遵守。
 - 权限：`permissionMode: default` 时每个工具弹卡；`本次会话都允许` 缓存进 `permission-flow` 的
   allowance Set（scope = sessionId）；10 分钟无响应自动 deny。
 
@@ -313,6 +343,11 @@ claude CLI（你 Mac 上的子进程）
 - **Bash MCP 只剩 HTTP 一套**：`mcp-bash-route.ts`（bearer-token），Claude / Codex / 飞书都走它。
   `bash-mcp.ts` 现在只提供任务注册表和 `runBashTool`，不再自己起 MCP server——CLI 迁移前那套
   「进程内 vs HTTP 两套」的说法已经作废（旧文档里还能看到）。
+- **Codex 禁止 Fast（2026-10-09）**：executor 每次 spawn（含 resume）固定
+  `service_tier="default"` + `features.fast_mode=false`，不继承全局 fast/priority，
+  不降 effort、不写全局 config、不改 Claude。CLI 0.161.0 的普通模式会省略 HTTP
+  service_tier，不能宣称抓到了字面 default；当前线上为 ChatGPT 登录，改 API key 时
+  须额外核对 API 项目默认档位。配置/线路实测和安全重启边界见 `docs/cli-migration.md`。
 - **PPT/PDF 插件仅在 cc-webui 的 Codex 子进程禁用**（2026-10-08 用户确认）：
   `server/codex-plugin-policy.ts` 的两个 `plugins.…@openai-primary-runtime.enabled=false`
   由 executor 加到每次 spawn 的 `--config`，包括 resume；网页与会话引擎还每轮说明旧 skill
@@ -534,12 +569,10 @@ claude CLI（你 Mac 上的子进程）
   历史上已错配的 thread（如 Jul 4 默认模型 `gpt-5.3-codex`→`gpt-5.5` 批量改 config 但没清 runtime.json
   的那批）：`server/codex-events.ts` 的 `isCodexModelMismatchNotice` 会在 codex-runner / codex-chat 里把这条
   advisory 静音（turn 仍按新 model 正常跑，advisory 纯装饰）。
-- **[设计] Codex 从不弹权限卡**（群聊和网页单聊都是）：`codex-executor.mapSandbox` 把 mode 只翻译成
-  sandbox，`approval_policy` 恒为 `"never"`。**这不是偷懒，是 `codex exec` 压根没有审批通道**——
-  `-a/--ask-for-approval` 只长在交互式 TUI 上，`--experimental-json` 的事件集里也没有任何审批请求
-  （thread.started / turn.* / item.* / error，没别的）。传 `"on-request"` 只会让 turn 挂住或工具被
-  直接拒掉，没有任何一侧能回答它。所以 旧 UI 上 `default` 写着「每次弹权限」对 Codex 是**假的**（现已按 provider 提示），
-  这是 UI/文案问题，不是驱动层能修的。要真做审批得换 `codex app-server`（另一套协议，未评估）。
+- **[设计] Codex 不弹用户权限卡**（群聊和网页单聊都是）：Auto 从 0.162.0 起成对配置
+  on-request + auto_review，由 CLI 内部审查；其他模式仍 never，Plan 保持只读。
+  网页虽已改用 app-server，但不在本次插话功能里引入手动审批；若收到意外的宿主审批，
+  executor 明确拒绝，未知 server request 回 -32601，不能兜底放行。
 
 **飞书**
 - **[安全·中，原为高] agent 能把文件发到任意飞书 chat，且无审批**：`mcp__lark__send_file/send_image`
@@ -630,9 +663,14 @@ claude CLI（你 Mac 上的子进程）
 
 ### Codex 运行反馈与模型目录（2026-09-29）
 
-- `codex exec` 无 reasoning/text delta，工具有 `item.started/updated/completed`。**思考动效是用户设计，不能一刀切删掉**：有显式 pending reasoning item（即使无正文）时保留 `Decoding` 等动态文案；工具执行时只转工具 spinner；没有明确 reasoning 信号时显示回合 activity，**也保留动态换字，不改成固定「处理中」**（2026-10-07 用户确认）。activity 时间明确写「回合已用」，包括模型等待和工具执行，**不得放进 reasoning 行当作思考时长**；没有可靠的独立思考时间就不显示。后续工具/回答 started 要结束旧 reasoning 动画，不能等工具结束又把它复活；done/cancel/no-inflight/历史不转圈。
+- 引擎 `codex exec` 无 reasoning/text delta；网页 app-server 有公开 reasoning summary/text/output delta（**不读 raw reasoning**），SSE buffer 存 delta 而不是不断增长的全文。**思考动效是用户设计，不能一刀切删掉**：有显式 pending reasoning item（即使无正文）时保留 `Decoding` 等动态文案；工具执行时只转工具 spinner；没有明确 reasoning 信号时显示回合 activity，**也保留动态换字，不改成固定「处理中」**（2026-10-07 用户确认）。activity 时间明确写「回合已用」，包括模型等待和工具执行，**不得放进 reasoning 行当作思考时长**；没有可靠的独立思考时间就不显示。后续工具/回答 started 要结束旧 reasoning 动画，不能等工具结束又把它复活；done/cancel/no-inflight/历史不转圈。
 - CodeX 单聊 buffer 第一帧 `turn_meta {effort,startedAt,provider}`；attach 重放同一帧。未确认 attach 真在运行前不显示历史活动动画。
 - 第二帧 `turn_user` 回放本轮原始提问和图片（不含 memory envelope）。**不能靠浏览器的 ActiveTurn 补用户气泡**：管理员看别人的活跃会话时根本没有它。attach 先替换当前轮历史后缀，再回放 buffer；`item_N` 每次 exec 从头编号，UI id 必须按 user/turn 分 scope，否则后轮覆盖前轮。`codex-attach.test.ts` / `codex-turn.test.ts` 钉住这两条。
 - Codex 0.157.1 的 native rollout 已换成 `event_msg/item_completed`，item 是 `UserMessage` / `AgentMessage` / `CommandExecution` 等 PascalCase；旧 `user_message` / `agent_message` 解析器会丢掉提问。`session-store.ts` 同时支持新旧格式，只读公开消息/工具字段，**不读 Reasoning.raw_content**；memory envelope 必须在压缩换行**之前**剥离。
 - MCP `result.isError` 也必须映射 error，不可因为 transport completed 就画绿勾；web search/file change 的 started 帧亦需 pending。
+- Codex 原生 `error.willRetry=true` 经 `codex-retry.ts` 变成 `codex_retry` 控制帧：显示原生
+  message/additionalDetails/可用 HTTP 状态，不自造次数、重试上限或倒计时。只有同 native
+  turn 的新模型 item/公开摘要/正文 delta 才清重试；旧 item 完成、user echo、工具 stdout
+  不算恢复。终止/取消也清。attach 回放同一状态，历史不渲染为助理气泡；Claude RetryHint
+  保持原样，暂停的 Codex pending thinking 留挂载，模型/effort/Fast 配置不变。
 - `CC_WEBUI_CODEX_MODELS_CACHE` 可覆盖默认 `$CODEX_HOME/models_cache.json`（缺省 `~/.codex`）。只下发 visibility=list 的公开模型信息；不下发 identity/账号/token/文件路径。

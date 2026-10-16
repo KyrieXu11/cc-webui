@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import { SteeringRequests, SteerConflict, pickSteerTurn, validSteerInput } from "./steering.ts";
+const writes = new SteeringRequests();
+let count = 0;
+const first = writes.run("q", "same", async () => { count++; return true; });
+assert.equal(writes.run("q", "same", async () => false), first);
+await writes.settled(); assert.equal(count, 1);
+assert.throws(() => writes.run("q", "different", async () => true), SteerConflict);
+assert.equal(await writes.run("ready", "input", async () => false), false);
+assert.equal(await writes.run("ready", "input", async () => true), true);
+const a = { clientTurnId: "a", threadId: "s" }, b = { clientTurnId: "b", threadId: "other" };
+assert.equal(pickSteerTurn({ sessionId: "s", clientTurnId: "a" }, () => a, () => a), a);
+assert.equal(pickSteerTurn({ sessionId: "s", clientTurnId: "b" }, () => a, () => b), undefined);
+assert.equal(pickSteerTurn({ sessionId: "s" }, () => a, () => a), undefined);
+assert.equal(validSteerInput({ text: "hello", messageId: "q-1", clientTurnId: "t" }), true);
+assert.equal(validSteerInput({ text: "hello", messageId: "../escape", clientTurnId: "t" }), false);
+assert.equal(validSteerInput({ text: " ", messageId: "q", clientTurnId: "t" }), false);
+console.log("steering.test.ts: all assertions passed");

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { pickThinkingWord } from "../lib/thinking-words";
+import { inTimelineSlot, useTimelineActivity, type TimelineStatusProps } from "./TimelineStatusSlot";
 
-interface Props {
+interface Props extends TimelineStatusProps {
   text: string;
   expanded: boolean;
   onToggle: () => void;
@@ -15,10 +16,16 @@ export default function ThinkingBlock({
   onToggle,
   delay = 0,
   live,
+  statusSlot,
+  statusMetaSlot,
+  activityId,
+  onActivityChange,
+  onStatusClick,
 }: Props) {
   const [label, setLabel] = useState(() => pickThinkingWord());
   const [textActive, setActive] = useState(true);
   const active = live ?? textActive;
+  useTimelineActivity(active, activityId, onActivityChange);
   const prevTextRef = useRef(text);
 
   // Mark active whenever the content changes; flip to inactive after a quiet gap.
@@ -41,6 +48,14 @@ export default function ThinkingBlock({
 
   const preview =
     text.length > 80 ? text.slice(0, 80).replace(/\s+/g, " ") + "…" : text;
+
+  if (statusSlot) return <>
+    {inTimelineSlot(<span className="timeline-status-word">
+      <Sparkle active={active} />
+      <span>{active ? `${label}…` : "thought"}</span>
+    </span>, statusSlot, onStatusClick)}
+    {statusMetaSlot && inTimelineSlot(<span className="timeline-status-meta">{text.length} 字</span>, statusMetaSlot, onStatusClick)}
+  </>;
 
   return (
     <div className="msg-enter" style={{ animationDelay: `${delay}ms` }}>

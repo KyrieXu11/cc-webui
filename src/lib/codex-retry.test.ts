@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { applyCodexRetryFrame, isCodexRetryFrame, type RetryInfo } from "../../shared/codex-retry.ts";
+import { applySDKMessage } from "./processor.ts";
+const f = { type: "codex_retry" as const, turn_id: "native", status: "retrying" as const, message: "Reconnecting... 1/5", details: "stream closed", httpStatusCode: 503 };
+assert(isCodexRetryFrame(f)); assert(!isCodexRetryFrame({ ...f, status: "unknown" }));
+assert(!isCodexRetryFrame({ ...f, turn_id: "" }));
+let info: RetryInfo | null = applyCodexRetryFrame(null, f);
+assert.equal(info?.kind, "codex"); assert(!("attempt" in info!), "no fake counter or delay is added");
+assert.equal(applyCodexRetryFrame(info, { ...f, turn_id: "other", status: "resumed" }), info);
+assert.equal(applyCodexRetryFrame(info, { ...f, status: "resumed" }), null);
+assert.equal(applyCodexRetryFrame(info, { ...f, status: "ended" }), null);
+const claude = { attempt: 2, maxRetries: 5, retryDelayMs: 3000, errorStatus: 429 };
+assert.equal(applyCodexRetryFrame(claude, { ...f, status: "ended" }), claude);
+assert.deepEqual(applySDKMessage([], f, () => {}), [], "retry state is not persisted assistant prose/history animation");
+assert.deepEqual(applyCodexRetryFrame(null, { ...f, httpStatusCode: 0 }), { kind: "codex", turnId: "native", message: f.message, details: f.details });
+console.log("Native retry UI state: scoped, replayable, no counters, no chat bubbles");

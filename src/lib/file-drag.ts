@@ -18,6 +18,29 @@ export type DraggedFile = {
   rel: string;
 };
 
+/** UX 护栏；软链/规范化路径/授权仍由移动接口判定。允许向更高的祖先目录移动。 */
+export function canMoveInto(path: string, dir: string): boolean {
+  const source = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const target = dir.length > 1 ? dir.replace(/\/+$/, "") : dir;
+  if (!source.startsWith("/") || !target.startsWith("/") || source === "/") return false;
+  const slash = source.lastIndexOf("/");
+  const parent = slash <= 0 ? "/" : source.slice(0, slash);
+  return parent !== target && source !== target && !target.startsWith(source + "/");
+}
+
+export function movableDraggedFiles(files: DraggedFile[], dir: string): DraggedFile[] {
+  const eligible = files.filter(file => canMoveInto(file.path, dir));
+  const paths = new Set(eligible.map(file => file.path));
+  return eligible.filter((file, index) => eligible.findIndex(other => other.path === file.path) === index &&
+    ![...paths].some(parent => parent !== file.path && file.path.startsWith(parent + "/"))
+  );
+}
+
+export function relocatedDraggedPath(path: string, moves: { from: string; to: string }[]): string {
+  const move = moves.find(move => path === move.from || path.startsWith(move.from + "/"));
+  return move ? move.to + path.slice(move.from.length) : path;
+}
+
 export function hasDraggedFiles(dt: DataTransfer | null): boolean {
   if (!dt) return false;
   // types 是 DOMStringList/只读数组，Safari 下没有 includes。

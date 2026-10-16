@@ -21,17 +21,21 @@ const fake = path.join(tmp, "codex.cjs");
 await fs.writeFile(fake, `#!/usr/bin/env node
 const fs = require('node:fs');
 const out = o => process.stdout.write(JSON.stringify(o)+'\\n');
-process.stdin.resume();
-process.stdin.on('end', () => {
-  out({type:'thread.started',thread_id:${JSON.stringify(sessionId)}});
-  out({type:'turn.started'});
-  out({type:'item.started',item:{id:'item_2',type:'command_execution',command:'echo ok',status:'in_progress'}});
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+  const r=JSON.parse(line), notify=(method,params)=>out({method,params:{threadId:${JSON.stringify(sessionId)},...params}});
+  if(r.method==='initialize')return out({id:r.id,result:{}});
+  if(r.method==='thread/start')return out({id:r.id,result:{thread:{id:${JSON.stringify(sessionId)}}}});
+  if(r.method!=='turn/start')return;
+  out({id:r.id,result:{turn:{id:'native-turn',status:'inProgress'}}});
+  notify('turn/started',{turn:{id:'native-turn',status:'inProgress'}});
+  notify('item/started',{turnId:'native-turn',item:{id:'item_2',type:'commandExecution',command:'echo ok',status:'inProgress'}});
+  notify('error',{turnId:'native-turn',willRetry:true,error:{message:'Reconnecting... 1/5',additionalDetails:'Synthetic native stream disconnected'}});
   const timer = setInterval(() => {
     if (!fs.existsSync(${JSON.stringify(release)})) return;
     clearInterval(timer);
-    out({type:'item.completed',item:{id:'item_2',type:'command_execution',command:'echo ok',status:'completed',aggregated_output:'ok'}});
-    out({type:'item.completed',item:{id:'item_3',type:'agent_message',text:'finished'}});
-    out({type:'turn.completed'});
+    notify('item/completed',{turnId:'native-turn',item:{id:'item_2',type:'commandExecution',command:'echo ok',status:'completed',aggregatedOutput:'ok'}});
+    notify('item/completed',{turnId:'native-turn',item:{id:'item_3',type:'agentMessage',text:'finished'}});
+    notify('turn/completed',{turn:{id:'native-turn',status:'completed'}});
   }, 20);
 });
 `);
@@ -44,6 +48,8 @@ const { getCodexSessionTurns } = await import("./session-store.ts");
 const { closeDb } = await import("./db.ts");
 const { applySDKMessage, sessionMessagesToEvents } = await import("../src/lib/processor.ts");
 const { showCodexActivity, liveToolIds } = await import("../src/lib/turn-activity.ts");
+const { isCodexRetryFrame, applyCodexRetryFrame } = await import("../shared/codex-retry.ts");
+import type { RetryInfo } from "../shared/codex-retry.ts";
 import type { ChatEvent } from "../src/lib/types.ts";
 
 try {
@@ -63,7 +69,7 @@ try {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let prefix = "";
-  while (!prefix.includes('"item.started"')) {
+  while (!prefix.includes('"codex_retry"')) {
     const chunk = await reader.read();
     assert.equal(chunk.done, false);
     prefix += decoder.decode(chunk.value);
@@ -77,6 +83,7 @@ try {
   assert.equal(frames[1].data.prompt, prompt);
   assert.equal(frames[1].data.startedAt, frames[0].data.startedAt);
   assert.deepEqual(frames[1].data.images, [image]);
+  assert.equal(frames.find(f => f.data.type === "codex_retry")?.data.message, "Reconnecting... 1/5");
 
   // An authorized viewer has no sender-local ActiveTurn. Only SSE replay can
   // recover the current question while the completed-turn store is empty.
@@ -90,10 +97,18 @@ try {
   const text = await replay;
   assert.match(text, /event: done/);
   let events: ChatEvent[] = [];
+  let retryInfo: RetryInfo | null = null;
+  const retryStates: string[] = [];
   for (const block of text.split("\n\n")) {
     const data = block.split("\n").find(l => l.startsWith("data: "))?.slice(6);
-    if (data) events = applySDKMessage(events, JSON.parse(data), () => {});
+    if (data) {
+      const frame = JSON.parse(data);
+      if (isCodexRetryFrame(frame)) { retryInfo = applyCodexRetryFrame(retryInfo, frame); retryStates.push(frame.status); }
+      events = applySDKMessage(events, frame, () => {});
+    }
   }
+  assert.deepEqual(retryStates, ["retrying", "resumed"], "reattach replays the native retry and recovery in order");
+  assert.equal(retryInfo, null, "recovery does not leave a stale active banner");
   assert.deepEqual(events.filter(e => e.type === "user").map(e => e.text), [prompt]);
   assert.deepEqual(events.filter(e => e.type === "user").map(e => e.images), [[image]], "another authorized tab recovers the image from SSE replay");
   assert.deepEqual(events.filter(e => e.type === "assistant").map(e => e.text), ["finished"]);

@@ -11,3 +11,5 @@
 完整模块、完整请求和诊断日志在私有 `~/.cc-webui/research/claude-memory/2.1.283-2026-10-03/`。仓库不保存整个程序源码或其它系统提示，也不保存真实账号、凭据或生产记忆。
 
 触发条件与产品差异见 [Claude Code 记忆 Prompt 对照](../../claude-memory-prompts.md)。
+
+2026-10-10 补充 `maintenance/`：普通文件分支的后台提取、Auto Dream 实际维护 user prompt，以及 24 用例校验摘要。正向维护分支在隔离缓存中启用；Dream 另使用合成 desktop 入口，不代表本机 rollout 或 cc-webui 已启用。完整机制见 [后台记忆研究](../../claude-memory-maintenance.md)，这些材料同样不参与运行时装配。

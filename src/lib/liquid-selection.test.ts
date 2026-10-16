@@ -24,9 +24,9 @@ assert(image.includes('<LiquidSelection container={modeRail} activeKey={modeKey}
 assert.match(sidebar, /key=\{scope\} ref=\{selectionRail\} className="conversation-selection-rail"/, "project/provider changes reset the decorative selection instead of flowing across scopes");
 assert.match(sidebar, /activeKey=\{currentSessionId \? `\$\{currentProvider\}:\$\{currentSessionId\}` : null\}/, "new chat has no stale selected capsule");
 assert.match(sidebar, /data-liquid-key=\{`\$\{s.provider\}:\$\{s.sessionId\}`\}/, "selection keys are provider-scoped, never list indexes");
-assert.match(sidebar, /layoutKey=\{sessions.map/, "reordering/removal updates the selected position even at the same list length");
+assert.match(sidebar, /layoutKey=\{visibleSessions.map/, "reordering/removal/collapse updates the selected position even at the same list length");
 assert.match(css, /\.conversation-selection-rail:has\(> \.liquid-selection\) \.conversation-row\[aria-current="true"\]/);
 assert.doesNotMatch(css, /\.conversation-selection-rail\s*\{[^}]*\b(?:filter|backdrop-filter|contain|transform)\s*:/, "sharing dialogs keep their viewport positioning");
 assert(sidebar.includes("{ root: el.parentElement, threshold: 0.1 }"));
-assert.match(sidebar, /<\/div>\s*\{\(sessions.length >= limit/, "pagination sentinel stays outside the non-scrolling animation rail");
+assert.match(sidebar, /<\/div>\s*\{expanded && \(sessions.length >= limit/, "pagination sentinel stays outside the non-scrolling animation rail and only loads when expanded");
 console.log("Memory, image modes and conversation sidebar share an elastic selection without changing scrolling, scope or actions");

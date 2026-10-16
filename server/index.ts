@@ -80,7 +80,7 @@ const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
     ([claude, codex]) => {
       console.log(`[cc-webui] claude cli: ${claude.version} (${claude.bin})`);
       console.log(
-        `[cc-webui] codex cli: ${codex.version} (${codex.bin}, ${CODEX_JSON_FLAG})`,
+        `[cc-webui] codex cli: ${codex.version} (${codex.bin}, web=app-server/stdio, engine=exec ${CODEX_JSON_FLAG})`,
       );
     },
   );

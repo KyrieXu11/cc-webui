@@ -151,6 +151,9 @@ export function connectAttach(
     // 一轮时，状态行只能靠它，不能读自己的设置。
     "turn_meta",
     "turn_user",
+    "steer_user",
+    "steer_available",
+    "steer_target",
   ]) {
     es.addEventListener(t, forward);
   }
@@ -205,25 +208,29 @@ export async function getInflightSessions(
  * 来 / 不走 stdin 协议）合流成同一个 409，对用户是同一件事——「现在插不进去，那条
  * 留在排队里等这一轮结束」。抛异常会让界面把它报成故障。
  *
- * ⚠️ Codex 没有这条路：`codex exec` 的 stdin 不是控制协议。调用方自己按 provider 拦。
+ * Claude 使用 stdin；Codex 网页单聊使用 app-server turn/steer。
  */
 export async function steerChat(params: {
   sessionId?: string | null;
   clientTurnId?: string | null;
   text: string;
-}): Promise<{ ok: boolean; unavailable?: boolean; message?: string }> {
-  const res = await fetch("/api/chat/steer", {
+  messageId: string;
+  agentProvider?: AgentProvider;
+}): Promise<{ ok: boolean; unavailable?: boolean; retryable?: boolean; message?: string }> {
+  const base = params.agentProvider === "codex" ? "/api/codex/chat" : "/api/chat";
+  const res = await fetch(`${base}/steer`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       sessionId: params.sessionId || undefined,
       clientTurnId: params.clientTurnId || undefined,
       text: params.text,
+      messageId: params.messageId,
     }),
   });
   if (res.status === 409) {
     const body = await res.json().catch(() => ({}));
-    return { ok: false, unavailable: true, message: body?.message };
+    return { ok: false, unavailable: true, retryable: body?.retryable === true, message: body?.message };
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

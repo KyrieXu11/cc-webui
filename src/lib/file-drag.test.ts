@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { canMoveInto, movableDraggedFiles, relocatedDraggedPath, type DraggedFile } from "./file-drag.ts";
+
+const unit = "/project/晨读单/Unit 1";
+assert.equal(canMoveInto(unit, "/project/必修一"), true);
+assert.equal(canMoveInto(unit, unit), false);
+assert.equal(canMoveInto(unit, unit + "/课文/更多"), false);
+assert.equal(canMoveInto(unit, "/project/晨读单"), false);
+assert.equal(canMoveInto(unit, "/project"), true, "moving upward is valid, not a blanket ban on ancestors");
+assert.equal(canMoveInto(unit, unit + "0"), true, "same-prefix siblings are not descendants");
+assert.equal(canMoveInto(unit + "/", "/project/晨读单/"), false);
+assert.equal(canMoveInto("/", "/project"), false);
+assert.equal(canMoveInto("", "/project"), false);
+const file = (path: string): DraggedFile => ({ path, name: path.split("/").pop()!, rel: path.slice(9) });
+assert.deepEqual(movableDraggedFiles([file(unit), file(unit + "/lesson.md"), file(unit)], "/project/必修一").map(f => f.path), [unit], "a selected directory includes its children; never move them twice");
+assert.deepEqual(movableDraggedFiles([file(unit), file("/project/already.txt")], "/project").map(f => f.path), [unit]);
+assert.deepEqual(movableDraggedFiles([file(unit)], unit + "/child"), []);
+const moves = [{ from: unit, to: "/project/必修一/Unit 1" }];
+assert.equal(relocatedDraggedPath(unit + "/课文", moves), "/project/必修一/Unit 1/课文");
+assert.equal(relocatedDraggedPath(unit + "0", moves), unit + "0", "the upload target's same-prefix sibling cannot move with another folder");
+const opened = ["/project/晨读单", unit, unit + "/课文", "/project/必修一"];
+assert.deepEqual(opened.map(path => relocatedDraggedPath(path, moves)), ["/project/晨读单", "/project/必修一/Unit 1", "/project/必修一/Unit 1/课文", "/project/必修一"]);
+
+const source = readFileSync(new URL("../components/FileExplorer.tsx", import.meta.url), "utf8");
+const directory = source.slice(source.indexOf("function DirRow"), source.indexOf("function FileRow"));
+assert.match(directory, /draggable=\{!renaming\}/, "directory name editing must not accidentally start a drag");
+assert.match(directory, /onDragStart=\{e => startDrag\(e, entry.path, entry.name\)\}/);
+assert(directory.indexOf("e.stopPropagation();") < directory.indexOf("if (!canDropInto(entry.path))"), "invalid folder destinations cannot bubble into a root move");
+assert(directory.indexOf("setRootOver(false);") < directory.indexOf("if (!canDropInto(entry.path))"));
+assert.match(source, /movableDraggedFiles\(files, dir\)/, "dragover and drop share the same parent-child rule");
+assert.match(source, /openedDirs.has\(entry.path\)/, "expansion is path-scoped and can follow a folder to its new location");
+assert.match(source, /\.map\(path => relocatedDraggedPath\(path, r.moved\)\)/, "moving a whole folder retains nested expansion");
+console.log("Directory drag: whole-folder sources, self/descendant/no-op guards, ancestors, prefix siblings and nested selection dedup verified");
