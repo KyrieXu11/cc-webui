@@ -7,7 +7,7 @@ import {
 import { getInflightSessions } from "../lib/api";
 import { tildify } from "../lib/fs";
 import { providerLabel, type AgentProvider } from "../lib/settings";
-import { collapsedProjectSessions, createSessionListLoader, SESSION_LIST_POLL_MS } from "../lib/project-sessions";
+import { createSessionListLoader, nextSessionWindow, RECENT_SESSION_COUNT, SESSION_LIST_POLL_MS, sortProjectSessions } from "../lib/project-sessions";
 import { useAuth } from "../AuthGate";
 import ShareSessionDialog from "./ShareSessionDialog";
 import LiquidSelection from "./LiquidSelection";
@@ -15,7 +15,6 @@ import LiquidSelection from "./LiquidSelection";
 const INFLIGHT_POLL_MS = 3000;
 const PAGE_SIZE = 15;
 const MAX_SESSIONS = 200;
-const EXPANDED_STORAGE_KEY = "ccwebui.sessions_expanded";
 
 interface Props {
   cwd: string;
@@ -85,17 +84,16 @@ export default function ProjectSidebar({
   const [error, setError] = useState(false);
   const [inflight, setInflight] = useState<Set<string>>(() => new Set());
   const [sharing, setSharing] = useState<SessionSummary | null>(null);
-  const [expanded, setExpanded] = useState(() => {
-    try { return localStorage.getItem(EXPANDED_STORAGE_KEY) === "true"; }
-    catch { return false; }
-  });
-  const collapsedSessions = collapsedProjectSessions(sessions, currentProvider, currentSessionId);
-  const visibleSessions = expanded ? sessions : collapsedSessions;
-  const canCollapse = collapsedSessions.length < sessions.length;
+  const [displayWindow, setWindow] = useState({ scope: "", size: RECENT_SESSION_COUNT });
+  const visibleCount = displayWindow.scope === scope ? displayWindow.size : RECENT_SESSION_COUNT;
+  const visibleSessions = sessions.slice(0, visibleCount);
+  const revealCount = Math.min(RECENT_SESSION_COUNT, Math.max(0, sessions.length - visibleCount));
+  const hasMore = sessions.length >= limit && limit < MAX_SESSIONS;
   const listId = useId();
-  const loaderRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const disclosureRef = useRef<HTMLButtonElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const revealRef = useRef<{ scope: string; size: number; collapse?: boolean } | null>(null);
   const requestRef = useRef<ReturnType<typeof createSessionListLoader> | null>(null);
   const selectionRail = useRef<HTMLDivElement>(null);
   const listingRef = useRef(listing);
@@ -127,7 +125,7 @@ export default function ProjectSidebar({
     setError(false);
     const loader = createSessionListLoader({
       read: (signal) => listSessions(limit, cwd, currentProvider, { compact: true, signal }),
-      onRows: (rows) => { setListing({ scope, rows }); setError(false); },
+      onRows: (rows) => { setListing({ scope, rows: sortProjectSessions(rows) }); setError(false); },
       onError: () => setError(true),
       onSettled: () => setLoading(false),
     });
@@ -161,29 +159,41 @@ export default function ProjectSidebar({
   }, [currentSessionId, currentProvider, scope]);
 
   useEffect(() => {
-    if (!expanded || loading || error || sessions.length < limit || limit >= MAX_SESSIONS) return;
-    const el = loaderRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setPage({ scope, size: Math.min(limit + PAGE_SIZE, MAX_SESSIONS) });
-        }
-      },
-      { root: el.parentElement, threshold: 0.1 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [sessions.length, scope, limit, loading, error, expanded]);
-
-  const toggleExpanded = () => {
-    const next = !expanded;
-    setExpanded(next);
-    try { localStorage.setItem(EXPANDED_STORAGE_KEY, String(next)); } catch { /* storage may be disabled */ }
-    if (!next) {
-      scrollRef.current?.scrollTo({ top: 0 });
+    const reveal = revealRef.current;
+    if (!reveal) return;
+    if (reveal.scope !== scope) { revealRef.current = null; return; }
+    if (reveal.size !== visibleCount) return;
+    revealRef.current = null;
+    if (reveal.collapse) {
       disclosureRef.current?.focus({ preventScroll: true });
+      return;
     }
+    const scroller = scrollRef.current;
+    const lastRow = selectionRail.current?.querySelector<HTMLElement>(".conversation-row:last-child");
+    if (!scroller || !lastRow) return;
+    const footerHeight = footerRef.current?.getBoundingClientRect().height ?? 44;
+    const delta = lastRow.getBoundingClientRect().bottom + footerHeight - scroller.getBoundingClientRect().bottom;
+    if (delta > 0) scroller.scrollBy({ top: delta, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }, [scope, visibleCount]);
+
+  const showMore = () => {
+    if (loading || revealCount === 0) return;
+    const size = nextSessionWindow(visibleCount, sessions.length);
+    revealRef.current = { scope, size };
+    setWindow({ scope, size });
+    // Read ahead only after a click exhausts the known next five. Scrolling
+    // alone never reveals or fetches more rows; the next button has a real count.
+    if (hasMore && size + RECENT_SESSION_COUNT > sessions.length) {
+      requestRef.current?.dispose();
+      setLoading(true);
+      setPage({ scope, size: Math.min(limit + PAGE_SIZE, MAX_SESSIONS) });
+    }
+  };
+
+  const collapse = () => {
+    revealRef.current = { scope, size: RECENT_SESSION_COUNT, collapse: true };
+    setWindow({ scope, size: RECENT_SESSION_COUNT });
+    scrollRef.current?.scrollTo({ top: 0 });
   };
 
   // 删成功才从列表里拿掉。乐观地先抹掉再说，会让「其实没删掉」一直到下次刷新才暴露。
@@ -238,23 +248,6 @@ export default function ProjectSidebar({
         </button>
       </div>
 
-      <div className="shrink-0 min-h-11 max-md:min-h-14 flex items-center justify-between gap-2 px-4 pt-2 pb-1">
-        <span className="text-[11px] font-medium text-muted">最近对话</span>
-        {canCollapse && <button
-          ref={disclosureRef}
-          onClick={toggleExpanded}
-          className="conversation-disclosure"
-          aria-expanded={expanded}
-          aria-controls={listId}
-          aria-label={expanded ? "收起更早对话" : "展开更早对话"}
-          title={expanded ? "仅保留最近 5 条和当前对话" : "查看更早对话"}
-        >
-          {expanded ? "收起" : "展开更多"}
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d={expanded ? "m3 7.5 3-3 3 3" : "m3 4.5 3 3 3-3"} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>}
-      </div>
       <div id={listId} ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto py-2 px-2">
         {(loading || listing.scope !== scope && !error) && sessions.length === 0 ? (
           <div className="px-4 py-3 text-[12px] text-subtle">加载中…</div>
@@ -370,21 +363,27 @@ export default function ProjectSidebar({
               );
             })}
             </div>
-            {expanded && (sessions.length >= limit && limit < MAX_SESSIONS || loading) && (
-              <div
-                ref={loaderRef}
-                className="flex items-center justify-center py-3 text-[11px] text-subtle font-mono gap-1.5"
+            <div ref={footerRef} className="conversation-list-footer">
+              {revealCount > 0 ? <button
+                ref={disclosureRef}
+                onClick={showMore}
+                disabled={loading}
+                className="conversation-disclosure"
+                aria-controls={listId}
+                aria-label={`展开显示 ${revealCount} 个对话`}
               >
-                <span className="w-1 h-1 rounded-full bg-subtle animate-pulse" />
-                {loading ? "加载中…" : "继续向下查看更早对话"}
-              </div>
-            )}
-            {expanded && canCollapse && <button
-              onClick={toggleExpanded}
-              className="conversation-disclosure mx-auto my-2"
-              aria-expanded={expanded}
-              aria-controls={listId}
-            >仅显示最近对话</button>}
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>展开显示</span><span className="tabular-nums">{revealCount}</span>
+              </button> : loading && <span className="px-2 py-2 text-[12px] text-muted" role="status">加载中…</span>}
+              {visibleCount > RECENT_SESSION_COUNT && <button
+                onClick={collapse}
+                className="conversation-disclosure conversation-collapse"
+                aria-controls={listId}
+                aria-label="收起更早对话"
+              >收起</button>}
+            </div>
           </>
         )}
         {error && <div role="status" className="px-4 py-3 text-[12px] text-muted">

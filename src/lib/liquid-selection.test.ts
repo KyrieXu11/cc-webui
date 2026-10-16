@@ -27,6 +27,6 @@ assert.match(sidebar, /data-liquid-key=\{`\$\{s.provider\}:\$\{s.sessionId\}`\}/
 assert.match(sidebar, /layoutKey=\{visibleSessions.map/, "reordering/removal/collapse updates the selected position even at the same list length");
 assert.match(css, /\.conversation-selection-rail:has\(> \.liquid-selection\) \.conversation-row\[aria-current="true"\]/);
 assert.doesNotMatch(css, /\.conversation-selection-rail\s*\{[^}]*\b(?:filter|backdrop-filter|contain|transform)\s*:/, "sharing dialogs keep their viewport positioning");
-assert(sidebar.includes("{ root: el.parentElement, threshold: 0.1 }"));
-assert.match(sidebar, /<\/div>\s*\{expanded && \(sessions.length >= limit/, "pagination sentinel stays outside the non-scrolling animation rail and only loads when expanded");
+assert.match(sidebar, /<\/div>\s*<div ref=\{footerRef\} className="conversation-list-footer"/, "the five-at-a-time button stays in the scroll flow, outside the decorative rail");
+assert.doesNotMatch(sidebar, /IntersectionObserver/, "only clicking the inline button can reveal more rows");
 console.log("Memory, image modes and conversation sidebar share an elastic selection without changing scrolling, scope or actions");

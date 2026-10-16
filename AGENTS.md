@@ -105,7 +105,7 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   复用于记忆导航和图片「适应/原图」：单块选中层随真实坐标移动、拉伸回弹/高光，
   pointer-events:none；滚动/改大小重新测量，减少动态效果时静态，不新增持续 RAF。
   左侧 `ProjectSidebar` 也复用同款流动层：provider/sessionId 作为目标 key，scope 切换
-  重建 rail，排序/删除重新测量；分页 sentinel 必须留在原滚动容器内、装饰 rail 外。
+  重建 rail，排序/删除重新测量；逐批展开按钮必须留在列表滚动容器内、装饰 rail 外。
   左右开合用 `usePaneMotion` 保留短促退场，逻辑关闭立即 inert/aria-hidden/禁命中，
   手机结束后 display:none；拖动调宽不做过渡，编辑器不卸载，最大化/放映不走缩栏动画。
 - `App.tsx` — 中枢：路由/视图切换、发送、session 打开、attach、in-flight 轮询。
@@ -130,11 +130,13 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
   并发扫描合流；**不能缓存跨账号的授权结果**，每次响应仍按当前白名单过滤（最近项目也一样）。
   「刷新目录」走 `?refresh=1`，新建目录不用等 TTL。TCC 超时黑名单和不递归软链的护栏仍在
   `server/fs.ts`；不要为了提速无限并发 readdir/stat，那些挂起的系统调用取消不了。
-- **项目最近对话先取 15 条，向下滚动再增量拉到最多 200 条**：`ProjectSidebar` 用 `compact=1`
+- **项目最近对话先取 15 条，点击列表内「展开显示 N」逐批显示，到边界再增量拉到最多 200 条**：`ProjectSidebar` 用 `compact=1`
   只收 256 字首问摘录；点选对话不重拉/闪空整个列表，换 cwd/provider 会取消旧请求。
-  默认只展示最近 5 条（已加载的当前对话额外保留），「展开更多 / 收起」偏好存
-  `ccwebui.sessions_expanded`；折叠时禁止触发隐藏分页，展开仍复用原来的 15 → 200 窗口。
-  列表可见时每 10 秒同步，focus / 切回标签立即同步，新 native id 分配后也会补拉。
+  默认严格展示最近 5 条，下面紧跟「展开显示 N」按钮，每次最多追加 5 条（最后不足 5 条显示真实数量）。
+  不是固定底栏或顶部总开关，滚动本身不加载；显示窗口和 15 → 200 的读取窗口分开，
+  仅点击接近读取边界时预取下一页。旧 `ccwebui.sessions_expanded` 不再读取，切项目/provider 重回 5 条。
+  按 `lastModified` 最近消息活动倒序，旧对话有新消息也会到最上面，不因点选就置顶或额外塞入当前旧对话。
+  页面可见时每 10 秒同步，focus / 切回标签立即同步，新 native id 分配后也会补拉。
   `project-sessions.ts` 合流重叠请求、取消旧作用域，后台更新/失败保留行和滚动位置；
   删除成功先中止旧读取，防止迟到响应复活已删行。流动选中层按实际可见行重测。
   搜索仍取完整窗口/首问，不能复用截断后的结果。`session-summary-cache.ts` 只缓存原始 metadata，

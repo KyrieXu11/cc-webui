@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { collapsedProjectSessions, createSessionListLoader, RECENT_SESSION_COUNT, SESSION_LIST_POLL_MS } from "./project-sessions.ts";
+import { createSessionListLoader, nextSessionWindow, RECENT_SESSION_COUNT, SESSION_LIST_POLL_MS, sortProjectSessions } from "./project-sessions.ts";
 import type { SessionSummary } from "./sessions.ts";
 
 const sessions: SessionSummary[] = Array.from({ length: 30 }, (_, i) => ({
@@ -8,13 +8,19 @@ const sessions: SessionSummary[] = Array.from({ length: 30 }, (_, i) => ({
 }));
 assert.equal(RECENT_SESSION_COUNT, 5);
 assert.equal(SESSION_LIST_POLL_MS, 10_000);
-assert.deepEqual(collapsedProjectSessions([], "codex", null), []);
-assert.deepEqual(collapsedProjectSessions(sessions.slice(0, 3), "codex", null), sessions.slice(0, 3));
-assert.deepEqual(collapsedProjectSessions(sessions, "codex", null), sessions.slice(0, 5));
-assert.deepEqual(collapsedProjectSessions(sessions, "codex", "session-1"), sessions.slice(0, 5), "current recent row is never duplicated");
-assert.deepEqual(collapsedProjectSessions(sessions, "codex", "session-22"), [...sessions.slice(0, 5), sessions[22]], "an older open conversation remains visible in its original order");
-assert.deepEqual(collapsedProjectSessions(sessions, "claude", "session-22"), sessions.slice(0, 5), "selection is provider scoped");
-assert.equal(sessions.length, 30, "collapsing never mutates or deletes history");
+assert.deepEqual(sortProjectSessions([]), []);
+assert.deepEqual(sortProjectSessions([...sessions].reverse()), sessions, "native activity time determines order, not API arrival order");
+assert.equal(nextSessionWindow(5, 30), 10);
+assert.equal(nextSessionWindow(10, 30), 15);
+assert.equal(nextSessionWindow(15, 30), 20, "each click reveals five, not the whole fetched page");
+assert.equal(nextSessionWindow(10, 13), 13, "the last partial batch is exact");
+assert.equal(nextSessionWindow(5, 3), 3, "short lists need no phantom rows");
+const activeOld = { ...sessions[22], lastModified: 200 };
+const updated = sessions.map((s) => s.sessionId === activeOld.sessionId ? activeOld : s);
+assert.equal(sortProjectSessions(updated)[0].sessionId, activeOld.sessionId, "new activity in an old conversation moves it above newly created conversations");
+assert.equal(sortProjectSessions(updated).slice(0, 5).length, 5, "the recent window is strictly five, without an extra pinned old selection");
+assert.equal(updated[22], activeOld, "sorting never mutates the source list");
+assert.equal(sessions.length, 30, "folding never deletes history");
 
 const pending: Array<{ signal: AbortSignal; resolve: (rows: SessionSummary[]) => void; reject: (error: Error) => void }> = [];
 let rows: SessionSummary[] = [];
@@ -69,7 +75,11 @@ await abandoned;
 assert.equal(errors, 1, "aborted requests do not show spurious errors");
 
 const sidebar = readFileSync(new URL("../components/ProjectSidebar.tsx", import.meta.url), "utf8");
-assert.match(sidebar, /if \(!expanded \|\| loading/, "folded history must not trigger invisible pagination");
+assert.doesNotMatch(sidebar, /IntersectionObserver/, "scrolling alone must never fetch or expand conversations");
+assert.match(sidebar, /const visibleSessions = sessions.slice\(0, visibleCount\)/, "only the five-per-click display window is visible");
+assert.match(sidebar, /onClick=\{showMore\}/);
+assert.match(sidebar, /展开显示.*\{revealCount\}/s);
+assert.match(sidebar, /className="conversation-list-footer"/);
 assert.match(sidebar, /document.visibilityState === "visible"/, "hidden tabs do not poll the session store");
 assert.match(sidebar, /setInterval\(refreshVisible, SESSION_LIST_POLL_MS\)/);
 for (const [target, event] of [["document", "visibilitychange"], ["window", "focus"]]) {
@@ -77,8 +87,8 @@ for (const [target, event] of [["document", "visibilitychange"], ["window", "foc
   assert(sidebar.includes(`${target}.removeEventListener("${event}", refreshVisible)`));
 }
 assert.match(sidebar, /clearInterval\(timer\)/);
-assert.match(sidebar, /aria-expanded=\{expanded\}/);
 assert.match(sidebar, /aria-controls=\{listId\}/);
-assert.match(sidebar, /localStorage.setItem\(EXPANDED_STORAGE_KEY/);
+assert.doesNotMatch(sidebar, /EXPANDED_STORAGE_KEY|sessions_expanded/, "the old all-or-nothing expansion preference must not bypass the recent five");
+assert.match(sidebar, /prefers-reduced-motion: reduce/, "scrolling to revealed rows respects reduced motion");
 assert.doesNotMatch(sidebar, /key=\{(?:reload|refreshKey|currentSessionId)\}/, "background updates must not remount the list");
 console.log("Project conversations collapse safely and refresh without overlaps, lost rows or stale-scope writes");

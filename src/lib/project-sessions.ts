@@ -1,17 +1,15 @@
-import type { AgentProvider } from "./settings";
 import type { SessionSummary } from "./sessions";
 
 export const RECENT_SESSION_COUNT = 5;
 export const SESSION_LIST_POLL_MS = 10_000;
 
-/** Keep the open conversation visible even when it is older than the recent five. */
-export function collapsedProjectSessions(
-  sessions: SessionSummary[],
-  provider: AgentProvider,
-  sessionId: string | null,
-): SessionSummary[] {
-  return sessions.filter((s, index) => index < RECENT_SESSION_COUNT ||
-    s.provider === provider && s.sessionId === sessionId);
+/** Recent activity, not creation order or which conversation was clicked. */
+export function sortProjectSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return [...sessions].sort((a, b) => b.lastModified - a.lastModified);
+}
+
+export function nextSessionWindow(size: number, total: number): number {
+  return Math.min(size + RECENT_SESSION_COUNT, total);
 }
 
 /** One read at a time; a disposed scope must never publish a late response. */

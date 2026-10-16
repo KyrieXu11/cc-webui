@@ -193,8 +193,11 @@
   .tool-timeline-activity { padding: 8px 12px; }
   .tool-timeline [data-tool-step][hidden], .tool-timeline [data-timeline-row][hidden] { display: none; }
   .conversation-row, .navigation-row { border-radius: var(--radius-control); }
-  .conversation-disclosure { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 32px; padding: 4px 8px; border-radius: var(--radius-control); color: var(--color-muted); font-size: 11px; }
+  .conversation-list-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 8px; }
+  .conversation-disclosure { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 8px; border-radius: var(--radius-control); color: var(--color-muted); font-size: 12px; }
   .conversation-disclosure:hover { background: var(--color-raised); color: var(--color-fg); }
+  .conversation-disclosure:disabled { cursor: wait; }
+  .conversation-collapse { margin-left: auto; }
   .navigation-row { color: var(--color-muted); }
   .conversation-row:hover, .navigation-row:hover { background: var(--color-raised); color: var(--color-fg); }
   .conversation-row[aria-current="true"], .navigation-row[data-active="true"] {

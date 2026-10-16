@@ -62,6 +62,7 @@ try {
     ((await getClaudeSessionMessages(mine, { dir: cwd }))[0].message as any).content, longPrompt, "history unchanged");
   await fs.appendFile(file, JSON.stringify({ type: "ai-title", aiTitle: "updated title" }) + "\n");
   assert.equal((await list(member.id, "claude", 2))[0].customTitle, "updated title", "append invalidates metadata cache");
+  assert.deepEqual((await list(member.id, "claude", 1)).map((s: any) => s.sessionId), [mine], "activity in an older Claude conversation moves it to the first page, even with a warm cache");
   setShares({ resourceId: shared, kind: "claude", userIds: [], sharedBy: admin.id, ownerId: admin.id });
   assert.deepEqual((await list(member.id, "claude", 2)).map((s: any) => s.sessionId), [mine], "warm cache cannot retain revoked sharing");
   await fs.unlink(file);
@@ -76,6 +77,12 @@ try {
     recordOwner(id, "codex", admin.id);
   }
   assert.deepEqual((await list(member.id, "codex", 1)).map((s: any) => s.sessionId), [codex]);
+  const recentCodex = randomUUID();
+  await appendCodexTurn({ sessionId: recentCodex, cwd, prompt: "newer member conversation", startedAt: Date.now() + 1000, events: [] });
+  recordOwner(recentCodex, "codex", member.id);
+  assert.deepEqual((await list(member.id, "codex", 1)).map((s: any) => s.sessionId), [recentCodex]);
+  await appendCodexTurn({ sessionId: codex, cwd, prompt: "new activity in the old conversation", startedAt: Date.now() + 2000, events: [] });
+  assert.deepEqual((await list(member.id, "codex", 1)).map((s: any) => s.sessionId), [codex], "new activity, not creation order, decides the first Codex conversation");
   assert.deepEqual((await list(member.id, "all", 1)).map((s: any) => s.sessionId), [codex]);
   console.log("sessions-list.test.ts ✓");
 } finally { closeDb(); await fs.rm(tmp, { recursive: true, force: true }); }
