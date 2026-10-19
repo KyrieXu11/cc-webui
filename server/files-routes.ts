@@ -26,7 +26,8 @@ import {
   recordDeletion,
   relocateSessionFiles,
 } from "./session-files.ts";
-import { ZIP_MAX_ENTRY_BYTES, zipStream } from "./zip.ts";
+import { zipStream } from "./zip.ts";
+import { FileDownloadError, prepareDownload } from "./file-download.ts";
 
 const filesRoute = new Hono();
 
@@ -270,7 +271,7 @@ filesRoute.post("/delete", async (c) => {
   return c.json({ deleted, failed });
 });
 
-// 下载（决策 18）。一个文件原样流回，多选打成一个 zip。
+// 下载（决策 18）。单文件原样流回，文件夹或多选打成 ZIP（保留空目录）。
 //
 // ⚠️ 白名单为什么又在处理器里查（和上面那条 delete 同源，但成因不同）：`path` 在
 // 这里是**可重复的 query**（`?path=a&path=b`），而中间件的 valueFrom 读的是
@@ -290,43 +291,23 @@ filesRoute.get("/download", async (c) => {
   // URL 长度是有上限的（nginx 默认 8k 请求行），而这棵树只能一行一行右键选，
   // 真选到 100 个之前用户早就换别的办法了。挡在这里比让 nginx 回一个 414 好懂。
   if (raws.length > 100) {
-    return c.json({ error: "一次最多下载 100 个文件" }, 400);
+    return c.json({ error: "一次最多选择 100 个文件或文件夹" }, 400);
   }
 
   const user = currentUser(c)!;
   const patterns = getAllowedPaths(user.id);
 
-  const files: { path: string; size: number; mtimeMs: number }[] = [];
-  for (const raw of raws) {
-    let target: string;
-    try {
-      // 和 delete 一样：用它返回的规范化路径去读，不用请求里那个字符串。
-      target = await assertCanOpen(raw, patterns);
-    } catch {
-      return c.json(
-        {
-          error: "path not allowed",
-          detail: `${raw} 不在你账号可以打开的范围内`,
-        },
-        403
-      );
-    }
-    let st;
-    try {
-      st = await fsp.stat(target);
-    } catch {
-      return c.json({ error: `文件不存在：${raw}` }, 404);
-    }
-    // 目录不在 v1 范围内（docs/file-manager.md「v1 不做」），而且树上也选不中。
-    if (!st.isFile()) return c.json({ error: "只能下载文件" }, 400);
-    if (raws.length > 1 && st.size > ZIP_MAX_ENTRY_BYTES) {
-      return c.json({ error: `${path.basename(target)} 超过 4GiB，打不进 zip` }, 413);
-    }
-    files.push({ path: target, size: st.size, mtimeMs: st.mtimeMs });
+  let download;
+  try {
+    // 每个显式路径和递归子项都过白名单；先验证完整清单，再开始流式发送。
+    download = await prepareDownload(raws, patterns, c.req.raw.signal);
+  } catch (error) {
+    if (!(error instanceof FileDownloadError)) throw error;
+    return c.json({ error: error.message }, error.status);
   }
 
-  if (files.length === 1) {
-    const only = files[0];
+  if (download.kind === "file") {
+    const only = download;
     return new Response(
       Readable.toWeb(createReadStream(only.path)) as unknown as ReadableStream,
       {
@@ -345,16 +326,7 @@ filesRoute.get("/download", async (c) => {
     );
   }
 
-  // 包里的名字＝相对公共父目录的路径。两个不同目录下的同名文件因此不会撞车，
-  // 而全在一个目录里时它就退化成裸文件名。
-  const root = commonDir(files.map((f) => f.path));
-  const stream = zipStream(
-    files.map((f) => ({
-      path: f.path,
-      name: path.relative(root, f.path).split(path.sep).join("/"),
-      mtimeMs: f.mtimeMs,
-    }))
-  );
+  const stream = zipStream(download.entries);
   return new Response(stream as unknown as ReadableStream, {
     headers: {
       "content-type": "application/zip",
@@ -362,9 +334,7 @@ filesRoute.get("/download", async (c) => {
       // 刻意不给 content-length：store 模式虽然算得出来，但那是按 stat 那一刻的
       // 大小算的，而 agent 完全可能在下载途中重写其中一个文件。长度对不上的响应
       // 会被截断成坏包，分块传输则最多是内容旧了一点。
-      "content-disposition": contentDisposition(
-        `${path.basename(root) || "files"}.zip`
-      ),
+      "content-disposition": contentDisposition(download.name),
     },
   });
 });
@@ -682,23 +652,6 @@ function contentDisposition(name: string): string {
     (ch) => "%" + ch.charCodeAt(0).toString(16).toUpperCase()
   );
   return `attachment; filename="${ascii}"; filename*=UTF-8''${utf8}`;
-}
-
-// 一组文件的公共父目录。全在同一个目录里时就是那个目录。
-function commonDir(paths: string[]): string {
-  const parts = paths.map((p) => path.dirname(p).split(path.sep));
-  const first = parts[0];
-  let n = first.length;
-  for (const other of parts.slice(1)) {
-    n = Math.min(n, other.length);
-    for (let i = 0; i < n; i++) {
-      if (other[i] !== first[i]) {
-        n = i;
-        break;
-      }
-    }
-  }
-  return first.slice(0, n).join(path.sep) || path.sep;
 }
 
 export { filesRoute };

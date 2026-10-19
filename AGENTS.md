@@ -75,7 +75,7 @@ npm test           # tsx --test "server/**/*.test.ts" "src/**/*.test.ts"（纯 a
 | `/api/mcp/local/:server` | `mcp-local-route.ts` | **桌面客户端中继**：把 CLI 的 MCP 调用透传到家人机器上的 Electron 客户端（见下「5. 桌面客户端」） |
 | `/api/client` | `client-routes.ts` | 桌面客户端安装包下载（**要鉴权**，不是公开面） |
 | `/ws/device` | `devices/ws.ts` | 设备 WebSocket。⚠️ **不是 Hono 路由** —— 挂在 http.Server 的 upgrade 事件上，绕开 authMiddleware |
-| `/api/files` | `files-routes.ts` + `session-files.ts` + `zip.ts` | **取件台**：列「本对话文件」、保存文本（乐观锁）、批量删除（真删+留痕）、下载（多选打 zip）、上传到会话 cwd、新建文件夹（`POST /mkdir`，**名字不合法就拒、重名回 409**——和上传的「消毒改名 + 加序号」刻意不同）、移动（`POST /move`）、重命名（`POST /rename`）。⚠️ 后两条都**两头各查一次白名单**（白名单是 glob，`x/*.md` 下把 a.md 改成 a.txt 就越界了），且**同名一律拒**——`fs.rename` 在 POSIX 上会静默覆盖 |
+| `/api/files` | `files-routes.ts` + `session-files.ts` + `file-download.ts` + `zip.ts` | **取件台**：列「本对话文件」、保存文本（乐观锁）、批量删除（真删+留痕）、下载（文件夹或多选打 ZIP、保留空目录；显式路径与递归子项逐个查白名单，目录内软链拒绝）、上传到会话 cwd、新建文件夹（`POST /mkdir`，**名字不合法就拒、重名回 409**——和上传的「消毒改名 + 加序号」刻意不同）、移动（`POST /move`）、重命名（`POST /rename`）。⚠️ 后两条都**两头各查一次白名单**（白名单是 glob，`x/*.md` 下把 a.md 改成 a.txt 就越界了），且**同名一律拒**——`fs.rename` 在 POSIX 上会静默覆盖 |
 | `/api/office` | `office.ts` | ONLYOFFICE：下发签名 EditorConfig（浏览器）+ 容器侧取文件/保存回调（**票据鉴权，无 cookie**） |
 | `/feishu` | `feishu/*` | 飞书机器人（见下） |
 

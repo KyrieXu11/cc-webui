@@ -9,7 +9,7 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const { zipStream } = await import("./zip.ts");
+const { zipStream, ZIP_MAX_ENTRIES } = await import("./zip.ts");
 
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "cc-webui-zip-"));
 
@@ -24,6 +24,9 @@ const entries = [
   { path: path.join(tmp, "报告.md"), name: "报告.md", mtimeMs: Date.parse("2026-09-06T10:30:00") },
   { path: path.join(tmp, "sub", "报告.md"), name: "sub/报告.md" },
   { path: path.join(tmp, "empty.txt"), name: "empty.txt" },
+  // 目录不应尝试 createReadStream（path 刻意不存在），DOS / Unix 属性均标为目录。
+  { path: path.join(tmp, "not-on-disk"), name: "空文件夹/", directory: true },
+  { path: path.join(tmp, "not-on-disk"), name: "空文件夹/下一层/", directory: true },
 ];
 
 const zip = Buffer.from(await new Response(zipStream(entries)).arrayBuffer());
@@ -31,7 +34,7 @@ const zip = Buffer.from(await new Response(zipStream(entries)).arrayBuffer());
 // 形状先粗查一遍：magic + EOCD 里的条目数。
 assert.equal(zip.subarray(0, 4).toString("hex"), "504b0304", "以 local header 开头");
 assert.equal(zip.readUInt32LE(zip.length - 22), 0x06054b50, "结尾是 EOCD");
-assert.equal(zip.readUInt16LE(zip.length - 22 + 10), 3, "EOCD 记着 3 个条目");
+assert.equal(zip.readUInt16LE(zip.length - 22 + 10), 5, "EOCD 包括文件与目录条目");
 
 const zipPath = path.join(tmp, "out.zip");
 await fsp.writeFile(zipPath, zip);
@@ -59,9 +62,16 @@ if (hasUnzip) {
     "子目录里的同名文件各是各的（包里的名字带相对路径，不会互相盖）"
   );
   assert.equal((await fsp.stat(path.join(out, "empty.txt"))).size, 0);
+  assert((await fsp.stat(path.join(out, "空文件夹", "下一层"))).isDirectory(), "解压保留空目录");
 } else {
   console.log("zip.test.ts: 没装 unzip，跳过解包验证");
 }
+
+await assert.rejects(
+  new Response(zipStream(Array.from({ length: ZIP_MAX_ENTRIES + 1 }, () => entries[3]))).arrayBuffer(),
+  /ZIP64/,
+  "条目数到达 ZIP64 哨兵前就拒，不能写坏 EOCD",
+);
 
 await fsp.rm(tmp, { recursive: true, force: true });
 console.log("zip.test.ts: all assertions passed");

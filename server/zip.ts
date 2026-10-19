@@ -11,8 +11,8 @@
 // 进内存，也不必为了算 crc 把文件读两遍。附带的好处是**下载途中文件被 agent 改写
 // 也不会写出坏包**：长度是实际发出去多少就写多少。
 //
-// ⚠️ 没有 ZIP64：单个文件 ≥ 4GiB 会写出坏包，所以调用方必须先按 stat 挡掉
-// （files-routes.ts 那条 413），这里再兜一次底（读的过程中长出来的情况）。
+// ⚠️ 没有 ZIP64：文件/整个包 ≥ 4GiB 或条目太多会写出坏包，调用方先按 stat
+// 挡掉（file-download.ts 的 413），这里再兜底读的过程中长出来的情况。
 
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
@@ -25,10 +25,14 @@ export type ZipEntry = {
   name: string;
   /** 修改时间，写进 DOS 时间戳。缺省＝现在。 */
   mtimeMs?: number;
+  /** 目录条目不读取 path，name 必须以 / 结尾；用来保留空文件夹。 */
+  directory?: boolean;
 };
 
-/** 单个条目的上限（uint32）。超过就得上 ZIP64，而这里没有。 */
-export const ZIP_MAX_ENTRY_BYTES = 0xffffffff;
+/** 全 1 是 ZIP64 哨兵值，不能当普通 ZIP 的长度/条目数。 */
+export const ZIP_MAX_ENTRY_BYTES = 0xfffffffe;
+export const ZIP_MAX_ARCHIVE_BYTES = 0xfffffffe;
+export const ZIP_MAX_ENTRIES = 0xfffe;
 
 const LOCAL_SIG = 0x04034b50;
 const DESC_SIG = 0x08074b50;
@@ -48,17 +52,22 @@ export function zipStream(entries: ZipEntry[]): ReadableStream<Uint8Array> {
 }
 
 async function* zipChunks(entries: ZipEntry[]): AsyncGenerator<Buffer> {
+  if (entries.length > ZIP_MAX_ENTRIES) throw new Error("ZIP 条目过多，需要 ZIP64");
   const central: Buffer[] = [];
   let offset = 0;
+  let centralBytes = 0;
 
   for (const e of entries) {
     const name = Buffer.from(e.name, "utf-8");
+    if (name.length > 0xffff) throw new Error("ZIP 文件名太长");
+    const directory = !!e.directory;
+    const flags = directory ? 0x0800 : FLAGS;
     const { time, date } = dosStamp(e.mtimeMs ?? Date.now());
 
     const local = Buffer.alloc(30 + name.length);
     local.writeUInt32LE(LOCAL_SIG, 0);
     local.writeUInt16LE(VERSION, 4);
-    local.writeUInt16LE(FLAGS, 6);
+    local.writeUInt16LE(flags, 6);
     local.writeUInt16LE(STORE, 8);
     local.writeUInt16LE(time, 10);
     local.writeUInt16LE(date, 12);
@@ -66,32 +75,40 @@ async function* zipChunks(entries: ZipEntry[]): AsyncGenerator<Buffer> {
     local.writeUInt16LE(name.length, 26);
     local.writeUInt16LE(0, 28);
     name.copy(local, 30);
+    // 包括已累计的 central directory、当前条目头部与 EOCD；文件增长时继续检查。
+    centralBytes += 46 + name.length;
+    const overhead = offset + local.length + (directory ? 0 : 16) + centralBytes + 22;
+    if (overhead > ZIP_MAX_ARCHIVE_BYTES) throw new Error("ZIP 总大小超过 4GiB，需要 ZIP64");
     yield local;
 
     let crc = 0;
     let size = 0;
-    for await (const chunk of createReadStream(e.path)) {
-      const buf = chunk as Buffer;
-      crc = zlib.crc32(buf, crc);
-      size += buf.length;
-      if (size > ZIP_MAX_ENTRY_BYTES) {
-        throw new Error(`${e.name} 超过 4GiB，这个打包器没有 ZIP64`);
+    if (!directory) {
+      for await (const chunk of createReadStream(e.path)) {
+        const buf = chunk as Buffer;
+        crc = zlib.crc32(buf, crc);
+        size += buf.length;
+        if (size > ZIP_MAX_ENTRY_BYTES || overhead + size > ZIP_MAX_ARCHIVE_BYTES) {
+          throw new Error(`${e.name} 或打包总大小超过 4GiB，这个打包器没有 ZIP64`);
+        }
+        yield buf;
       }
-      yield buf;
     }
 
-    const desc = Buffer.alloc(16);
-    desc.writeUInt32LE(DESC_SIG, 0);
-    desc.writeUInt32LE(crc, 4);
-    desc.writeUInt32LE(size, 8); // store：压缩后长度＝原始长度
-    desc.writeUInt32LE(size, 12);
-    yield desc;
+    const desc = Buffer.alloc(directory ? 0 : 16);
+    if (!directory) {
+      desc.writeUInt32LE(DESC_SIG, 0);
+      desc.writeUInt32LE(crc, 4);
+      desc.writeUInt32LE(size, 8); // store：压缩后长度＝原始长度
+      desc.writeUInt32LE(size, 12);
+      yield desc;
+    }
 
     const cd = Buffer.alloc(46 + name.length);
     cd.writeUInt32LE(CENTRAL_SIG, 0);
     cd.writeUInt16LE((3 << 8) | VERSION, 4); // made by: unix
     cd.writeUInt16LE(VERSION, 6);
-    cd.writeUInt16LE(FLAGS, 8);
+    cd.writeUInt16LE(flags, 8);
     cd.writeUInt16LE(STORE, 10);
     cd.writeUInt16LE(time, 12);
     cd.writeUInt16LE(date, 14);
@@ -100,7 +117,7 @@ async function* zipChunks(entries: ZipEntry[]): AsyncGenerator<Buffer> {
     cd.writeUInt32LE(size, 24);
     cd.writeUInt16LE(name.length, 28);
     // 30 extra / 32 comment / 34 disk / 36 internal 一律 0
-    cd.writeUInt32LE(((0o100644 << 16) >>> 0), 38); // 外部属性：unix 普通文件 0644
+    cd.writeUInt32LE(directory ? ((0o40755 << 16) | 0x10) >>> 0 : (0o100644 << 16) >>> 0, 38);
     cd.writeUInt32LE(offset, 42);
     name.copy(cd, 46);
     central.push(cd);

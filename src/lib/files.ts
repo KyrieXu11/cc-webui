@@ -128,7 +128,7 @@ export async function deleteFiles(
   return (await res.json()) as DeleteResult;
 }
 
-// 下载（决策 18）。一个文件直接下，多个由服务端打成一个 zip。
+// 下载（决策 18）。单个文件直接下，文件夹或多选由服务端打成一个 ZIP。
 //
 // **不做「连续触发 N 次下载」**：浏览器把第二个之后的下载当弹窗拦（Chrome 会问
 // 「是否允许下载多个文件」），用户误点一次「阻止」之后，此后所有下载都**静默**

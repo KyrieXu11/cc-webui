@@ -42,11 +42,10 @@ import {
 // 操作与树的关系：
 //   · 点文件名   → 在右侧格里打开（文本进编辑器、md 可渲染、Office 走 ONLYOFFICE）
 //   · 右键文件 / 文件夹 → 进多选模式（勾选框这时才出现，并顺手选中这一行；再右键别的行继续加选）
-//                  文件夹只能**删空的**（服务端 rmdir，不递归；非空的原样留下并说明原因），
-//                  不能下载（选中里有文件夹时「下载」直接灰掉）
+//                  文件夹只能**删空的**（服务端 rmdir，不递归；非空的原样留下并说明原因）
 //                  → 批量删除（**真删、无回收站**，所以确认弹窗逐个列出文件名——批量
 //                  删除最容易出的事故是多选里混进了一个你没看见的）
-//                  → 下载（选一个就是那个文件本身，选多个由服务端打成一个 zip；
+//                  → 下载（单个文件原样下，文件夹或多选由服务端打成一个 zip；
 //                  **不是**连着触发 N 次下载，理由见 lib/files.ts 的 downloadFiles）
 //                  ⚠️ 勾选框**平时不画**：常驻的话一棵目录树看着像一排表单（用户原话
 //                  「多选框应该去掉，应该做一个右键点击多选之后，才出现动态加载多选框」）。
@@ -76,7 +75,7 @@ interface Props {
 }
 
 // 多选里的一项。`dir` 决定它能做什么：删 = 只删空的（服务端 rmdir），
-// 下载 = 不行（/download 只收文件），拖 = 可以（/move 本来就收文件夹）。
+// 下载 = 文件夹打 ZIP，拖 = 可以（/move 本来就收文件夹）。
 type Picked = { name: string; dir: boolean };
 
 type Ctx = {
@@ -384,8 +383,7 @@ export default function FileExplorer({
               取消
             </button>
             <button
-              // 文件夹下不了（/download 只收文件，混进一个就整条 400），宁可按钮直接灰掉说清楚。
-              disabled={picked.size === 0 || pickedHasDir}
+              disabled={picked.size === 0}
               onClick={() => {
                 // 交给浏览器下，这里没有可等的东西；和 @ 一样做完就退出多选。
                 downloadFiles([...picked.keys()]);
@@ -394,11 +392,9 @@ export default function FileExplorer({
               }}
               className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted hover:text-fg border border-line hover:border-fg/30 rounded px-2 py-0.5 transition-colors disabled:opacity-40"
               title={
-                pickedHasDir
-                  ? "选中的里面有文件夹：文件夹不能下载"
-                  : picked.size > 1
-                    ? `打包成一个 zip 下载（${picked.size} 个文件）`
-                    : "下载到本机"
+                pickedHasDir || picked.size > 1
+                  ? `打包成一个 ZIP 下载（${picked.size} 项，保留文件夹结构）`
+                  : "下载到本机"
               }
             >
               下载 {picked.size}
@@ -771,7 +767,7 @@ function DirRow({ entry, depth }: { entry: TreeEntry; depth: number }) {
               onClick={toggle}
               aria-expanded={open}
               className="flex-1 min-w-0 flex items-center gap-1.5 py-0 text-left"
-              title={`${entry.path}\n（点一下：展开 / 设为上传落点 · 拖动整个文件夹到另一个文件夹 · 右键：多选，空文件夹可以删）`}
+              title={`${entry.path}\n（点一下：展开 / 设为上传落点 · 拖动整个文件夹到另一个文件夹 · 右键：多选下载 ZIP，空文件夹可以删）`}
             >
               <Chevron open={open} />
               <FolderIcon />

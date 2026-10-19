@@ -359,8 +359,12 @@ assert.equal(zipBytes.subarray(0, 4).toString("hex"), "504b0304", "是个真 zip
 // 结构与 crc 由 zip.test.ts 拿系统 unzip 验，这里只确认条目数对得上。
 assert.equal(zipBytes.readUInt16LE(zipBytes.length - 22 + 10), 2);
 
-// 目录 → 400（v1 不做，且树上也选不中）。
-assert.equal((await download(alice, [path.join(mine, "adir")])).status, 400);
+// 单个目录也走 ZIP，而不是退化成直接下载里面唯一的文件。
+const folder = await download(alice, [path.join(mine, "adir")]);
+assert.equal(folder.status, 200);
+assert.equal(folder.headers.get("content-type"), "application/zip");
+assert.match(folder.headers.get("content-disposition") ?? "", /adir\.zip/);
+await folder.arrayBuffer();
 // 不存在 → 404。
 assert.equal((await download(alice, [path.join(mine, "nope.md")])).status, 404);
 // 一个都没给 → 400。
